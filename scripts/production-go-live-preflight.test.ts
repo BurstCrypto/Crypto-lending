@@ -492,6 +492,27 @@ const PROVIDER_POSITION_READ_ARTIFACTS = Object.freeze({
     ),
     'utf8',
   ),
+  providerPositionChainAnchorRecordIntentMigrationSource: readFileSync(
+    resolve(
+      __dirname,
+      '../apps/api/src/infrastructure/database/migrations/0031-create-provider-position-chain-anchor-record-intents.migration.ts',
+    ),
+    'utf8',
+  ),
+  providerPositionChainAnchorRecordIntentReconciliationPortSource: readFileSync(
+    resolve(
+      __dirname,
+      '../apps/api/src/mainnet-platforms/application/ports/provider-position-chain-anchor-record-intent-reconciliation.port.ts',
+    ),
+    'utf8',
+  ),
+  providerPositionPostgresChainAnchorRecordIntentReconciliationProcessorSource: readFileSync(
+    resolve(
+      __dirname,
+      '../apps/api/src/mainnet-platforms/infrastructure/postgres-provider-position-chain-anchor-record-intent.reconciliation-processor.ts',
+    ),
+    'utf8',
+  ),
   providerPositionMigrationIndexSource: readFileSync(
     resolve(__dirname, '../apps/api/src/infrastructure/database/migrations/index.ts'),
     'utf8',
@@ -1154,7 +1175,7 @@ function mutateProviderPositionReadArtifact(
 }
 
 test('provider-position read inspection pins the exact dormant critical source slice', () => {
-  assert.equal(Object.keys(PROVIDER_POSITION_READ_ARTIFACTS).length, 32);
+  assert.equal(Object.keys(PROVIDER_POSITION_READ_ARTIFACTS).length, 35);
   const inspected = inspectProviderPositionReadBoundaryArtifacts(PROVIDER_POSITION_READ_ARTIFACTS);
   assert.deepEqual(inspected, EXPECTED_DORMANT_PROVIDER_POSITION_READ_BOUNDARY);
   assert.equal(Object.isFrozen(inspected), true);
@@ -1188,13 +1209,26 @@ test('provider-position read semantic gate contains no disabled-check bypass', (
     'function hasDormantProviderPositionChainAnchorEvidenceRecorderContract(',
     producerStart,
   );
-  const start = source.indexOf('function hasDormantProviderPositionReadBoundaryContract(');
+  const recordIntentMigrationStart = source.indexOf(
+    'function hasDormantProviderPositionChainAnchorRecordIntentMigrationContract(',
+    recorderStart,
+  );
+  const reconciliationStart = source.indexOf(
+    'function hasDormantProviderPositionChainAnchorRecordIntentReconciliationContract(',
+    recordIntentMigrationStart,
+  );
+  const start = source.indexOf(
+    'function hasDormantProviderPositionReadBoundaryContract(',
+    reconciliationStart,
+  );
   const end = source.indexOf('\nfunction ', start + 1);
   assert.ok(
     recordDeadlineMigrationStart >= 0 &&
       producerStart > recordDeadlineMigrationStart &&
       recorderStart > producerStart &&
-      start > recorderStart &&
+      recordIntentMigrationStart > recorderStart &&
+      reconciliationStart > recordIntentMigrationStart &&
+      start > reconciliationStart &&
       end > start,
   );
   const semanticGateSource = source
@@ -1465,26 +1499,7 @@ test('provider-position read inspection rejects dormant two-source evidence prod
   }
 });
 
-test('provider-position read inspection rejects dormant chain-anchor recorder drift', () => {
-  const recordRequestRuntimeGuard = [
-    '    record.recorderVersion !== PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_RECORDER_VERSION ||',
-    '    record.use !== PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_RECORD_USE ||',
-    '    record.mayAuthorizeFinancialAction !== false',
-  ].join('\n');
-  const producerRequestRuntimeGuard = [
-    '    record.producerVersion !== PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_PRODUCER_VERSION ||',
-    '    record.use !== PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_PRODUCE_USE ||',
-    '    record.mayAuthorizeFinancialAction !== false ||',
-    '    record.mayPersist !== false ||',
-    "    typeof sourceObservationId !== 'string' ||",
-    '    !SOURCE_OBSERVATION_ID.test(sourceObservationId)',
-  ].join('\n');
-  const candidateRuntimeGuard = [
-    '    record.producerVersion !== PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_PRODUCER_VERSION ||',
-    '    record.use !== PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_RECORD_CANDIDATE_USE ||',
-    '    record.mayAuthorizeFinancialAction !== false ||',
-    '    record.mayPersist !== false',
-  ].join('\n');
+test('provider-position read inspection rejects dormant chain-anchor recorder V2 drift', () => {
   const mutations: readonly (readonly [
     keyof ProviderPositionReadBoundaryArtifactSources,
     string,
@@ -1492,18 +1507,23 @@ test('provider-position read inspection rejects dormant chain-anchor recorder dr
   ])[] = [
     [
       'providerPositionChainAnchorEvidenceRecorderPortSource',
-      'export const PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_RECORDER_VERSION = 1 as const;',
       'export const PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_RECORDER_VERSION = 2 as const;',
+      'export const PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_RECORDER_VERSION = 3 as const;',
     ],
     [
       'providerPositionChainAnchorEvidenceRecorderPortSource',
-      'readonly mayAuthorizeFinancialAction: false;',
-      'readonly mayAuthorizeFinancialAction: true;',
+      "'DORMANT_PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_RECORD_RESULT_ONLY' as const;",
+      "'DORMANT_PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_RECORD_ONLY' as const;",
+    ],
+    [
+      'providerPositionChainAnchorEvidenceRecorderPortSource',
+      'export interface RecordProviderPositionChainAnchorEvidenceRequestV2 {',
+      'export interface RecordProviderPositionChainAnchorEvidenceRequestV1 {',
     ],
     [
       'providerPositionChainAnchorEvidenceRecorderPortSource',
       'readonly producerCapability: unknown;',
-      'readonly producerCapability: ProviderPositionChainAnchorEvidenceRecordCandidateV1;',
+      'readonly producerCapability: object;',
     ],
     [
       'providerPositionChainAnchorEvidenceRecorderPortSource',
@@ -1512,103 +1532,18 @@ test('provider-position read inspection rejects dormant chain-anchor recorder dr
     ],
     [
       'providerPositionChainAnchorEvidenceRecorderPortSource',
-      'recordEvidence(request: RecordProviderPositionChainAnchorEvidenceRequestV1): Promise<unknown>;',
-      'recordEvidence(request: RecordProviderPositionChainAnchorEvidenceRequestV1): Promise<ProviderPositionChainAnchorEvidenceRecordReceiptV1>;',
+      'recordEvidence(request: RecordProviderPositionChainAnchorEvidenceRequestV2): Promise<unknown>;',
+      'recordEvidence(request: RecordProviderPositionChainAnchorEvidenceRequestV2): Promise<ProviderPositionChainAnchorEvidenceRecordResultV2>;',
+    ],
+    [
+      'providerPositionChainAnchorEvidenceRecorderPortSource',
+      'readonly evidenceRecordedAt: string;\n  readonly resolvedAt: string;',
+      'readonly evidenceRecordedAt: string | null;\n  readonly resolvedAt: string;',
     ],
     [
       'providerPositionPostgresChainAnchorEvidenceRecorderSource',
-      recordRequestRuntimeGuard,
-      recordRequestRuntimeGuard.replace(
-        'record.recorderVersion !== PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_RECORDER_VERSION',
-        'record.recorderVersion !== 2',
-      ),
-    ],
-    [
-      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
-      recordRequestRuntimeGuard,
-      recordRequestRuntimeGuard.replace(
-        'record.use !== PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_RECORD_USE',
-        'record.use !== PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_RECORD_RECEIPT_USE',
-      ),
-    ],
-    [
-      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
-      recordRequestRuntimeGuard,
-      recordRequestRuntimeGuard.replace(
-        'record.mayAuthorizeFinancialAction !== false',
-        'record.mayAuthorizeFinancialAction !== true',
-      ),
-    ],
-    [
-      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
-      producerRequestRuntimeGuard,
-      producerRequestRuntimeGuard.replace(
-        'record.producerVersion !== PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_PRODUCER_VERSION',
-        'record.producerVersion !== 2',
-      ),
-    ],
-    [
-      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
-      producerRequestRuntimeGuard,
-      producerRequestRuntimeGuard.replace(
-        'record.use !== PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_PRODUCE_USE',
-        'record.use !== PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_RECORD_CANDIDATE_USE',
-      ),
-    ],
-    [
-      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
-      producerRequestRuntimeGuard,
-      producerRequestRuntimeGuard.replace(
-        'record.mayAuthorizeFinancialAction !== false',
-        'record.mayAuthorizeFinancialAction !== true',
-      ),
-    ],
-    [
-      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
-      producerRequestRuntimeGuard,
-      producerRequestRuntimeGuard.replace(
-        'record.mayPersist !== false',
-        'record.mayPersist !== true',
-      ),
-    ],
-    [
-      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
-      candidateRuntimeGuard,
-      candidateRuntimeGuard.replace(
-        'record.producerVersion !== PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_PRODUCER_VERSION',
-        'record.producerVersion !== 2',
-      ),
-    ],
-    [
-      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
-      candidateRuntimeGuard,
-      candidateRuntimeGuard.replace(
-        'record.use !== PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_RECORD_CANDIDATE_USE',
-        'record.use !== PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_PRODUCE_USE',
-      ),
-    ],
-    [
-      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
-      candidateRuntimeGuard,
-      candidateRuntimeGuard.replace(
-        'record.mayAuthorizeFinancialAction !== false',
-        'record.mayAuthorizeFinancialAction !== true',
-      ),
-    ],
-    [
-      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
-      candidateRuntimeGuard,
-      candidateRuntimeGuard.replace('record.mayPersist !== false', 'record.mayPersist !== true'),
-    ],
-    [
-      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
-      "Object.getOwnPropertyDescriptor(value, 'reviewCandidate') !== undefined",
-      'false',
-    ],
-    [
-      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
-      'this.#producerReview = captureProducerReview(producer);',
-      "this.#producerReview = captureMethod<ReviewCandidate>(producer, 'reviewCandidate');",
+      "import { randomBytes } from 'node:crypto';",
+      "import { request } from 'node:https';",
     ],
     [
       'providerPositionPostgresChainAnchorEvidenceRecorderSource',
@@ -1617,234 +1552,133 @@ test('provider-position read inspection rejects dormant chain-anchor recorder dr
     ],
     [
       'providerPositionPostgresChainAnchorEvidenceRecorderSource',
-      "(typeof value !== 'object' && typeof value !== 'function') ||\n      value === null ||\n      isProxy(value)",
-      "(typeof value !== 'object' && typeof value !== 'function') ||\n      value === null ||\n      false",
+      'const arguments_ = exactDataArray(record.recordArguments, 23);',
+      'const arguments_ = exactDataArray(record.recordArguments, 22);',
     ],
     [
       'providerPositionPostgresChainAnchorEvidenceRecorderSource',
-      'if (isProxy(current)) return fail();',
-      'void current;',
-    ],
-    [
-      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
-      'if (isProxy(descriptor.value)) return fail();',
-      'void descriptor.value;',
-    ],
-    [
-      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
-      'return Object.freeze({ receiver: value, method: descriptor.value as Method });',
-      'return Object.freeze({ receiver: current, method: descriptor.value as Method });',
-    ],
-    [
-      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
-      'current !== Object.prototype &&',
-      'current !== null &&',
-    ],
-    [
-      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
-      'return Object.freeze(Object.assign(Object.create(null) as object, fields)) as Readonly<T>;',
-      'return Object.freeze(Object.assign({}, fields)) as Readonly<T>;',
-    ],
-    [
-      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
-      "typeof value !== 'object' ||\n      value === null ||\n      Array.isArray(value) ||\n      isProxy(value) ||\n      (requireFrozen && !Object.isFrozen(value))",
-      "typeof value !== 'object' ||\n      value === null ||\n      false ||\n      false ||\n      false",
-    ],
-    [
-      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
-      '(requireNullPrototype && prototype !== null) ||\n      (!requireNullPrototype && prototype !== null && prototype !== Object.prototype)',
-      'false',
-    ],
-    [
-      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
-      "if (!descriptor?.enumerable || !('value' in descriptor)) return fail();",
-      "if (!('value' in descriptor)) return fail();",
-    ],
-    [
-      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
-      'const record = exactDataRecord(value, PRODUCER_REQUEST_KEYS, true, false);',
-      'const record = exactDataRecord(value, PRODUCER_REQUEST_KEYS, true, true);',
-    ],
-    [
-      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
-      'const record = exactDataRecord(value, RECORD_REQUEST_KEYS, true, false);',
-      'const record = exactDataRecord(value, RECORD_REQUEST_KEYS, true, true);',
-    ],
-    [
-      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
-      'observedAt.milliseconds >= deadlineAt.milliseconds ||',
-      'observedAt.milliseconds >= deadlineAt.milliseconds ||\n    deadlineAt.milliseconds - observedAt.milliseconds > 30_000 ||',
-    ],
-    [
-      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
+      'FROM prepare_provider_position_chain_anchor_record_intent(',
       'FROM record_provider_position_chain_anchor_evidence(',
-      'FROM read_provider_position_chain_anchor_evidence(',
     ],
     [
       'providerPositionPostgresChainAnchorEvidenceRecorderSource',
-      '$6::jsonb, $7::jsonb, $8::timestamptz, $9::timestamptz,',
-      '$6::jsonb, $7::jsonb, $9::timestamptz, $8::timestamptz,',
+      'Object.freeze([...candidate.values, request.producerRequest.deadlineAt.value]),',
+      'Object.freeze(candidate.values),',
     ],
     [
       'providerPositionPostgresChainAnchorEvidenceRecorderSource',
-      'JSON.stringify(currentHead),',
-      'JSON.stringify(chainAnchor),',
+      'identity = identityFrom(prepare);',
+      'identity = null;',
     ],
     [
       'providerPositionPostgresChainAnchorEvidenceRecorderSource',
-      'if (firstReview !== request.producerCapability) return fail();',
-      'void firstReview;',
+      "if (prepare.state === 'RECORD_DISPATCHED' || prepare.state === 'UNKNOWN') {",
+      "if (prepare.state === 'UNKNOWN') {",
     ],
     [
       'providerPositionPostgresChainAnchorEvidenceRecorderSource',
-      'if (isAborted(request.signal)) return fail();',
-      'void request.signal;',
+      'secondReview !== firstReview ||\n        secondReview !== candidate.candidate ||',
+      'secondReview !== firstReview &&\n        secondReview !== candidate.candidate ||',
     ],
     [
       'providerPositionPostgresChainAnchorEvidenceRecorderSource',
-      'const candidate = reviewedCandidate(firstReview, request.producerRequest);',
-      'const candidate = reviewedCandidate(request.producerCapability, request.producerRequest);',
+      'dispatchToken = randomBytes(32);',
+      'dispatchToken = randomBytes(16);',
     ],
     [
       'providerPositionPostgresChainAnchorEvidenceRecorderSource',
-      '        candidate.values,\n        request.signal,',
-      '        candidate.values,\n        new AbortController().signal,',
-    ],
-    [
-      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
-      'const operation = Reflect.apply(this.#databaseQuery.method, this.#databaseQuery.receiver, [',
-      'const operation = Reflect.apply(this.#databaseQuery.method, this.#databaseQuery.receiver, [\n      const operation = Reflect.apply(this.#databaseQuery.method, this.#databaseQuery.receiver, [',
-    ],
-    [
-      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
-      'if (!genuinePromise(operation)) return fail();',
-      'void operation;',
-    ],
-    [
-      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
-      'Object.getPrototypeOf(value) === Promise.prototype',
-      "typeof (value as Promise<unknown>).then === 'function'",
-    ],
-    ['providerPositionPostgresChainAnchorEvidenceRecorderSource', '!isProxy(value) &&', 'true &&'],
-    [
-      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
-      'const result = await operation;',
-      'const result = await retry(operation);',
-    ],
-    [
-      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
-      'const result = await operation;',
-      'const result = await operation;\n      const result = await operation;',
-    ],
-    [
-      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
-      'if (secondReview !== firstReview || secondReview !== candidate.candidate) return fail();',
-      'if (secondReview !== firstReview && secondReview !== candidate.candidate) return fail();',
-    ],
-    [
-      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
-      "descriptors['length']?.value !== 1 ||",
-      "descriptors['length']?.value > 1 ||",
-    ],
-    [
-      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
-      "const rowsDescriptor = Object.getOwnPropertyDescriptor(value, 'rows');",
-      'const rowsDescriptor = { enumerable: true, value: (value as { rows: unknown }).rows };',
-    ],
-    [
-      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
-      "if (typeof value !== 'object' || value === null || isProxy(value)) return fail();",
-      "if (typeof value !== 'object' || value === null) return fail();",
-    ],
-    [
-      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
-      "if (!rowsDescriptor?.enumerable || !('value' in rowsDescriptor)) return fail();",
-      "if (!('value' in rowsDescriptor)) return fail();",
-    ],
-    [
-      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
-      'if (!Array.isArray(rows) || isProxy(rows) || Object.getPrototypeOf(rows) !== Array.prototype) {',
-      'if (!Array.isArray(rows)) {',
-    ],
-    [
-      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
-      'keys.length !== 2 ||',
-      'keys.length > 2 ||',
-    ],
-    [
-      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
-      "!descriptors['0']?.enumerable ||\n      !('value' in descriptors['0'])",
-      "!('value' in descriptors['0'])",
-    ],
-    [
-      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
-      "return exactDataRecord(descriptors['0'].value, ROW_COLUMNS, false, false) as RecordRow;",
-      "return descriptors['0'].value as RecordRow;",
-    ],
-    [
-      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
-      "  'evidence_recorded_at',\n] as const);",
-      "  'evidence_recorded_at',\n  'unreviewed',\n] as const);",
-    ],
-    [
-      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
-      "if (row.record_outcome !== 'RECORDED' && row.record_outcome !== 'IDEMPOTENT_REPLAY') {",
-      'if (false) {',
-    ],
-    [
-      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
-      'recordedAt.milliseconds >= producerRequest.deadlineAt.milliseconds ||',
+      '!Buffer.isBuffer(dispatchToken) ||',
       'false ||',
     ],
     [
       'providerPositionPostgresChainAnchorEvidenceRecorderSource',
-      'const currentLifetime = candidate.networkId === ETHEREUM ? 60_000 : 15_000;',
-      'const currentLifetime = candidate.networkId === ETHEREUM ? 600_000 : 150_000;',
+      'dispatchToken.length !== 32 ||',
+      'dispatchToken.length !== 16 ||',
     ],
     [
       'providerPositionPostgresChainAnchorEvidenceRecorderSource',
-      'readonly #issued = new WeakMap<object, RecordProviderPositionChainAnchorEvidenceRequestV1>();',
-      'readonly #issued = new Map<object, RecordProviderPositionChainAnchorEvidenceRequestV1>();',
+      'dispatchToken.every((value) => value === 0)',
+      'false',
     ],
     [
       'providerPositionPostgresChainAnchorEvidenceRecorderSource',
-      'this.#issued.set(receipt, request.request);',
-      'this.#issued.set(receipt, request.producerRequest.request);',
+      'const tokenValues = Object.freeze([identity.recordIntentFingerprintSha256, dispatchToken]);',
+      'const tokenValues = Object.freeze([identity.recordIntentFingerprintSha256, Buffer.from(dispatchToken)]);',
     ],
     [
       'providerPositionPostgresChainAnchorEvidenceRecorderSource',
-      'export const PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_RECORD_ERROR = Object.freeze(',
-      'export const PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_RECORD_ERROR = (',
+      "'claim_provider_position_chain_anchor_record_dispatch',",
+      "'execute_provider_position_chain_anchor_record_intent',",
     ],
     [
       'providerPositionPostgresChainAnchorEvidenceRecorderSource',
-      "readonly code = 'PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_RECORD_FAILED' as const;",
-      "readonly code = 'DATABASE_ERROR' as const;",
+      'if (claim === null && attemptClaimsTerminalState(claimAttempt)) return uncertain();',
+      'void claimAttempt;',
     ],
     [
       'providerPositionPostgresChainAnchorEvidenceRecorderSource',
-      "this.name = 'ProviderPositionChainAnchorEvidenceRecordError';",
-      "this.name = 'Error';",
+      "phase = 'EXECUTE_RECORD';",
+      "phase = 'CLAIM_DISPATCH';",
+    ],
+    [
+      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
+      'EXECUTE_RECORD_SQL,\n        tokenValues,',
+      'CLAIM_DISPATCH_SQL,\n        tokenValues,',
+    ],
+    [
+      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
+      'if (executed === null && attemptClaimsTerminalState(executeAttempt)) return uncertain();',
+      'void executeAttempt;',
+    ],
+    [
+      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
+      "phase = 'MARK_UNKNOWN';",
+      "phase = 'EXECUTE_RECORD';",
+    ],
+    [
+      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
+      'await queryAttempt(this.#databaseQuery, MARK_UNKNOWN_SQL, tokenValues, request.signal)',
+      'await queryAttempt(this.#databaseQuery, EXECUTE_RECORD_SQL, tokenValues, request.signal)',
+    ],
+    [
+      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
+      'dispatchToken?.fill(0);',
+      'void dispatchToken;',
+    ],
+    [
+      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
+      'recordedAt.milliseconds < candidate.assessedAtMilliseconds ||',
+      'false ||',
+    ],
+    [
+      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
+      'recordedAt.milliseconds >= candidate.sourcePairApprovalExpiresAtMilliseconds ||',
+      'false ||',
+    ],
+    [
+      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
+      'reviewEvidenceFreshness(candidate, producerRequest, recordedAt, true);',
+      'reviewEvidenceFreshness(candidate, producerRequest, recordedAt, false);',
+    ],
+    [
+      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
+      'reviewEvidenceFreshness(candidate, producerRequest, evidenceRecordedAt, false);',
+      'void evidenceRecordedAt;',
+    ],
+    [
+      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
+      'readonly #issued = new WeakMap<',
+      'readonly #issued = new Map<',
+    ],
+    [
+      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
+      'return issued?.request === request && issued.result === capability ? issued.result : null;',
+      'return issued?.request === request || issued?.result === capability ? issued.result : null;',
     ],
     [
       'providerPositionPostgresChainAnchorEvidenceRecorderSource',
       "super('Provider position chain-anchor evidence record failed');",
       "super('Database request failed');",
-    ],
-    [
-      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
-      "super('Provider position chain-anchor evidence record failed');",
-      "super('Provider position chain-anchor evidence record failed', { cause: new Error('leak') });",
-    ],
-    [
-      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
-      'return frozenNullPrototype({\n    recorderVersion: PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_RECORDER_VERSION,',
-      'return Object.freeze({\n    recorderVersion: PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_RECORDER_VERSION,',
-    ],
-    [
-      'providerPositionPostgresChainAnchorEvidenceRecorderSource',
-      'cannot roll back a write: atomic producer-deadline enforcement requires a',
-      'late writes require no database enforcement because cancellation is sufficient;',
     ],
     [
       'providerPositionRuntimeCompositionSource',
@@ -1874,7 +1708,7 @@ test('provider-position read inspection rejects dormant chain-anchor recorder dr
         mutateProviderPositionReadArtifact(key, approved, rejected),
       ),
       INVALID_PROVIDER_POSITION_READ_BOUNDARY,
-      `${key}: ${approved}`,
+      [key, approved].join(': '),
     );
   }
 });
@@ -1907,8 +1741,8 @@ test('provider-position read inspection rejects dormant durable evidence and mig
     ],
     [
       'providerPositionChainAnchorEvidenceMigrationSource',
-      'OR database_read_at >= selected_evidence.finalized_head_advanced_at + CASE',
-      'OR requested_evaluated_at >= selected_evidence.finalized_head_advanced_at + CASE',
+      'OR database_read_at >= selected_evidence.finalized_head_advanced_at + (CASE',
+      'OR requested_evaluated_at >= selected_evidence.finalized_head_advanced_at + (CASE',
     ],
     [
       'providerPositionChainAnchorEvidenceMigrationSource',
@@ -1957,8 +1791,8 @@ test('provider-position read inspection rejects dormant durable evidence and mig
     ],
     [
       'providerPositionMigrationIndexSource',
-      '  suspendGenericWorkerBalanceAuthorityMigrationV0028,\n  createProviderPositionChainAnchorEvidenceMigrationV0029,\n  enforceProviderPositionChainAnchorRecordDeadlineMigrationV0030,\n]);',
-      '  suspendGenericWorkerBalanceAuthorityMigrationV0028,\n  createProviderPositionChainAnchorEvidenceTestSchemaMigrationV0029,\n  enforceProviderPositionChainAnchorRecordDeadlineMigrationV0030,\n]);',
+      '  suspendGenericWorkerBalanceAuthorityMigrationV0028,\n  createProviderPositionChainAnchorEvidenceMigrationV0029,\n  enforceProviderPositionChainAnchorRecordDeadlineMigrationV0030,\n  createProviderPositionChainAnchorRecordIntentMigrationV0031,\n]);',
+      '  suspendGenericWorkerBalanceAuthorityMigrationV0028,\n  createProviderPositionChainAnchorEvidenceTestSchemaMigrationV0029,\n  enforceProviderPositionChainAnchorRecordDeadlineMigrationV0030,\n  createProviderPositionChainAnchorRecordIntentMigrationV0031,\n]);',
     ],
     [
       'providerPositionMigrationIndexSource',
@@ -2150,13 +1984,13 @@ test('provider-position read inspection rejects deadline-bound evidence migratio
     ],
     [
       'providerPositionMigrationIndexSource',
-      '  enforceProviderPositionChainAnchorRecordDeadlineTestSchemaMigrationV0030,\n]);',
-      '  enforceProviderPositionChainAnchorRecordDeadlineMigrationV0030,\n]);',
+      '  enforceProviderPositionChainAnchorRecordDeadlineTestSchemaMigrationV0030,\n  createProviderPositionChainAnchorRecordIntentTestSchemaMigrationV0031,',
+      '  enforceProviderPositionChainAnchorRecordDeadlineMigrationV0030,\n  createProviderPositionChainAnchorRecordIntentTestSchemaMigrationV0031,',
     ],
     [
       'providerPositionMigrationIndexSource',
-      '  createProviderPositionChainAnchorEvidenceMigrationV0029,\n  enforceProviderPositionChainAnchorRecordDeadlineMigrationV0030,\n]);',
-      '  createProviderPositionChainAnchorEvidenceMigrationV0029,\n  enforceProviderPositionChainAnchorRecordDeadlineTestSchemaMigrationV0030,\n]);',
+      '  createProviderPositionChainAnchorEvidenceMigrationV0029,\n  enforceProviderPositionChainAnchorRecordDeadlineMigrationV0030,\n  createProviderPositionChainAnchorRecordIntentMigrationV0031,',
+      '  createProviderPositionChainAnchorEvidenceMigrationV0029,\n  enforceProviderPositionChainAnchorRecordDeadlineTestSchemaMigrationV0030,\n  createProviderPositionChainAnchorRecordIntentMigrationV0031,',
     ],
     [
       'providerPositionMigrationIndexSource',
@@ -2187,6 +2021,165 @@ test('provider-position read inspection rejects deadline-bound evidence migratio
       'mainnetPlatformsControllerSource',
       'constructor(private readonly directory: MainnetPlatformDirectoryService) {}',
       'constructor(private readonly deadline: ProviderPositionChainAnchorRecordDeadline) {}',
+    ],
+  ];
+
+  for (const [key, approved, rejected] of mutations) {
+    assert.deepEqual(
+      inspectProviderPositionReadBoundaryArtifacts(
+        mutateProviderPositionReadArtifact(key, approved, rejected),
+      ),
+      INVALID_PROVIDER_POSITION_READ_BOUNDARY,
+      `${key}: ${approved}`,
+    );
+  }
+});
+
+test('provider-position read inspection rejects durable record-intent migration drift', () => {
+  const mutations: readonly (readonly [
+    keyof ProviderPositionReadBoundaryArtifactSources,
+    string,
+    string,
+  ])[] = [
+    ['providerPositionChainAnchorRecordIntentMigrationSource', "id: '0031',", "id: '0032',"],
+    [
+      'providerPositionChainAnchorRecordIntentMigrationSource',
+      "supersedesVerificationOf: ['0030'],",
+      "supersedesVerificationOf: ['0029'],",
+    ],
+    [
+      'providerPositionChainAnchorRecordIntentMigrationSource',
+      'LOCK TABLE ${EVIDENCE_TABLE}, ${DEADLINE_TABLE} IN ACCESS EXCLUSIVE MODE;',
+      'LOCK TABLE ${EVIDENCE_TABLE}, ${DEADLINE_TABLE} IN SHARE MODE;',
+    ],
+    [
+      'providerPositionChainAnchorRecordIntentMigrationSource',
+      'record_dispatch_token_sha256 text,',
+      'record_dispatch_token_sha256 text,\n      raw_dispatch_token bytea,',
+    ],
+    [
+      'providerPositionChainAnchorRecordIntentMigrationSource',
+      'OR NEW.record_dispatch_count > OLD.record_dispatch_count + 1',
+      'OR NEW.record_dispatch_count > OLD.record_dispatch_count + 2',
+    ],
+    [
+      'providerPositionChainAnchorRecordIntentMigrationSource',
+      'FOR UPDATE SKIP LOCKED',
+      'FOR UPDATE',
+    ],
+    [
+      'providerPositionChainAnchorRecordIntentMigrationSource',
+      "        'RECONCILE_ONLY'\n",
+      "        'RECORD'\n",
+    ],
+    [
+      'providerPositionChainAnchorRecordIntentMigrationSource',
+      'CREATE CONSTRAINT TRIGGER provider_position_chain_anchor_deadline_intent_terminal_check',
+      'CREATE TRIGGER provider_position_chain_anchor_deadline_intent_terminal_check',
+    ],
+    [
+      'providerPositionChainAnchorRecordIntentMigrationSource',
+      'REVOKE ALL PRIVILEGES ON TABLE ${INTENT_TABLE} FROM ${guardedRoles};',
+      'GRANT SELECT ON TABLE ${INTENT_TABLE} TO ${worker};',
+    ],
+    [
+      'providerPositionChainAnchorRecordIntentMigrationSource',
+      'constraint_state.coninhcount = 0',
+      'constraint_state.coninhcount >= 0',
+    ],
+    [
+      'providerPositionMigrationIndexSource',
+      '  enforceProviderPositionChainAnchorRecordDeadlineTestSchemaMigrationV0030,\n  createProviderPositionChainAnchorRecordIntentTestSchemaMigrationV0031,',
+      '  enforceProviderPositionChainAnchorRecordDeadlineTestSchemaMigrationV0030,\n  createProviderPositionChainAnchorRecordIntentMigrationV0031,',
+    ],
+    [
+      'providerPositionMigrationIndexSource',
+      '  enforceProviderPositionChainAnchorRecordDeadlineMigrationV0030,\n  createProviderPositionChainAnchorRecordIntentMigrationV0031,',
+      '  enforceProviderPositionChainAnchorRecordDeadlineMigrationV0030,\n  createProviderPositionChainAnchorRecordIntentTestSchemaMigrationV0031,',
+    ],
+    [
+      'providerPositionRuntimeCompositionSource',
+      'const DEPENDENCY_KEYS = Object.freeze([',
+      'type ProviderPositionChainAnchorRecordIntent = unknown;\nconst DEPENDENCY_KEYS = Object.freeze([',
+    ],
+  ];
+
+  for (const [key, approved, rejected] of mutations) {
+    assert.deepEqual(
+      inspectProviderPositionReadBoundaryArtifacts(
+        mutateProviderPositionReadArtifact(key, approved, rejected),
+      ),
+      INVALID_PROVIDER_POSITION_READ_BOUNDARY,
+      `${key}: ${approved}`,
+    );
+  }
+});
+
+test('provider-position read inspection rejects record-intent reconciliation drift', () => {
+  const mutations: readonly (readonly [
+    keyof ProviderPositionReadBoundaryArtifactSources,
+    string,
+    string,
+  ])[] = [
+    [
+      'providerPositionChainAnchorRecordIntentReconciliationPortSource',
+      'PROVIDER_POSITION_CHAIN_ANCHOR_RECORD_INTENT_RECONCILIATION_VERSION = 1 as const;',
+      'PROVIDER_POSITION_CHAIN_ANCHOR_RECORD_INTENT_RECONCILIATION_VERSION = 2 as const;',
+    ],
+    [
+      'providerPositionChainAnchorRecordIntentReconciliationPortSource',
+      'readonly use: typeof PROVIDER_POSITION_CHAIN_ANCHOR_RECORD_INTENT_RECONCILIATION_USE;',
+      'readonly use: string;',
+    ],
+    [
+      'providerPositionChainAnchorRecordIntentReconciliationPortSource',
+      'readonly signal: AbortSignal;',
+      'readonly signal: AbortSignal;\n  readonly recordIntentFingerprintSha256: string;',
+    ],
+    [
+      'providerPositionPostgresChainAnchorRecordIntentReconciliationProcessorSource',
+      "FROM lease_provider_chain_anchor_record_intent_reconciliation($1::bytea, interval '30 seconds') AS intent",
+      "FROM lease_provider_chain_anchor_record_intent_reconciliation($1::bytea, interval '60 seconds') AS intent",
+    ],
+    [
+      'providerPositionPostgresChainAnchorRecordIntentReconciliationProcessorSource',
+      'FROM reconcile_provider_position_chain_anchor_record_intent($1::text, $2::bytea) AS intent',
+      'FROM execute_provider_position_chain_anchor_record_intent($1::text, $2::bytea) AS intent',
+    ],
+    [
+      'providerPositionPostgresChainAnchorRecordIntentReconciliationProcessorSource',
+      'const generated: unknown = randomBytes(32);',
+      'const generated: unknown = randomBytes(16);',
+    ],
+    [
+      'providerPositionPostgresChainAnchorRecordIntentReconciliationProcessorSource',
+      'Object.freeze([lease.recordIntentFingerprintSha256, leaseToken]),',
+      'Object.freeze([lease.recordIntentFingerprintSha256, Buffer.from(leaseToken)]),',
+    ],
+    [
+      'providerPositionPostgresChainAnchorRecordIntentReconciliationProcessorSource',
+      'leaseToken?.fill(0);',
+      'void leaseToken;',
+    ],
+    [
+      'providerPositionPostgresChainAnchorRecordIntentReconciliationProcessorSource',
+      'readonly #issued = new WeakMap<',
+      'readonly #issued = new Map<',
+    ],
+    [
+      'providerPositionPostgresChainAnchorRecordIntentReconciliationProcessorSource',
+      'const RECONCILE_RECORD_SQL = `SELECT',
+      "const RELEASE_SQL = 'SELECT * FROM release_provider_chain_anchor_record_intent_reconciliation()';\nconst RECONCILE_RECORD_SQL = `SELECT",
+    ],
+    [
+      'mainnetPlatformsModuleSource',
+      'providers: [MainnetPlatformDirectoryService, MainnetPlatformsPrivacyInterceptor],',
+      'providers: [MainnetPlatformDirectoryService, PostgresProviderPositionChainAnchorRecordIntentReconciliationProcessor],',
+    ],
+    [
+      'mainnetPlatformsIndexSource',
+      "export { MainnetPlatformDirectoryService } from './application/mainnet-platform-directory.service';",
+      "export { PostgresProviderPositionChainAnchorRecordIntentReconciliationProcessor } from './infrastructure/postgres-provider-position-chain-anchor-record-intent.reconciliation-processor';",
     ],
   ];
 
@@ -3033,7 +3026,7 @@ test('provider-position read artifact shape and private brand fail closed', () =
     Object.fromEntries(
       Object.keys(PROVIDER_POSITION_READ_ARTIFACTS).map((key) => [
         key,
-        'x'.repeat(Math.floor((704 * 1024) / 32) + 1),
+        'x'.repeat(Math.floor((896 * 1024) / 35) + 1),
       ]),
     ),
     accessor,
@@ -5189,14 +5182,14 @@ test('balance-consumer inspection fails closed for drift in every reviewed artif
     [
       'provider-position anchor production migration registration',
       'migrationIndexSource',
-      '  suspendGenericWorkerBalanceAuthorityMigrationV0028,\n  createProviderPositionChainAnchorEvidenceMigrationV0029,\n]);',
-      '  suspendGenericWorkerBalanceAuthorityMigrationV0028,\n  createProviderPositionChainAnchorEvidenceTestSchemaMigrationV0029,\n]);',
+      '  suspendGenericWorkerBalanceAuthorityMigrationV0028,\n  createProviderPositionChainAnchorEvidenceMigrationV0029,',
+      '  suspendGenericWorkerBalanceAuthorityMigrationV0028,\n  createProviderPositionChainAnchorEvidenceTestSchemaMigrationV0029,',
     ],
     [
       'provider-position anchor test migration registration',
       'migrationIndexSource',
-      '  suspendGenericWorkerBalanceAuthorityTestSchemaMigrationV0028,\n  createProviderPositionChainAnchorEvidenceTestSchemaMigrationV0029,\n]);',
-      '  suspendGenericWorkerBalanceAuthorityTestSchemaMigrationV0028,\n  createProviderPositionChainAnchorEvidenceMigrationV0029,\n]);',
+      '  suspendGenericWorkerBalanceAuthorityTestSchemaMigrationV0028,\n  createProviderPositionChainAnchorEvidenceTestSchemaMigrationV0029,',
+      '  suspendGenericWorkerBalanceAuthorityTestSchemaMigrationV0028,\n  createProviderPositionChainAnchorEvidenceMigrationV0029,',
     ],
     [
       'release entrypoint',
