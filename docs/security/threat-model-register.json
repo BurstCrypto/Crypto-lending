@@ -972,7 +972,9 @@
         "Immutable idempotency identity and result",
         "Journal, lifecycle event, command result, and outbox enqueue commit atomically",
         "Outbox rows use immutable job IDs; any future side-effecting consumer must persist deduplication before enablement",
-        "The dormant reviewed-job dispatcher requires the complete three-contract handler registry and rejects malformed, legacy, unknown, or non-launch-network jobs before selecting a handler"
+        "The dormant reviewed-job dispatcher requires the complete three-contract handler registry and rejects malformed, legacy, unknown, or non-launch-network jobs before selecting a handler",
+        "Owner-only migrations 0033 and 0034 atomically prepare an append-only Ethereum/Solana action lifecycle, preserve exact replay and compare-and-swap identities, and refuse unbound history or lossy rollback",
+        "The direct-import-only durable adapter derives the canonical wallet-address HMAC candidates internally, calls only address-bound V2 once, never automatically retries an uncertain database outcome, and exposes no signing, broadcast, or settlement authority"
       ],
       "owner": "Ledger and Backend",
       "status": "MITIGATED_LOCAL",
@@ -981,10 +983,13 @@
         "docs/KAN-51.md",
         "apps/api/src/infrastructure/sqs/reviewed-job-dispatcher.ts",
         "apps/api/src/infrastructure/sqs/reviewed-job-dispatcher.spec.ts",
-        "docs/outbox/reviewed-job-consumer-dispatch.md"
+        "docs/outbox/reviewed-job-consumer-dispatch.md",
+        "apps/api/src/infrastructure/database/migrations/0033-create-mainnet-financial-action-lifecycle.migration.ts",
+        "apps/api/src/infrastructure/database/migrations/0034-bind-mainnet-financial-action-wallet-identity.migration.ts",
+        "apps/api/src/mainnet-actions/infrastructure/postgres-dormant-mainnet-financial-action-lifecycle-durable.adapter.ts"
       ],
-      "residualRisk": "Provider-side idempotency, ambiguous outcomes, and reconciliation are outside the current local database boundary.",
-      "followUp": "Provider submission and reconciliation adapter review"
+      "residualRisk": "The local database and direct-import-only adapter now preserve restart-safe intent, replay, submission, ambiguous-broadcast, and reconciliation state, but no runtime is authorized to submit or discover and claim unresolved work. Provider-side idempotency, exact signed-payload verification, authenticated chain evidence, and live recovery behavior remain unproved.",
+      "followUp": "Approve exact transaction manifests and provider adapters; add payload/signature verification plus durable unresolved-work claim/lease processing; then independently review and exercise submission and reconciliation before granting or registering V2"
     },
     {
       "id": "THR-LEDGER-003",
@@ -1031,7 +1036,9 @@
         "No production provider submission or indexing path is enabled yet",
         "A dormant Aave Ethereum checkpoint boundary preserves source-scoped append-only finalized decisions, last-good facts, optimistic revisions, and sticky quarantine",
         "Continuity backfill and quarantine recovery require two distinct agreeing sources across every contiguous block, are bounded to 64 blocks, and cannot roll back or skip history",
-        "Single-use recovery authorization is bound to operation, sources, chain, deployment, current state, target, approver, nonce, issuance time, and an exclusive expiry before the locked database mutation"
+        "Single-use recovery authorization is bound to operation, sources, chain, deployment, current state, target, approver, nonce, issuance time, and an exclusive expiry before the locked database mutation",
+        "The dormant Ethereum/Solana financial-action lifecycle records prepared, wallet-signed, broadcast-observed, and reconciled states append-only; the adapter never resends or retries an uncertain post-dispatch database result and permits read-only recovery",
+        "Address-bound V2 validates the current ACTIVE/nonrevoked registered-wallet identity before any lifecycle row can exist, including after key rotation, and wallet revocation makes replay fail closed"
       ],
       "owner": "Blockchain, Ledger, and SRE",
       "status": "OPEN_FOLLOW_UP",
@@ -1040,10 +1047,13 @@
         "docs/KAN-61.md",
         "apps/api/src/smart-lending/domain/aave-v3-ethereum-finalized-checkpoint-recovery.ts",
         "apps/api/src/smart-lending/infrastructure/postgres/postgres-aave-v3-ethereum-finalized-checkpoint.repository.ts",
-        "apps/api/src/infrastructure/database/migrations/0017-create-aave-finalized-checkpoints.migration.ts"
+        "apps/api/src/infrastructure/database/migrations/0017-create-aave-finalized-checkpoints.migration.ts",
+        "apps/api/src/infrastructure/database/migrations/0033-create-mainnet-financial-action-lifecycle.migration.ts",
+        "apps/api/src/infrastructure/database/migrations/0034-bind-mainnet-financial-action-wallet-identity.migration.ts",
+        "apps/api/src/mainnet-actions/infrastructure/postgres-dormant-mainnet-financial-action-lifecycle-durable.adapter.ts"
       ],
-      "residualRisk": "The local recovery contract covers only the dormant Aave Ethereum read checkpoint. Approved independent live readers, source-pair identity, a cryptographic authorization issuer and verifier, live finality and reorg exercises, Solana indexing, and transaction unknown-outcome reconciliation are absent.",
-      "followUp": "Approve and implement the real read sources, source-pair registry, authorization service, and live recovery drill; separately implement network-specific indexing plus idempotent submission and unknown-outcome reconciliation before enabling chain processing"
+      "residualRisk": "Durable local transaction unknown-outcome state now exists, but no runtime discovers or claims unresolved work and no approved independent Ethereum/Solana source authenticates observations. Post-finality reorg recording, exact payload/signature verification, live finality exercises, Solana indexing, provider credentials, and deployment authority remain absent.",
+      "followUp": "Approve and implement independent read sources, source-pair identity, payload/signature verification, durable unresolved-work claim/lease reconciliation, and append-only post-finality reorg handling; complete live recovery/finality drills before enabling chain processing"
     },
     {
       "id": "THR-ADMIN-001",

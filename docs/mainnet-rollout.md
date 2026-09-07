@@ -190,11 +190,11 @@ issuance. Cross-chain execution, API signing, API broadcast, automatic resend,
 and automatic fee escalation are all explicitly false; the user wallet is the
 only named signer and broadcaster.
 
-The subtree has no route, module, dependency-injection registration, runtime or
-environment configuration, transport, RPC call, transaction construction,
-signing, submission, credential, or persistence repository. Its only exported
-policy is immutable and `DISABLED`: both chain kill switches are `HALT`, every
-provider/market/asset/action/wallet approval list is empty, and the per-
+The policy/domain subtree has no route, module, dependency-injection
+registration, runtime or environment configuration, transport, RPC call,
+transaction construction, signing, submission, or credential. Its only
+exported policy is immutable and `DISABLED`: both chain kill switches are
+`HALT`, every provider/market/asset/action/wallet approval list is empty, and the per-
 transaction, per-wallet daily, global daily, total-outstanding, network-fee,
 allowance, unresolved-intent, and wallet-allowlist limits are all zero. Consequently every
 well-formed candidate is still returned as `DENY` with financial-action
@@ -212,12 +212,27 @@ adds the dedicated fail-closed source validator, and commit `a61bb57` exercises
 three isolated test-schema/verifier controls against disposable local PostgreSQL
 16 without seeding lifecycle rows.
 
-This closes only the database-schema portion of durable replay and restart
-state. No repository adapter, API/worker composition, runtime grant, scheduled
-reconciler, signer, broadcaster, mainnet provider binding, or write authority
-exists. The migration is registered solely in the cumulative migration index;
-its guarded functions remain unavailable to application principals, and all
-policy limits and approvals remain zero.
+Commits `b7289ac` and `b0b39d9` add and exercise a direct-import-only PostgreSQL
+adapter for that durable lifecycle. It performs one cancellable database call
+per operation, never retries a post-dispatch ambiguity, and returns only a
+read-only `DATABASE_OUTCOME_UNKNOWN` recovery capability when the database
+result is uncertain. Migration `0034` in commit `9af00ef` and the adapter update
+in `79c4b71` additionally require the parsed canonical Ethereum or Solana
+address to match the requested registered wallet's exact current HMAC key set
+and same-account `ACTIVE`, nonrevoked identity aliases before preparation. The
+database retains the immutable registration-era digest as its audit anchor, so
+v1-parent/v2-current key rotation remains valid; address A paired with wallet B
+is rejected without creating lifecycle history.
+
+This closes the local schema-and-adapter portion of durable replay, restart
+state, and wallet-identity binding. It does not create API/worker composition,
+a runtime grant, unresolved-work discovery/claim/lease processing, a scheduled
+reconciler, authenticated chain-finality admission, a post-finality reorg
+record, an exact transaction-payload verifier, a signer, a broadcaster, a
+mainnet provider binding, or write authority. Both migrations are registered
+solely in the cumulative migration index; V2 and its V1 owner-only delegate
+remain unavailable to application principals, the adapter is unregistered,
+and all policy limits and approvals remain zero.
 
 ## Additional gates before any real-value write
 
@@ -230,9 +245,12 @@ policy limits and approvals remain zero.
   unresolved transaction per wallet, and no automatic resend or fee escalation.
 - Use exact allowances by default. Any unlimited allowance needs a separate
   security decision and explicit user disclosure.
-- Integrate the dormant `0033` persistence substrate through a separately
-  reviewed repository and transactional prepare-before-dispatch runtime; handle
-  ambiguous outcomes and reorgs without resubmitting.
+- Authorize and register only the address-bound `0034` V2 adapter through a
+  separately reviewed transactional prepare-before-dispatch runtime. Add
+  durable unresolved-work discovery, claim/lease recovery, and reconciliation
+  without automatic resubmission; never log its HMAC candidate arrays.
+- Authenticate network observations and transaction payload/signature evidence,
+  then record post-finality reorgs without silently rewriting terminal history.
 - Define provisional, safe, finalized, and accepted financial-finality states.
 - Exercise pause, provider divergence, deployment drift, recovery, withdrawal,
   and incident runbooks in a fork or simulation, then obtain independent
@@ -257,7 +275,7 @@ request, transaction submission, broadcast, provider account, cloud
 deployment, or paid resource is created by the local implementation. The
 separate balance-sync queue definition has no activated consumer or chain
 egress and grants no live-read authority. Migration `0031`, recorder V2, the
-dormant reconciliation processor, its bounded lifecycle, and owner-only
-migration `0033` add no application database grant, repository/runtime
-composition, or external egress. The same is true of the deferred Base artifacts
-retained in the repository.
+dormant reconciliation processor, its bounded lifecycle, owner-only migrations
+`0033`/`0034`, and the direct-import-only durable adapter add no application
+database grant, runtime composition, or external egress. The same is true of
+the deferred Base artifacts retained outside the Ethereum/Solana launch scope.
