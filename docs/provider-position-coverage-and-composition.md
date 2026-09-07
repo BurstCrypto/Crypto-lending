@@ -67,9 +67,10 @@ trusted-chain-assessment assembler, exact mainnet launch-network policy,
 coverage, observation, assessment, observation-policy, trusted-assembly,
 admission, source port, two-source producer, recorder port, concrete PostgreSQL
 recorder, record-intent reconciliation port and PostgreSQL processor, bounded
-reconciliation lifecycle, module, barrel, and controller sources together with
-migrations `0029`, `0030`, and `0031` and the migration index as one selected
-thirty-six-file dormant critical-source slice. A passing local source inspection
+reconciliation lifecycle, pure candidate-finality port and dormant finalizer,
+module, barrel, and controller sources together with migrations `0029`, `0030`,
+and `0031` and the migration index as one selected thirty-eight-file dormant
+critical-source slice. A passing local source inspection
 does not prove recursive dependency closure, whole-application registration
 absence, populated or deployed evidence, or live behavior. It does pin the
 private construction path that passes the composition-owned PostgreSQL reader
@@ -79,8 +80,9 @@ neither the outer facade nor its reader sub-capability exposes either object.
 The reader, trusted-assessment, and deadline-runner feature-registration
 blockers all remain open.
 
-At the preflight milestone verified in `6f35a91`, all 63 focused cases in
-`production-go-live-preflight.test.ts` passed for this 36-artifact slice. Six
+At the candidate-finality milestone implemented in `387a2dc` and verified in
+`7f7347a`, all 64 focused cases in `production-go-live-preflight.test.ts` passed
+for this exact 38-artifact slice. Six
 focused PostgreSQL 16 integration cases also passed for the
 migration/recorder/processor path. That is local source and disposable-database
 evidence only, not proof of a production migration, runtime
@@ -109,16 +111,35 @@ record candidate to the original request in a private `WeakMap`. Its checked-in
 mainnet pair registry is empty and `NOT_APPROVED`, and it has no persistence or
 runtime capability. Pair agreement on finalized heads does not prove the
 selected candidate anchor itself is finalized: the artifact remains
-`PROVISIONAL`, `DISPLAY_ONLY`, and `mayAuthorizeFinancialAction: false` until a
-separate candidate-finalization gate passes. There is still no live source implementation,
-owner-authorized recorder workload/principal/credential/grant, populated
-evidence claim, runtime registration or activation, deployment, or live
-evidence. Consequently all three
+`PROVISIONAL`, `DISPLAY_ONLY`, and `mayAuthorizeFinancialAction: false`. The new
+pure, direct-import-only finalizer provides the local classification boundary
+without activating it. It
+authenticates the exact producer capability and request before inspecting the
+candidate and again immediately before issuing an assessment. For Ethereum it
+keeps a candidate pending below its height, quarantines an equal-height hash
+conflict, and requires the producer-authenticated lineage proof before treating
+a higher finalized height as covering the candidate. For Solana it compares the
+candidate slot only with the finalized root, quarantines root regression, and
+explicitly makes no same-slot fork-detection claim. A server-owned monotonic
+clock, exclusive producer/approval/head-freshness deadlines, and abort checks
+fail closed; an issued pending result is never upgraded in place. Its immutable
+null-prototype, exact-identity result keeps financial-action, persistence, and
+position-snapshot authority false. Even a locally classified `FINALIZED` result
+does not persist or update migration `0029`; the producer artifact remains
+`PROVISIONAL` and `DISPLAY_ONLY` until a separately reviewed and activated
+authority boundary exists.
+
+There is still no live source implementation, owner-authorized recorder
+workload/principal/credential/grant, populated evidence claim, runtime
+registration or activation, deployment, or live evidence. The finalizer also
+has no module, barrel, controller, scheduler, or composition registration.
+Consequently all three
 provider-position registration blockers remain
 `PROVIDER_POSITION_READER_FEATURE_REGISTRATION_MISSING`,
 `PROVIDER_POSITION_TRUSTED_ASSESSMENT_FEATURE_REGISTRATION_MISSING`, and
 `PROVIDER_POSITION_DEADLINE_RUNNER_FEATURE_REGISTRATION_MISSING`, and the
-live-provider count remains zero.
+live-provider count, `liveReadEvidenceBound`, and `transactionEvidenceBound`
+all remain zero.
 
 Migration `0030` refuses installation over any existing `0029` evidence while
 holding an access-exclusive evidence-table lock. It adds an append-only,

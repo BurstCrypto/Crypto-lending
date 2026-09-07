@@ -194,10 +194,11 @@ into deployed or production-ready evidence.
 `PROVIDER_POSITION_READ_BOUNDARY` independently snapshots and byte-pins the
 coverage-aware reader v3 port, trusted-assessment assembly port,
 durable-chain-anchor reader port, concrete PostgreSQL durable-anchor reader,
-dormant chain-anchor evidence source port and two-source producer, recorder V2
-port and concrete PostgreSQL recorder, record-intent reconciliation port and
-one-shot PostgreSQL reconciliation processor, bounded reconciliation lifecycle,
-dormant trusted-chain-assessment assembler,
+dormant chain-anchor evidence source port and two-source producer, pure
+candidate-finality port and dormant finalizer, recorder V2 port and concrete
+PostgreSQL recorder, record-intent reconciliation port and one-shot PostgreSQL
+reconciliation processor, bounded reconciliation lifecycle, dormant
+trusted-chain-assessment assembler,
 admission coordinator, concrete Node deadline runner, wallet-roster reader port
 and adapter, wallet service and repository port, PostgreSQL wallet repository,
 shared PostgreSQL cancellation service, dormant runtime-budget resource,
@@ -206,7 +207,7 @@ runtime PostgreSQL pool factory, coverage/observation/assessment/policy domains,
 exact Ethereum/Solana mainnet launch-network policy, migration `0029`, the
 deadline-bound migration `0030`, record-intent migration `0031`, the migration
 index, feature module, feature barrel, and HTTP controller as one selected
-thirty-six-file critical-source slice. Within that slice, the local semantic
+thirty-eight-file critical-source slice. Within that slice, the local semantic
 inspection requires an exact account/correlation
 reader request with no caller-supplied evaluation time and an exact frozen
 result envelope containing the server-authored parser time and covered-snapshot
@@ -282,6 +283,25 @@ candidate containing migration `0029`'s exact 23 record arguments. A private
 `WeakMap` binds that candidate to the exact producer request; copies and request
 clones fail review.
 
+The direct-import-only candidate-finality boundary authenticates that exact
+producer capability and request before it inspects the candidate and again
+immediately before it issues a result. Its injected clock authors the
+assessment time. Ethereum compares the candidate block height with the agreed
+finalized height: a lower height stays `PENDING`, an equal height requires the
+same block hash or is `QUARANTINED`, and a higher height is `FINALIZED` only
+with the authenticated nonzero lineage proof. Solana compares the candidate
+slot only with the agreed finalized root, never the finalized slot; it
+quarantines a root regression and explicitly sets its same-slot fork-detection
+claim false. Producer deadline, source-pair approval, and current/finalized-head
+freshness boundaries are exclusive. Abort and clock regression fail closed,
+and a frozen `PENDING` capability is never upgraded in place.
+
+The finality request and result keep `mayAuthorizeFinancialAction`,
+`mayPersist`, and `mayCreatePositionSnapshot` false. Results are frozen,
+null-prototype capabilities bound by `WeakMap` to the exact request. This pure
+classification performs no database, network, timer, environment, provider,
+persistence, snapshot, or financial action.
+
 The recorder V2 port exposes only opaque record and result-review capabilities.
 The concrete dormant PostgreSQL recorder accepts exact frozen plain- or
 null-prototype outer and nested producer requests with one genuine, unchanged
@@ -309,19 +329,21 @@ most 30 seconds. That bound belongs to the producer's private `evaluatedAt`, whi
 is not present in the recorder request, and is preserved by authentic pre- and
 post-query producer review.
 
-The agreed finalized heads do not establish that the selected candidate anchor
-itself is finalized. Migration `0029` and the producer deliberately leave the
-artifact `PROVISIONAL`, `DISPLAY_ONLY`, and
-`mayAuthorizeFinancialAction: false`; a separate candidate-finalization gate is
-required before any ledger or financial authority could consume it.
+The finalizer closes only the local candidate-classification source gap. It
+does not update migration `0029`, persist an assessment, create a position
+snapshot, or grant a downstream ledger capability. Even an authenticated
+`FINALIZED` classification is display-only here; the recorded candidate remains
+`PROVISIONAL`, `DISPLAY_ONLY`, and `mayAuthorizeFinancialAction: false` until a
+separately reviewed and activated authority boundary can consume it.
 
 The checked-in mainnet source-pair registry is exactly empty and
 `NOT_APPROVED`, and no concrete source binding is checked in. The producer has
 no database writer, transport, endpoint, credential, environment lookup,
 provider SDK, Nest decorator, module registration, barrel export, or runtime
-composition. The recorder, reconciliation processor, and bounded lifecycle are
-likewise unregistered and ungranted, so these dormant artifacts cannot populate
-migration `0029` or `0031`, contact a chain, or change any production blocker.
+composition. The finalizer, recorder, reconciliation processor, and bounded
+lifecycle are likewise unregistered and ungranted, so these dormant artifacts
+cannot populate migration `0029` or `0031`, contact a chain, or change any
+production blocker.
 
 Migration `0029` adds a dormant, append-only PostgreSQL boundary for global
 Ethereum and Solana chain-anchor evidence plus append-only `INVALIDATED` and
@@ -460,13 +482,15 @@ Launch readiness remains blocked by
 `PROVIDER_POSITION_DEADLINE_RUNNER_FEATURE_REGISTRATION_MISSING`. The concrete
 assembler, PostgreSQL reader, and migration do not clear any registration
 blocker: the dormant producer is not composed, its checked-in production
-registry approves no pair, no live evidence-source implementation exists, and
-the concrete recorder and reconciliation processor have no owner-authorized
+registry approves no pair, the finalizer is not composed, no live
+evidence-source implementation exists, and the concrete recorder and
+reconciliation processor have no owner-authorized
 workload, principal, credential, grant, composition, schedule, deployment, or
 populated evidence claim. The private
 composition wiring is not registered in the
 Nest/module/HTTP graph, no runtime is activated, and no deployment or live
-evidence exists. The live-provider count therefore remains zero. The concrete
+evidence exists. The live-provider count, `liveReadEvidenceBound`, and
+`transactionEvidenceBound` therefore all remain zero. The concrete
 runner remains dormant and unregistered. Provider sources must cooperate with
 abort and settle before the runner can return. Wallet-roster cancellation now
 reaches the PostgreSQL query boundary, but active `pg` pool acquisition has no
@@ -862,9 +886,10 @@ npm run typecheck:production:preflight
 npm run test:production:preflight
 ```
 
-For the durable record-intent and bounded-reconciliation milestone verified in
-`6f35a91`, all 63 focused cases in `production-go-live-preflight.test.ts` passed.
-The migration was also exercised
+For the finality-aware provider-position preflight milestone implemented in
+`387a2dc` and verified in `7f7347a`, all 64 focused cases in
+`production-go-live-preflight.test.ts` passed for the exact 38-artifact slice.
+The record-intent migration was also exercised
 in a disposable local PostgreSQL 16 instance: all six focused integration cases
 passed, covering clean up/down/up migration verification, Ethereum and Solana
 preparation, one-shot claim and idempotent replay, expired-`NEW` reconciliation,

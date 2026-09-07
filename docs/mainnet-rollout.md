@@ -89,7 +89,27 @@ transaction.
    and the deployment-target registry are empty today, so this gate cannot pass
    locally.
 
-## Dormant chain-anchor record-intent milestone
+## Dormant chain-anchor finality and record-intent milestone
+
+Commit `387a2dc` adds a pure, direct-import-only finality boundary after the
+authenticated two-source producer. It authenticates the exact producer
+capability and request before inspecting the candidate and again immediately
+before issuing a frozen, null-prototype, exact-request-bound result. Ethereum
+classification compares the candidate block height with the agreed finalized
+height, requires the authenticated lineage proof when the finalized height is
+higher, and quarantines an equal-height hash conflict. Solana classification
+compares the candidate slot only with the agreed finalized root, quarantines a
+root regression, and never treats the finalized slot as proof. It explicitly
+makes no same-slot fork-detection claim. Its clock is injected and
+server-controlled; deadlines, source-pair approval, and head-freshness bounds
+are exclusive, and abort or clock regression fails closed. `PENDING` never
+upgrades in place.
+
+Every request and result keeps financial-action, persistence, and position-
+snapshot authority false. The finalizer neither persists nor updates migration
+`0029`'s candidate: even a locally classified `FINALIZED` result remains a
+dormant display-only assessment, and the recorded candidate remains
+`PROVISIONAL`, `DISPLAY_ONLY`, and non-authorizing.
 
 Migration `0031` now wraps migration `0030`'s deadline-guarded evidence writer
 in a retained PostgreSQL intent lifecycle. Recorder V2 prepares the exact
@@ -101,19 +121,24 @@ direct-import-only lifecycle can invoke that processor sequentially within a
 reviewed 1-through-64 work-item limit and a 10-millisecond-through-30-second run
 deadline. It accepts one run at a time, propagates aborts, honors authenticated
 retry deferrals only inside the deadline, and cleans up its injected timers and
-listeners. Import and construction start no work. The offline preflight milestone
-verified in `6f35a91` pins all 36 provider-position artifacts; all 63 focused
-cases in `production-go-live-preflight.test.ts` passed, and six focused cases
-passed against an isolated local PostgreSQL 16 instance.
+listeners. Import and construction start no work. The finality-aware offline
+preflight in `7f7347a` pins all 38 provider-position artifacts; all 64 focused
+cases in `production-go-live-preflight.test.ts` passed. The earlier six focused
+record-intent cases also passed against an isolated local PostgreSQL 16
+instance.
 
 This closes a local evidence-recording and bounded-run implementation gap only.
-The recorder, reconciliation processor, and lifecycle remain direct-import-only,
-unregistered, unscheduled, ungranted, and undeployed. They have no approved
-source pair, endpoint, credential, external transport, populated mainnet
-evidence, or financial-action authority, and physical commit acknowledgement can
-still be ambiguous across a broken connection. These local tests do not
-increment the live-provider count or clear any read-only or real-value launch
-gate.
+The finalizer, recorder, reconciliation processor, and lifecycle remain
+direct-import-only, unregistered, unscheduled, ungranted, and undeployed. They
+have no approved source pair, endpoint, credential, external transport,
+populated mainnet evidence, or financial-action authority, and physical commit
+acknowledgement can still be ambiguous across a broken connection. The report
+still emits `PROVIDER_POSITION_READER_FEATURE_REGISTRATION_MISSING`,
+`PROVIDER_POSITION_TRUSTED_ASSESSMENT_FEATURE_REGISTRATION_MISSING`, and
+`PROVIDER_POSITION_DEADLINE_RUNNER_FEATURE_REGISTRATION_MISSING`;
+`liveReadEvidenceBound` and `transactionEvidenceBound` both remain zero. These
+local tests do not increment the zero live-provider count or clear any
+read-only or real-value launch gate.
 
 The zero-cost application-template validator now rejects `NODE_OPTIONS` and
 unreviewed `DD_TRACE*`, `NEW_RELIC*`, `ELASTIC_APM*`, or `OTEL*` bindings from

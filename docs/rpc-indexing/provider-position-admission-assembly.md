@@ -234,12 +234,13 @@ The offline production preflight now byte-pins this coordinator, assembly port,
 durable-anchor reader port, concrete PostgreSQL durable reader, chain-anchor
 evidence source port, dormant two-source evidence producer, exact recorder port,
 concrete PostgreSQL recorder, record-intent reconciliation port, one-shot
-PostgreSQL reconciliation processor, bounded reconciliation lifecycle, dormant
+PostgreSQL reconciliation processor, bounded reconciliation lifecycle, pure
+candidate-finality port, dormant candidate-finality finalizer, dormant
 trusted-chain-assessment assembler,
 exact mainnet launch-network policy, concrete deadline runner, complete
 wallet-roster cancellation chain, shared PostgreSQL cancellation service,
 runtime-budget resource, private dormant composition, migrations `0029`,
-`0030`, and `0031`, and the migration index with a selected thirty-six-file
+`0030`, and `0031`, and the migration index with a selected thirty-eight-file
 reader/domain/infrastructure/database/module/barrel/controller critical-source
 slice.
 Its local check rejects trust, timing, source-method substitution, active-controller
@@ -248,7 +249,7 @@ result-cardinality/row-validation weakening, recorder SQL/value order,
 durable-intent/token/one-shot/reconciliation/lifecycle drift, pre/post-producer
 authentication, raw reader or trusted-assembly
 injection, private reader/assembler construction/argument bypass, facade
-exposure, zero-target anchor,
+exposure, zero-target anchor, candidate-finality authentication/classification,
 authority, or feature-surface drift inside that slice, but deliberately reports the reader,
 trusted-assessment, and deadline-runner feature registrations as missing. It
 does not prove recursive dependency closure or scan every application module,
@@ -267,6 +268,20 @@ live-capability, and lineage proofs are required. The ordered pair derives the
 stored proof hashes, and the producer issues only an opaque, exact 23-argument
 migration-record candidate bound to its original request in a private
 `WeakMap`.
+
+The pure direct-import-only finalizer authenticates that exact producer
+capability and request before candidate inspection and again immediately before
+issuing its immutable, exact-identity result. Ethereum candidates remain
+pending below the finalized height, are quarantined when an equal-height hash
+conflicts, and require the authenticated lineage proof when a higher finalized
+height covers the candidate. Solana candidates are compared with the finalized
+root, never merely the finalized slot; root regression is quarantined and the
+result explicitly claims no same-slot fork detection. A server-owned monotonic
+clock, exclusive producer/approval/head-freshness deadlines, abort checks, and
+clock-regression checks fail closed, and a pending result is never upgraded in
+place. Its financial-action, persistence, and position-snapshot flags are all
+false, and it performs no network, database, timer, environment, provider, or
+financial operation.
 
 The concrete recorder captures the canonical producer reviewer and
 `queryWithCancellation` without construction-time I/O. It accepts exact frozen
@@ -302,30 +317,34 @@ signal, authenticates the returned capability before reading its exact outcome,
 and stops at idle, deferral, work limit, run deadline, or external abort. It does
 not turn this source artifact into a scheduler or runtime worker.
 
-At the preflight milestone verified in `6f35a91`, all 63 focused cases in
-`production-go-live-preflight.test.ts` passed for this exact 36-artifact slice.
+At the candidate-finality milestone implemented in `387a2dc` and verified in
+`7f7347a`, all 64 focused cases in `production-go-live-preflight.test.ts` passed
+for this exact 38-artifact slice.
 Six focused integration cases also passed against an
 isolated local PostgreSQL 16 instance, including the cumulative verifier,
 Ethereum/Solana intent preparation, one-shot/idempotent execution,
 expired-`NEW` reconciliation, token rejection, and deferred-constraint
 rollback. This is local database evidence, not deployed or mainnet evidence.
 
-Agreement on the two sources' finalized heads does not prove that the selected
-candidate anchor itself is finalized. Migration `0029` and this producer keep
-the artifact `PROVISIONAL`, `DISPLAY_ONLY`, and
-`mayAuthorizeFinancialAction: false`. A separately reviewed
-candidate-finalization gate is required before any ledger mutation or financial
-authority may consume it.
+Agreement on the two sources' finalized heads alone does not prove that the
+selected candidate anchor itself is finalized. The dormant finalizer now closes
+that local source-classification gap, but it does not persist or update migration
+`0029`, create a position snapshot, or grant downstream authority. Even a
+locally classified `FINALIZED` assessment leaves the producer artifact
+`PROVISIONAL`, `DISPLAY_ONLY`, and `mayAuthorizeFinancialAction: false` until a
+separately reviewed and activated authority boundary permits any ledger mutation
+or financial use.
 
 The checked-in mainnet source-pair registry remains empty and `NOT_APPROVED`.
 No concrete source, endpoint, owner-authorized recorder or reconciliation
 workload/principal/credential/grant, module provider, barrel export, composition
-dependency, lifecycle registration, schedule, deployment, or runtime activation
-is added, so all three
+dependency, finalizer registration, lifecycle registration, schedule,
+deployment, or runtime activation is added, so all three
 registration blockers remain `PROVIDER_POSITION_READER_FEATURE_REGISTRATION_MISSING`,
 `PROVIDER_POSITION_TRUSTED_ASSESSMENT_FEATURE_REGISTRATION_MISSING`, and
 `PROVIDER_POSITION_DEADLINE_RUNNER_FEATURE_REGISTRATION_MISSING`, and the
-live-provider count remains zero.
+live-provider count, `liveReadEvidenceBound`, and `transactionEvidenceBound`
+all remain zero.
 
 That production change must also provide:
 
