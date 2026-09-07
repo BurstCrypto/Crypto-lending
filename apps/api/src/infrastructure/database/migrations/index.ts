@@ -112,6 +112,10 @@ import {
   createMainnetFinancialActionLifecycleMigrationV0033,
   createMainnetFinancialActionLifecycleTestSchemaMigrationV0033,
 } from './0033-create-mainnet-financial-action-lifecycle.migration';
+import {
+  createMainnetFinancialActionWalletIdentityBindingMigrationV0034,
+  createMainnetFinancialActionWalletIdentityBindingTestSchemaMigrationV0034,
+} from './0034-bind-mainnet-financial-action-wallet-identity.migration';
 import type { DatabaseMigration } from './migration';
 
 /**
@@ -153,6 +157,7 @@ export const DATABASE_TEST_SCHEMA_MIGRATION_LIST: readonly DatabaseMigration[] =
   createProviderPositionChainAnchorRecordIntentTestSchemaMigrationV0031,
   createMainnetBalanceAgreementEvidenceV2TestSchemaMigrationV0032,
   createMainnetFinancialActionLifecycleTestSchemaMigrationV0033,
+  createMainnetFinancialActionWalletIdentityBindingTestSchemaMigrationV0034,
 ]);
 
 export const DATABASE_MIGRATION_LIST: readonly DatabaseMigration[] = Object.freeze([
@@ -189,6 +194,7 @@ export const DATABASE_MIGRATION_LIST: readonly DatabaseMigration[] = Object.free
   createProviderPositionChainAnchorRecordIntentMigrationV0031,
   createMainnetBalanceAgreementEvidenceV2MigrationV0032,
   createMainnetFinancialActionLifecycleMigrationV0033,
+  createMainnetFinancialActionWalletIdentityBindingMigrationV0034,
 ]);
 
 export type { DatabaseMigration } from './migration';
@@ -335,3 +341,8 @@ export {
   createMainnetFinancialActionLifecycleTestSchemaMigrationV0033,
   MAINNET_ACTION_FINGERPRINT_GOLDEN_VECTORS,
 } from './0033-create-mainnet-financial-action-lifecycle.migration';
+export {
+  createMainnetFinancialActionWalletIdentityBindingMigration,
+  createMainnetFinancialActionWalletIdentityBindingMigrationV0034,
+  createMainnetFinancialActionWalletIdentityBindingTestSchemaMigrationV0034,
+} from './0034-bind-mainnet-financial-action-wallet-identity.migration';
