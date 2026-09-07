@@ -32,6 +32,11 @@ import {
   verifyProductionDeploymentIntentBytesWithTestRegistry,
   verifyProductionDeploymentIntentWithTestRegistry,
 } from './validate-production-deployment-intent.mjs';
+import {
+  isVerifiedProductionDeploymentDestination,
+  productionDeploymentDestinationSha256,
+  resolveProductionDeploymentDestinationWithTestRegistry,
+} from '../../scripts/production-deployment-target.mjs';
 
 const VALIDATOR_PATH = resolve(import.meta.dirname, 'validate-production-deployment-intent.mjs');
 const ISSUED_AT = '2026-09-07T12:00:00Z';
@@ -45,16 +50,36 @@ const PREDECESSOR_SHA256 = 'f'.repeat(64);
 const PREDECESSOR_RESERVATION_SHA256 = 'e'.repeat(64);
 const PREDECESSOR_RESULT_SHA256 = 'd'.repeat(64);
 const PREDECESSOR_HEAD_SHA256 = 'c'.repeat(64);
-const DESTINATION_BINDING = Object.freeze({
+const TEST_DESTINATION = Object.freeze({
   destinationId: 'production-provisioning-us-east-1',
-  destinationSha256: '2'.repeat(64),
   epochId: '3'.repeat(64),
-  destinationRegistrySha256: '4'.repeat(64),
   environment: 'production',
-  accountId: '123456789012',
-  region: 'us-east-1',
+  awsAccountId: '123456789012',
+  awsRegion: 'us-east-1',
   stackName: 'crypto-lending-production',
   publicOrigin: 'https://app.example.com',
+});
+const TEST_DESTINATION_SHA256 = productionDeploymentDestinationSha256(TEST_DESTINATION);
+const TEST_DESTINATION_REGISTRY = Object.freeze({
+  schemaVersion: 1,
+  artifactType: 'PRODUCTION_DEPLOYMENT_DESTINATION_REGISTRY',
+  destinations: Object.freeze([TEST_DESTINATION]),
+});
+const RESOLVED_TEST_DESTINATION = resolveProductionDeploymentDestinationWithTestRegistry(
+  TEST_DESTINATION.destinationId,
+  TEST_DESTINATION_SHA256,
+  TEST_DESTINATION_REGISTRY,
+);
+const DESTINATION_BINDING = Object.freeze({
+  destinationId: RESOLVED_TEST_DESTINATION.destinationId,
+  destinationSha256: RESOLVED_TEST_DESTINATION.destinationSha256,
+  epochId: RESOLVED_TEST_DESTINATION.epochId,
+  destinationRegistrySha256: RESOLVED_TEST_DESTINATION.registrySha256,
+  environment: RESOLVED_TEST_DESTINATION.environment,
+  accountId: RESOLVED_TEST_DESTINATION.awsAccountId,
+  region: RESOLVED_TEST_DESTINATION.awsRegion,
+  stackName: RESOLVED_TEST_DESTINATION.stackName,
+  publicOrigin: RESOLVED_TEST_DESTINATION.publicOrigin,
 });
 
 const INERT_AUTHORITY = Object.freeze({
@@ -286,8 +311,18 @@ function clockReading(wallTime, monotonicMilliseconds) {
   return { wallTime, monotonicMilliseconds };
 }
 
-function verifyWithTestRegistry(record, options = optionsFor(record), registry = TEST_REGISTRY) {
-  return verifyProductionDeploymentIntentWithTestRegistry(record, options, registry);
+function verifyWithTestRegistry(
+  record,
+  options = optionsFor(record),
+  registry = TEST_REGISTRY,
+  destinationRegistry = TEST_DESTINATION_REGISTRY,
+) {
+  return verifyProductionDeploymentIntentWithTestRegistry(
+    record,
+    options,
+    registry,
+    destinationRegistry,
+  );
 }
 
 test('accepts an exact two-role intent only through the injected unbranded test registry', () => {
@@ -301,6 +336,11 @@ test('accepts an exact two-role intent only through the injected unbranded test 
   assert.equal(report.operation, 'PROVISION_INERT');
   assert.equal(report.sequence, 1);
   assert.equal(report.intentSha256, record.intentSha256);
+  assert.equal(report.destinationResolved, true);
+  assert.deepEqual(report.destination, RESOLVED_TEST_DESTINATION);
+  assert.equal(isVerifiedProductionDeploymentDestination(report.destination), false);
+  assert.equal(report.abortedProvisionAttempt, null);
+  assert.equal(report.plan.abortedProvisionAttempt, null);
   assert.equal(report.callerExpectedPredecessorMatched, true);
   assert.equal(report.durableCasRequired, true);
   assert.equal(report.durableCasAccepted, false);
@@ -311,6 +351,8 @@ test('accepts an exact two-role intent only through the injected unbranded test 
   );
   assert.equal(isProductionAuthorizedDeploymentIntentReport(report), false);
   assert.equal(Object.isFrozen(report), true);
+  assert.equal(Object.isFrozen(report.destination), true);
+  assert.equal(Object.isFrozen(report.plan), true);
 
   const canonicalBytes = Buffer.from(canonicalizeProductionDeploymentIntentValue(record), 'utf8');
   assert.equal(
@@ -318,6 +360,7 @@ test('accepts an exact two-role intent only through the injected unbranded test 
       canonicalBytes,
       optionsFor(record),
       TEST_REGISTRY,
+      TEST_DESTINATION_REGISTRY,
     ).ok,
     true,
   );
@@ -348,6 +391,17 @@ test('supports only the seven reviewed operations and never proposes financial w
     assert.equal(report.executionAllowed, false, operation);
     assert.equal(record.content.proposedState.authority.financialWritesEnabled, false, operation);
     assert.equal(report.durableCasAccepted, false, operation);
+    if (operation === 'ABORT_PROVISION') {
+      assert.deepEqual(report.abortedProvisionAttempt, {
+        intentSha256: record.content.bindings.abortedProvisionIntentSha256,
+        reservationSha256: record.content.bindings.abortedProvisionReservationSha256,
+      });
+      assert.equal(report.plan.abortedProvisionAttempt, report.abortedProvisionAttempt);
+      assert.equal(Object.isFrozen(report.abortedProvisionAttempt), true);
+    } else {
+      assert.equal(report.abortedProvisionAttempt, null, operation);
+      assert.equal(report.plan.abortedProvisionAttempt, null, operation);
+    }
   }
 
   const unknown = structuredClone(buildRecord());
@@ -464,7 +518,13 @@ test('binds genesis to stable destination-epoch identity and rejects sequence ga
 
 test('abort binds an exact provision attempt and terminal states have no outgoing edge', () => {
   const abort = buildRecord({ operation: 'ABORT_PROVISION' });
-  assert.equal(verifyWithTestRegistry(abort).ok, true);
+  const abortReport = verifyWithTestRegistry(abort);
+  assert.equal(abortReport.ok, true);
+  assert.deepEqual(abortReport.abortedProvisionAttempt, {
+    intentSha256: abort.content.bindings.abortedProvisionIntentSha256,
+    reservationSha256: abort.content.bindings.abortedProvisionReservationSha256,
+  });
+  assert.equal(abortReport.plan.abortedProvisionAttempt, abortReport.abortedProvisionAttempt);
   for (const field of ['abortedProvisionIntentSha256', 'abortedProvisionReservationSha256']) {
     const missing = structuredClone(abort.content);
     missing.bindings[field] = ZERO_SHA256;
@@ -498,6 +558,38 @@ test('destination physical coordinates must exactly match the deployment request
   }
 });
 
+test('successful reports require the exact resolved destination and registry, not caller pins', () => {
+  const mismatchedBindings = [
+    { destinationId: 'production-provisioning-us-west-2' },
+    { destinationSha256: 'a'.repeat(64) },
+    { destinationRegistrySha256: 'b'.repeat(64) },
+    { epochId: 'c'.repeat(64) },
+    { accountId: '210987654321' },
+    { region: 'us-west-2' },
+    { stackName: 'different-production-stack' },
+    { publicOrigin: 'https://other.example.com' },
+  ];
+  for (const override of mismatchedBindings) {
+    const record = buildRecord({
+      destinationBinding: { ...DESTINATION_BINDING, ...override },
+    });
+    assert.equal(verifyWithTestRegistry(record).ok, false, Object.keys(override)[0]);
+  }
+
+  const record = buildRecord();
+  assert.equal(
+    verifyProductionDeploymentIntentWithTestRegistry(record, optionsFor(record), TEST_REGISTRY).ok,
+    false,
+  );
+  assert.equal(
+    verifyWithTestRegistry(record, optionsFor(record), TEST_REGISTRY, {
+      ...TEST_DESTINATION_REGISTRY,
+      destinations: [],
+    }).ok,
+    false,
+  );
+});
+
 test('the empty production registry cannot authorize any otherwise valid intent', () => {
   const record = buildRecord();
   assert.deepEqual(PRODUCTION_DEPLOYMENT_INTENT_AUTHORITY_KEY_REGISTRY.keys, []);
@@ -510,6 +602,7 @@ test('the empty production registry cannot authorize any otherwise valid intent'
       record,
       optionsFor(record),
       PRODUCTION_DEPLOYMENT_INTENT_AUTHORITY_KEY_REGISTRY,
+      TEST_DESTINATION_REGISTRY,
     ).ok,
     false,
   );
@@ -552,6 +645,7 @@ test('production-style verification captures current time and rejects injected o
     active,
     activeOptions,
     registry,
+    TEST_DESTINATION_REGISTRY,
   );
   assert.equal(activeReport.ok, true);
   assert.equal(activeReport.productionAuthorityValidated, false);
@@ -561,6 +655,7 @@ test('production-style verification captures current time and rejects injected o
       active,
       { evaluatedAt: active.content.issuedAt, ...activeOptions },
       registry,
+      TEST_DESTINATION_REGISTRY,
     ).ok,
     false,
   );
@@ -575,6 +670,7 @@ test('production-style verification captures current time and rejects injected o
       expired,
       productionOptionsFor(expired),
       registry,
+      TEST_DESTINATION_REGISTRY,
     ).ok,
     false,
   );
@@ -586,6 +682,7 @@ test('cached report freshness and revalidation fail closed at the exact expirati
     record,
     productionOptionsFor(record),
     TEST_REGISTRY,
+    TEST_DESTINATION_REGISTRY,
     [clockReading(EVALUATED_AT, 1_000), clockReading('2026-09-07T12:10:01Z', 2_000)],
   );
   assert.equal(report.ok, true);
@@ -638,6 +735,7 @@ test('authorization lifecycle makes observed clock rollback sticky and rejects u
       record,
       productionOptions,
       TEST_REGISTRY,
+      TEST_DESTINATION_REGISTRY,
       [clockReading(EVALUATED_AT, 1_000), clockReading('2026-09-07T12:09:59Z', 2_000)],
     );
   assert.equal(wallRollbackDuringVerification.ok, false);
@@ -647,6 +745,7 @@ test('authorization lifecycle makes observed clock rollback sticky and rejects u
       record,
       productionOptions,
       TEST_REGISTRY,
+      TEST_DESTINATION_REGISTRY,
       [clockReading(EVALUATED_AT, 1_000), clockReading('2026-09-07T12:10:01Z', 999)],
     );
   assert.equal(monotonicRollbackDuringVerification.ok, false);
@@ -655,6 +754,7 @@ test('authorization lifecycle makes observed clock rollback sticky and rejects u
     record,
     productionOptions,
     TEST_REGISTRY,
+    TEST_DESTINATION_REGISTRY,
     [clockReading(EVALUATED_AT, 1_000), clockReading(EXPIRES_AT, 1_201_000)],
   );
   assert.equal(expiredDuringVerification.ok, false);
@@ -663,6 +763,7 @@ test('authorization lifecycle makes observed clock rollback sticky and rejects u
     record,
     productionOptions,
     TEST_REGISTRY,
+    TEST_DESTINATION_REGISTRY,
     [clockReading(EVALUATED_AT, 1_000), clockReading('2026-09-07T12:10:01Z', 2_000)],
   );
   assert.equal(report.ok, true);
@@ -692,6 +793,7 @@ test('authorization lifecycle makes observed clock rollback sticky and rejects u
     record,
     productionOptions,
     TEST_REGISTRY,
+    TEST_DESTINATION_REGISTRY,
     [clockReading(EVALUATED_AT, 1_000), clockReading('2026-09-07T12:10:01Z', 2_000)],
   );
   assert.equal(
@@ -720,6 +822,7 @@ test('authorization lifecycle makes observed clock rollback sticky and rejects u
     record,
     productionOptions,
     TEST_REGISTRY,
+    TEST_DESTINATION_REGISTRY,
     [clockReading(EVALUATED_AT, 1_000), clockReading('2026-09-07T12:10:01Z', 2_000)],
   );
   assert.equal(
@@ -944,6 +1047,7 @@ test('rejects hostile object shapes and ambiguous, noncanonical, or oversized JS
         bytes,
         optionsFor(record),
         TEST_REGISTRY,
+        TEST_DESTINATION_REGISTRY,
       ).ok,
       false,
     );

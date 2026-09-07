@@ -61,6 +61,7 @@ const DEPLOYMENT_RUNTIME_ENTRIES = Object.freeze([
 const DEPLOYMENT_RUNTIME_MODULE_POLICY = Object.freeze({
   [DEPLOYMENT_RUNTIME_ENTRIES[0]]: Object.freeze({
     imports: Object.freeze([
+      '../../scripts/production-deployment-target.mjs|isVerifiedProductionDeploymentDestination,resolveProductionDeploymentDestination,resolveProductionDeploymentDestinationWithTestRegistry',
       '../shared/parse-strict-json.mjs|parseStrictJsonBytes',
       '../shared/read-secure-local-file.mjs|readSecureLocalFile',
       '../shared/validate-ed25519-public-key.mjs|validateEd25519PublicKeyBytes',
@@ -759,6 +760,7 @@ test('stages both exact offline deployment module closures with reviewed direct 
       'infra/shared/parse-strict-json.mjs',
       'infra/shared/read-secure-local-file.mjs',
       'infra/shared/validate-ed25519-public-key.mjs',
+      'scripts/production-deployment-target.mjs',
     ]),
     [DEPLOYMENT_RUNTIME_ENTRIES[1]]: Object.freeze([
       'infra/shared/parse-strict-json.mjs',

@@ -18,6 +18,11 @@ import { TextDecoder, types as utilTypes } from 'node:util';
 import { parseStrictJsonBytes } from '../shared/parse-strict-json.mjs';
 import { readSecureLocalFile } from '../shared/read-secure-local-file.mjs';
 import { validateEd25519PublicKeyBytes } from '../shared/validate-ed25519-public-key.mjs';
+import {
+  isVerifiedProductionDeploymentDestination,
+  resolveProductionDeploymentDestination,
+  resolveProductionDeploymentDestinationWithTestRegistry,
+} from '../../scripts/production-deployment-target.mjs';
 
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
 export const REPOSITORY_ROOT = resolve(scriptDirectory, '..', '..');
@@ -1134,11 +1139,34 @@ function parsedRoot(value) {
   return Object.freeze({ unsigned, signatures: Object.freeze(signatures) });
 }
 
-function requireIntegratedProductionDestination() {
-  // The checked-in prospective-destination registry is intentionally empty. A
-  // later reviewed integration must replace this refusal with its branded
-  // resolver and a separately branded durable chain-head snapshot.
-  return invalid();
+function resolveBoundDestination(content, destinationResolver, requireProductionBrand) {
+  let resolved;
+  try {
+    resolved = destinationResolver(
+      content.destinationBinding.destinationId,
+      content.destinationBinding.destinationSha256,
+    );
+  } catch {
+    return invalid();
+  }
+  const productionBranded = isVerifiedProductionDeploymentDestination(resolved);
+  const binding = content.destinationBinding;
+  if (
+    (requireProductionBrand && !productionBranded) ||
+    (!requireProductionBrand && productionBranded) ||
+    resolved.destinationId !== binding.destinationId ||
+    resolved.destinationSha256 !== binding.destinationSha256 ||
+    resolved.epochId !== binding.epochId ||
+    resolved.registrySha256 !== binding.destinationRegistrySha256 ||
+    resolved.environment !== binding.environment ||
+    resolved.awsAccountId !== binding.accountId ||
+    resolved.awsRegion !== binding.region ||
+    resolved.stackName !== binding.stackName ||
+    resolved.publicOrigin !== binding.publicOrigin
+  ) {
+    return invalid();
+  }
+  return resolved;
 }
 
 function createAuthorizationFreshness(initialReading, finalReading, expiresAtMilliseconds) {
@@ -1169,6 +1197,7 @@ function verifyIntent(
   registryValue,
   {
     requireProductionDestination,
+    destinationResolver,
     brandProduction,
     trustedEvaluationInstant,
     authorizationLifecycle,
@@ -1182,7 +1211,8 @@ function verifyIntent(
       (!brandProduction &&
         authorizationLifecycle?.reportRegistry === PRODUCTION_AUTHORIZED_REPORTS) ||
       (authorizationLifecycle !== undefined &&
-        trustedEvaluationInstant !== authorizationLifecycle.initialReading.wall)
+        trustedEvaluationInstant !== authorizationLifecycle.initialReading.wall) ||
+      typeof destinationResolver !== 'function'
     ) {
       return invalid();
     }
@@ -1232,7 +1262,11 @@ function verifyIntent(
     ) {
       return invalid();
     }
-    if (requireProductionDestination) requireIntegratedProductionDestination();
+    const resolvedDestination = resolveBoundDestination(
+      content,
+      destinationResolver,
+      requireProductionDestination,
+    );
     const registry = parsedRegistry(registryValue);
     const usedPublicKeys = new Set();
     for (const signature of parsed.signatures) {
@@ -1272,6 +1306,13 @@ function verifyIntent(
             authorizationLifecycle.readClock(),
             parsed.unsigned.expiresAt.milliseconds,
           );
+    const abortedProvisionAttempt =
+      content.operation === 'ABORT_PROVISION'
+        ? Object.freeze({
+            intentSha256: content.bindings.abortedProvisionIntentSha256,
+            reservationSha256: content.bindings.abortedProvisionReservationSha256,
+          })
+        : null;
     const report = deepFreeze({
       ok: true,
       signatureValidated: true,
@@ -1285,8 +1326,11 @@ function verifyIntent(
       operation: content.operation,
       sequence: content.sequence,
       intentSha256: parsed.unsigned.value.intentSha256,
+      destinationResolved: true,
+      destination: resolvedDestination,
       destinationBinding: content.destinationBinding,
       predecessor: content.predecessor,
+      abortedProvisionAttempt,
       authorityRegistrySha256: registry.registrySha256,
       validUntil: content.expiresAt,
       plan: Object.freeze({
@@ -1294,6 +1338,7 @@ function verifyIntent(
         operation: content.operation,
         sequence: content.sequence,
         committedHeadSha256: content.predecessor.committedHeadSha256,
+        abortedProvisionAttempt,
         durableCasAccepted: false,
         executionAllowed: false,
         durableCasAndLiveEvidenceRequired: true,
@@ -1314,6 +1359,8 @@ function failureReport(errors = ['Production deployment intent validation failed
     signatureValidated: false,
     productionAuthorityValidated: false,
     readyForAuthorizedPlan: false,
+    destinationResolved: false,
+    abortedProvisionAttempt: null,
     callerExpectedPredecessorMatched: false,
     durableCasRequired: true,
     durableCasAccepted: false,
@@ -1328,12 +1375,13 @@ function verifyIntentAtTrustedCurrentTime(
   value,
   options,
   registry,
-  { requireProductionDestination, brandProduction },
+  { requireProductionDestination, destinationResolver, brandProduction },
 ) {
   try {
     const initialReading = trustedClockReading();
     return verifyIntent(value, options, registry, {
       requireProductionDestination,
+      destinationResolver,
       brandProduction,
       trustedEvaluationInstant: initialReading.wall,
       authorizationLifecycle: brandProduction
@@ -1384,10 +1432,25 @@ function revalidateReportFromClock(value, registry, readClock) {
   return value;
 }
 
+function testDestinationResolver(registry) {
+  return (destinationId, destinationSha256) =>
+    resolveProductionDeploymentDestinationWithTestRegistry(
+      destinationId,
+      destinationSha256,
+      registry,
+    );
+}
+
 /** Test-only trust seam. A successful report is deliberately never production-branded. */
-export function verifyProductionDeploymentIntentWithTestRegistry(value, options, registry) {
+export function verifyProductionDeploymentIntentWithTestRegistry(
+  value,
+  options,
+  registry,
+  destinationRegistry,
+) {
   return verifyIntent(value, options, registry, {
     requireProductionDestination: false,
+    destinationResolver: testDestinationResolver(destinationRegistry),
     brandProduction: false,
   });
 }
@@ -1397,9 +1460,11 @@ export function verifyProductionDeploymentIntentAtTrustedClockWithTestRegistry(
   value,
   options,
   registry,
+  destinationRegistry,
 ) {
   return verifyIntentAtTrustedCurrentTime(value, options, registry, {
     requireProductionDestination: false,
+    destinationResolver: testDestinationResolver(destinationRegistry),
     brandProduction: false,
   });
 }
@@ -1413,6 +1478,7 @@ export function verifyProductionDeploymentIntentAuthorizationLifecycleForTest(
   value,
   options,
   registry,
+  destinationRegistry,
   clockReadings,
 ) {
   try {
@@ -1420,6 +1486,7 @@ export function verifyProductionDeploymentIntentAuthorizationLifecycleForTest(
     const initialReading = readClock();
     return verifyIntent(value, options, registry, {
       requireProductionDestination: false,
+      destinationResolver: testDestinationResolver(destinationRegistry),
       brandProduction: false,
       trustedEvaluationInstant: initialReading.wall,
       authorizationLifecycle: Object.freeze({
@@ -1441,6 +1508,7 @@ export function verifyProductionDeploymentIntentAgainstProductionDestinationWith
 ) {
   return verifyIntent(value, options, registry, {
     requireProductionDestination: true,
+    destinationResolver: resolveProductionDeploymentDestination,
     brandProduction: false,
   });
 }
@@ -1452,6 +1520,7 @@ export function verifyProductionDeploymentIntent(value, options) {
     PRODUCTION_DEPLOYMENT_INTENT_AUTHORITY_KEY_REGISTRY,
     {
       requireProductionDestination: true,
+      destinationResolver: resolveProductionDeploymentDestination,
       brandProduction: true,
     },
   );
@@ -1497,10 +1566,16 @@ function parsedCanonicalBytes(bytes) {
   return parsed;
 }
 
-export function verifyProductionDeploymentIntentBytesWithTestRegistry(bytes, options, registry) {
+export function verifyProductionDeploymentIntentBytesWithTestRegistry(
+  bytes,
+  options,
+  registry,
+  destinationRegistry,
+) {
   try {
     return verifyIntent(parsedCanonicalBytes(bytes), options, registry, {
       requireProductionDestination: false,
+      destinationResolver: testDestinationResolver(destinationRegistry),
       brandProduction: false,
     });
   } catch {
@@ -1514,7 +1589,11 @@ export function verifyProductionDeploymentIntentBytes(bytes, options) {
       parsedCanonicalBytes(bytes),
       options,
       PRODUCTION_DEPLOYMENT_INTENT_AUTHORITY_KEY_REGISTRY,
-      { requireProductionDestination: true, brandProduction: true },
+      {
+        requireProductionDestination: true,
+        destinationResolver: resolveProductionDeploymentDestination,
+        brandProduction: true,
+      },
     );
   } catch {
     return failureReport();
