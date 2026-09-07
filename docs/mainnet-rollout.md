@@ -89,6 +89,25 @@ transaction.
    and the deployment-target registry are empty today, so this gate cannot pass
    locally.
 
+## Dormant chain-anchor record-intent milestone
+
+Migration `0031` now wraps migration `0030`'s deadline-guarded evidence writer
+in a retained PostgreSQL intent lifecycle. Recorder V2 prepares the exact
+Ethereum/Solana evidence intent before claiming one record dispatch, stores only
+hashed token material, and never automatically resubmits an ambiguous record.
+A separate one-shot processor can lease one due unresolved intent and inspect
+the result only through `RECONCILE_ONLY`; it cannot dispatch `RECORD`. All 62
+focused cases in `production-go-live-preflight.test.ts` passed, and six focused
+cases passed against an isolated local PostgreSQL 16 instance.
+
+This closes a local evidence-recording implementation gap only. The recorder
+and reconciliation processor remain direct-import-only, unregistered,
+unscheduled, ungranted, and undeployed. They have no approved source pair,
+endpoint, credential, external transport, populated mainnet evidence, or
+financial-action authority, and physical commit acknowledgement can still be
+ambiguous across a broken connection. These local tests do not increment the
+live-provider count or clear any read-only or real-value launch gate.
+
 ## Additional gates before any real-value write
 
 - Select and approve an exact Ethereum or Solana provider, market/program,
@@ -125,5 +144,7 @@ request a transaction signature. No public Ethereum or Solana RPC/indexing
 request, transaction submission, broadcast, provider account, cloud
 deployment, or paid resource is created by the local implementation. The
 separate balance-sync queue definition has no activated consumer or chain
-egress and grants no live-read authority. The same is true of the deferred Base
-artifacts retained in the repository.
+egress and grants no live-read authority. Migration `0031`, recorder V2, and
+the dormant reconciliation processor add no database runtime grant or external
+egress. The same is true of the deferred Base artifacts retained in the
+repository.

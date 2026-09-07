@@ -2,11 +2,12 @@
 
 Status: dormant, unregistered, read-only, and non-persistable from the
 application graph. Migration `0029` defines dormant evidence persistence, and
-migration `0030` adds a dormant deadline-bound record/reconcile boundary, but no
-evidence writer is composed and neither the private reader nor dormant recorder
-is registered or runtime-reachable. The exact unregistered, ungranted recorder
-still calls `0029` directly and cannot commit once `0030`'s reverse foreign key
-is installed.
+migration `0030` adds a dormant deadline-bound record/reconcile boundary.
+Migration `0031` and recorder V2 now provide retained one-shot record intents,
+while a separate processor provides source-only reconciliation. No evidence
+writer or reconciliation schedule is composed, and none of the private reader,
+recorder, or processor is registered, granted runtime authority, or
+runtime-reachable.
 
 ## What the coordinator establishes
 
@@ -158,10 +159,34 @@ matching original deadline binding, `NOT_RECORDED` for absence, and
 binding; conflicting evidence raises and fails closed. No runtime principal
 receives a grant on the new table or functions.
 
+Migration `0031` refuses installation over existing evidence or deadline
+history. It adds a retained, wallet-free record-intent table whose identity
+binds the evidence fingerprint and original producer deadline. Its append-only
+and transition guards permit at most one record dispatch, retain only
+domain-separated SHA-256 dispatch and reconciliation lease-token digests, and
+reject invalid or regressing state. Deferred foreign keys and a deferred
+terminal trigger bind terminal evidence/deadline rows to the exact intent. A
+`SKIP LOCKED` lease selects only due `NEW`, `RECORD_DISPATCHED`, or `UNKNOWN`
+work. Rollback refuses any evidence, control, deadline, or intent history. The
+table and every new function are revoked from `PUBLIC`, API, worker, legacy,
+balance-consumer, and migration runtime roles.
+
+Recorder V2 prepares this durable intent before any record dispatch, generates
+one private nonzero 32-byte dispatch token, claims the one allowed dispatch,
+and executes migration `0030`'s guarded `RECORD` operation at most once. An
+ambiguous prepare, claim, execute, or mark response yields only an authenticated
+`RECONCILIATION_REQUIRED` result; the recorder never retries `RECORD`. The raw
+token is zeroed after use. The separate dormant one-shot processor generates
+and zeroes one private lease token, leases at most one due intent, and invokes
+only `RECONCILE_ONLY`. It cannot select an intent supplied by its caller,
+release a lease, or dispatch a record, and it has no timer or module
+registration.
+
 Production still needs reviewed live implementations for both members of each
 approved source pair, an owner-authorized recorder workload, principal,
-credential, and grant, populated evidence, production registration, and deployed
-proof. The local private wiring constructs
+credential, and grant, a reviewed reconciliation schedule and shutdown policy,
+logging/redaction controls, populated evidence, production registration, and
+deployed proof. The local private wiring constructs
 the PostgreSQL durable reader unconditionally from the same owned
 `PostgresService`, after the deadline runner and before the assembler and
 coordinator, and never exposes the reader or assembler through the facade or
@@ -196,17 +221,19 @@ live-provider count remains zero.
 The offline production preflight now byte-pins this coordinator, assembly port,
 durable-anchor reader port, concrete PostgreSQL durable reader, chain-anchor
 evidence source port, dormant two-source evidence producer, exact recorder port,
-concrete PostgreSQL recorder, dormant trusted-chain-assessment assembler, exact
-mainnet launch-network policy, concrete deadline runner, complete wallet-roster
-cancellation chain, shared PostgreSQL cancellation service, runtime-budget
-resource, private dormant composition, migrations `0029` and `0030`, and the
-migration index with a selected thirty-two-file
+concrete PostgreSQL recorder, record-intent reconciliation port, one-shot
+PostgreSQL reconciliation processor, dormant trusted-chain-assessment assembler,
+exact mainnet launch-network policy, concrete deadline runner, complete
+wallet-roster cancellation chain, shared PostgreSQL cancellation service,
+runtime-budget resource, private dormant composition, migrations `0029`,
+`0030`, and `0031`, and the migration index with a selected thirty-five-file
 reader/domain/infrastructure/database/module/barrel/controller critical-source
 slice.
 Its local check rejects trust, timing, source-method substitution, active-controller
 lifecycle, signal substitution, cancellation/drain/cleanup, query fallback,
 result-cardinality/row-validation weakening, recorder SQL/value order,
-pre/post-producer authentication, raw reader or trusted-assembly
+durable-intent/token/one-shot/reconciliation drift, pre/post-producer
+authentication, raw reader or trusted-assembly
 injection, private reader/assembler construction/argument bypass, facade
 exposure, zero-target anchor,
 authority, or feature-surface drift inside that slice, but deliberately reports the reader,
@@ -232,28 +259,35 @@ The concrete recorder captures the canonical producer reviewer and
 `queryWithCancellation` without construction-time I/O. It accepts exact frozen
 plain- or null-prototype recorder and producer requests carrying the same genuine
 signal. It authenticates the opaque producer capability before candidate
-inspection, checks abort, sends exactly one native promise-returning call with
-migration `0029`'s exact SQL, casts, and 23-value order, then rechecks abort and
-authenticates the same capability again. Only one exact three-column data row
-with a valid outcome, fingerprint, database record time, producer deadline, pair
-approval, and network-specific current/finalized freshness can issue a frozen
-null-prototype receipt bound to the original request in a private `WeakMap`.
-There is no ordinary-query fallback, automatic retry, provider transport,
-registration, feature export, runtime composition, database credential, or
-grant. The producer's 30-second limit remains tied to its private `evaluatedAt`;
-the recorder does not substitute an incorrect `deadlineAt - observedAt` bound.
+inspection and reconstructs the exact migration `0029` evidence payload, then
+uses migration `0031`'s exact prepare/claim/execute/mark statements with the same
+signal. The prepare persists the 23-value evidence payload and producer deadline
+before dispatch. One private nonzero 32-byte token can claim and execute only one
+guarded `RECORD`; PostgreSQL retains only its digest, and the recorder zeroes the
+raw token. Known terminal outcomes issue frozen null-prototype results bound to
+the original request in a private `WeakMap`. Ambiguity at any database phase
+returns a reviewable `RECONCILIATION_REQUIRED` result and never triggers an
+automatic second record attempt. There is no ordinary-query fallback, provider
+transport, registration, feature export, runtime composition, database
+credential, or grant. The producer's 30-second limit remains tied to its private
+`evaluatedAt`; the recorder does not substitute an incorrect
+`deadlineAt - observedAt` bound.
 
-The current recorder still invokes migration `0029`'s 23-argument record
-function. It does not call `0030`'s deadline-bound `RECORD`/`RECONCILE_ONLY`
-function and, because the reverse foreign key rejects an unbound insert, cannot
-commit after `0030` is applied. It also has no durable one-shot pre-dispatch
-intent or restart recovery. Migration `0030` atomically rolls back its evidence
-and sidecar when its database deadline checks fail, but it cannot guarantee that
-the caller receives physical commit acknowledgement. A rejected query or broken
-connection can therefore still leave an unknown outcome that must be resolved
-without dispatching `RECORD` again. A versioned `0031` recorder adaptation,
-durable intent state, reconciliation-only recovery, and restart processor remain
-production blockers.
+The reconciliation processor captures only `queryWithCancellation`, owns its
+private 32-byte lease token, and makes at most one lease query followed by one
+`RECONCILE_ONLY` query. It accepts no caller-selected intent or token and exposes
+only opaque `IDLE`, terminal, or `DEFERRED` status after exact request-identity
+review. It cannot invoke `RECORD`, release the lease, contact a provider, or
+register or schedule itself. A rejected query or broken connection can still
+hide physical commit acknowledgement, but the durable intent remains available
+for source-only recovery without a second dispatch.
+
+All 62 focused cases in `production-go-live-preflight.test.ts` passed for this
+exact 35-artifact slice. Six focused integration cases also passed against an
+isolated local PostgreSQL 16 instance, including the cumulative verifier,
+Ethereum/Solana intent preparation, one-shot/idempotent execution,
+expired-`NEW` reconciliation, token rejection, and deferred-constraint
+rollback. This is local database evidence, not deployed or mainnet evidence.
 
 Agreement on the two sources' finalized heads does not prove that the selected
 candidate anchor itself is finalized. Migration `0029` and this producer keep
@@ -263,10 +297,10 @@ candidate-finalization gate is required before any ledger mutation or financial
 authority may consume it.
 
 The checked-in mainnet source-pair registry remains empty and `NOT_APPROVED`.
-No concrete source, endpoint, owner-authorized recorder
+No concrete source, endpoint, owner-authorized recorder or reconciliation
 workload/principal/credential/grant, module provider, barrel export, composition
-dependency, deployment, or runtime activation is added, so all three registration
-blockers remain `PROVIDER_POSITION_READER_FEATURE_REGISTRATION_MISSING`,
+dependency, schedule, deployment, or runtime activation is added, so all three
+registration blockers remain `PROVIDER_POSITION_READER_FEATURE_REGISTRATION_MISSING`,
 `PROVIDER_POSITION_TRUSTED_ASSESSMENT_FEATURE_REGISTRATION_MISSING`, and
 `PROVIDER_POSITION_DEADLINE_RUNNER_FEATURE_REGISTRATION_MISSING`, and the
 live-provider count remains zero.
@@ -280,9 +314,10 @@ That production change must also provide:
 - durable continuity floors rather than accepting an upstream service's unsupported history claim;
 - disagreement quarantine and operator alerting;
 - retention/replay rules for source observation IDs;
-- a `0031`-compatible recorder with durable one-shot intent, reconciliation-only
-  unknown-outcome and restart recovery, and reviewed physical
-  commit-acknowledgement handling; and
+- reviewed ownership, scheduling, bounded retries, shutdown, logging/redaction,
+  and deployed restart-recovery evidence for the dormant recorder and
+  reconciliation processor, plus explicit physical commit-acknowledgement
+  handling; and
 - explicit persistence and display approval after live conformance tests.
 
 Until those gates are satisfied, the coordinator and its candidate must remain unregistered and must not be used to imply an available balance, recommendation, or permission to move funds.

@@ -183,18 +183,19 @@ into deployed or production-ready evidence.
 `PROVIDER_POSITION_READ_BOUNDARY` independently snapshots and byte-pins the
 coverage-aware reader v3 port, trusted-assessment assembly port,
 durable-chain-anchor reader port, concrete PostgreSQL durable-anchor reader,
-dormant chain-anchor evidence source port and two-source producer, exact recorder
-port and concrete PostgreSQL recorder, dormant trusted-chain-assessment assembler,
+dormant chain-anchor evidence source port and two-source producer, recorder V2
+port and concrete PostgreSQL recorder, record-intent reconciliation port and
+one-shot PostgreSQL reconciliation processor, dormant trusted-chain-assessment assembler,
 admission coordinator, concrete Node deadline runner, wallet-roster reader port
 and adapter, wallet service and repository port, PostgreSQL wallet repository,
 shared PostgreSQL cancellation service, dormant runtime-budget resource,
 private dormant runtime composition, infrastructure configuration loader,
 runtime PostgreSQL pool factory, coverage/observation/assessment/policy domains,
 exact Ethereum/Solana mainnet launch-network policy, migration `0029`, the
-deadline-bound migration `0030`, the migration index, feature module, feature
-barrel, and HTTP controller as one selected thirty-two-file critical-source
-slice. Within that
-slice, the local semantic inspection requires an exact account/correlation
+deadline-bound migration `0030`, record-intent migration `0031`, the migration
+index, feature module, feature barrel, and HTTP controller as one selected
+thirty-five-file critical-source slice. Within that slice, the local semantic
+inspection requires an exact account/correlation
 reader request with no caller-supplied evaluation time and an exact frozen
 result envelope containing the server-authored parser time and covered-snapshot
 identity. It binds result account, correlation, time, manifest fingerprints and
@@ -269,29 +270,27 @@ candidate containing migration `0029`'s exact 23 record arguments. A private
 `WeakMap` binds that candidate to the exact producer request; copies and request
 clones fail review.
 
-The recorder port exposes only opaque record and receipt-review capabilities.
+The recorder V2 port exposes only opaque record and result-review capabilities.
 The concrete dormant PostgreSQL recorder accepts exact frozen plain- or
 null-prototype outer and nested producer requests with one genuine, unchanged
-abort signal. At construction it descriptor-captures migration `0029`'s exact
-`queryWithCancellation` method and the canonical `reviewCandidate` method from a
-genuine producer instance; it performs no I/O. Before the database call it
-authenticates the producer capability against the exact producer request, checks
-the signal, strictly reconstructs the opaque candidate, and sends exactly one
-native promise-returning query with the migration function's exact SQL, casts,
-23-value order, and same signal. After the query settles it rechecks abort and
-authenticates the producer capability again before accepting exactly one native
-array row with the exact three enumerable data columns. Outcome, fingerprint,
-record time, producer deadline, pair approval, and Ethereum/Solana current-head
-and finalized-head freshness all fail closed. The issued receipt is frozen,
-null-prototype, non-authorizing, and privately bound to the exact recorder request
-in a `WeakMap`; all failures use one frozen, cause-free error. There is no generic
-query fallback, retry loop, network/provider capability, registration, feature
-export, runtime composition, credential, or database grant.
+abort signal. At construction it descriptor-captures only
+`queryWithCancellation` and the canonical `reviewCandidate` method from a
+genuine producer instance; it performs no I/O. It authenticates and reconstructs
+the exact 23-value candidate, appends the producer deadline, and prepares
+migration `0031`'s durable intent before any record dispatch. For a new intent it
+generates one nonzero 32-byte dispatch token, claims that token, and calls the
+intent executor at most once. The executor invokes migration `0030`'s guarded
+`RECORD` path. The raw token is never retained by PostgreSQL and is zeroed by the
+recorder after use.
 
-This recorder still sends migration `0029`'s 23-argument call. It does not use
-migration `0030`'s deadline-bound `RECORD`/`RECONCILE_ONLY` function and cannot
-commit after `0030` installs the reverse evidence-to-deadline foreign key. That
-is an intentional fail-closed incompatibility, not a production recorder path.
+Known terminal outcomes become frozen, null-prototype, non-authorizing results
+privately bound to the exact request in a `WeakMap`. A failed or ambiguous
+prepare, claim, execute, or mark response becomes an authenticated
+`RECONCILIATION_REQUIRED` result; the recorder never automatically retries
+`RECORD`. Exact signal, intent/evidence/deadline identity, row shape, producer
+review, approval, and Ethereum/Solana freshness drift fail closed. There is no
+generic query fallback, loop, network/provider capability, registration,
+feature export, runtime composition, credential, or database grant.
 
 The recorder deliberately does not claim that `deadlineAt - observedAt` is at
 most 30 seconds. That bound belongs to the producer's private `evaluatedAt`, which
@@ -308,9 +307,9 @@ The checked-in mainnet source-pair registry is exactly empty and
 `NOT_APPROVED`, and no concrete source binding is checked in. The producer has
 no database writer, transport, endpoint, credential, environment lookup,
 provider SDK, Nest decorator, module registration, barrel export, or runtime
-composition. The separate recorder is likewise unregistered and ungranted, so
-these dormant artifacts cannot populate migration `0029`, contact a chain, or
-change any production blocker.
+composition. The recorder and reconciliation processor are likewise
+unregistered and ungranted, so these dormant artifacts cannot populate
+migration `0029` or `0031`, contact a chain, or change any production blocker.
 
 Migration `0029` adds a dormant, append-only PostgreSQL boundary for global
 Ethereum and Solana chain-anchor evidence plus append-only `INVALIDATED` and
@@ -350,13 +349,34 @@ matching original deadline binding, `NOT_RECORDED` for absence, and
 binding; conflicting evidence raises and fails closed. Migration `0030` adds no
 runtime grants, registration, deployment, or live evidence.
 
+Migration `0031` refuses installation when migration `0029` evidence or
+migration `0030` deadline history already exists. It adds a retained,
+wallet-free intent table whose canonical identity binds the evidence
+fingerprint and producer deadline. Append-only and transition guards allow at
+most one record dispatch, store only domain-separated SHA-256 dispatch and
+reconciliation lease-token digests, and reject invalid or regressing lifecycle
+state. Deferred foreign keys and a deferred terminal trigger bind terminal
+evidence/deadline rows back to the exact durable intent. A due-intent lease uses
+`SKIP LOCKED` and supports only bounded `NEW`, `RECORD_DISPATCHED`, and `UNKNOWN`
+recovery. Migration down refuses any evidence, control, deadline, or intent
+history.
+
+The separate dormant reconciliation port gives callers no intent-selection,
+token, storage, or financial authority. Its PostgreSQL processor creates one
+private nonzero 32-byte lease token, leases at most one due unresolved intent,
+and performs at most one `RECONCILE_ONLY` statement. It never calls `RECORD`,
+does not expose or release the lease, returns an opaque authenticated
+`IDLE`/terminal/`DEFERRED` result, and zeroes the raw token after use. It is a
+direct-import-only source artifact with no timer, decorator, module, barrel,
+controller, environment, endpoint, credential, or network capability.
+
 Physical commit acknowledgement is still not guaranteed: a rejected query or
-interrupted connection can leave the caller uncertain whether the transaction
-committed. The current recorder neither calls the `0030` function nor stores a
-durable one-shot intent before its first dispatch, and it cannot recover a
-dispatched operation after restart. A versioned migration `0031` recorder
-adaptation with durable intent, reconciliation-only recovery, and restart
-processing remains an activation blocker.
+interrupted connection can leave the original caller uncertain whether the
+transaction committed. Migration `0031`, recorder V2, and the one-shot
+processor close the local durable pre-dispatch intent and source-only recovery
+implementation gap; they do not close workload scheduling, shutdown,
+logging/redaction, database-principal/grant, deployment, or live recovery
+evidence.
 
 The private dormant composition accepts no raw trust dependency. It constructs
 the concrete PostgreSQL reader from its owned `PostgresService`, constructs the
@@ -381,8 +401,8 @@ validation, started-operation settlement, and timer and abort-listener cleanup
 while rejecting network, environment, dynamic-import, and decorator
 capabilities. It also confirms that the pinned feature module, barrel, and HTTP
 controller do not register or expose the coordinator, PostgreSQL durable reader,
-PostgreSQL recorder, trusted assembly, deadline runner, runtime-budget resource,
-or runtime composition.
+PostgreSQL recorder, record-intent reconciliation processor, trusted assembly,
+deadline runner, runtime-budget resource, or runtime composition.
 
 The current exact source passes local inspection. The dormant runtime-budget
 resource constructs a lazy pool from its owned reviewed API configuration and
@@ -414,8 +434,9 @@ Launch readiness remains blocked by
 assembler, PostgreSQL reader, and migration do not clear any registration
 blocker: the dormant producer is not composed, its checked-in production
 registry approves no pair, no live evidence-source implementation exists, and
-the concrete recorder has no owner-authorized workload, principal, credential,
-grant, composition, deployment, or populated evidence claim. The private
+the concrete recorder and reconciliation processor have no owner-authorized
+workload, principal, credential, grant, composition, schedule, deployment, or
+populated evidence claim. The private
 composition wiring is not registered in the
 Nest/module/HTTP graph, no runtime is activated, and no deployment or live
 evidence exists. The live-provider count therefore remains zero. The concrete
@@ -813,6 +834,15 @@ npm run lint:production:preflight
 npm run typecheck:production:preflight
 npm run test:production:preflight
 ```
+
+For the durable record-intent milestone, all 62 focused cases in
+`production-go-live-preflight.test.ts` passed. The migration was also exercised
+in a disposable local PostgreSQL 16 instance: all six focused integration cases
+passed, covering clean up/down/up migration verification, Ethereum and Solana
+preparation, one-shot claim and idempotent replay, expired-`NEW` reconciliation,
+invalid dispatch-token rejection, and deferred-constraint rollback of a direct
+late record. This is local database evidence only; it is not production
+PostgreSQL, provider, mainnet, deployment, or external-service evidence.
 
 These checks are also part of the root `lint`, `typecheck`, and `test` scripts
 used by CI.

@@ -65,6 +65,12 @@ gateway endpoints for platform operations, and some of those endpoints have
 hourly and data-processing charges. No endpoint or other resource is created by
 this ADR or by local policy validation.
 
+The dormant PostgreSQL provider-position record-intent boundary does not change
+this decision. Migration `0031`, recorder V2, and its one-shot reconciliation
+processor have no endpoint, credential, transport, runtime registration,
+database grant, or deployment. Their focused source and local PostgreSQL 16
+tests authorize no Ethereum/Solana request and do not satisfy KAN-62 or KAN-231.
+
 No application service may work around the interim state with a public IP,
 unreviewed NAT path, direct IP address, wildcard hostname, alternate port,
 redirect, DNS-over-HTTPS endpoint, embedded proxy, public fallback URL, or
