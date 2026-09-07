@@ -175,10 +175,54 @@ export const ADDITIONAL_DORMANT_PROVIDER_ARTIFACTS = Object.freeze([
     path: 'apps/api/src/mainnet-platforms/infrastructure/dormant-kamino-provider-position-admission.source.ts',
     sha256: 'eacdafa7fcd5fa5574183d0f0e2beb6a02c270cd8ecd71be6b7a120ca60355a6',
     className: 'DormantKaminoProviderPositionAdmissionSource',
-    dependencyStem: 'kamino-lend-solana-finalized-transcript.adapter',
+    dependencyStems: Object.freeze(['kamino-lend-solana-finalized-transcript.adapter']),
     capabilityMarkers: Object.freeze([
       'mayAuthorizeFinancialAction: false',
       'mayPersist: false',
+      'maySign: false',
+      'mayAccessWalletPrivateKey: false',
+    ]),
+  }),
+  Object.freeze({
+    id: 'morpho-provider-position-source',
+    providerId: 'morpho',
+    path: 'apps/api/src/mainnet-platforms/infrastructure/dormant-morpho-blue-ethereum-provider-position.source.ts',
+    specPath:
+      'apps/api/src/mainnet-platforms/infrastructure/dormant-morpho-blue-ethereum-provider-position.source.spec.ts',
+    sha256: '54f62b9eb29b806109431c62e5a489c2c3bb5df01c0afc5fe1586377e4afecec',
+    specSha256: 'cb5b83ecf4e6803dba79aee4acfa88b25563cf3220f0fe4c2b642bcb3b75e782',
+    className: 'DormantMorphoBlueEthereumProviderPositionSource',
+    dependencyStems: Object.freeze([
+      'morpho-blue-ethereum-finalized-transcript.adapter',
+      'morpho-blue-account-position.semantics',
+    ]),
+    minimumTests: 15,
+    capabilityMarkers: Object.freeze([
+      'mayAuthorizeFinancialAction: false',
+      'mayPersist: false',
+      'mayCreatePositionSnapshot: false',
+      'maySign: false',
+      'mayAccessWalletPrivateKey: false',
+    ]),
+  }),
+  Object.freeze({
+    id: 'euler-provider-position-source',
+    providerId: 'euler',
+    path: 'apps/api/src/mainnet-platforms/infrastructure/dormant-euler-v2-ethereum-provider-position.source.ts',
+    specPath:
+      'apps/api/src/mainnet-platforms/infrastructure/dormant-euler-v2-ethereum-provider-position.source.spec.ts',
+    sha256: '538d3d33eff4d9cabc6af2f1da9d768fcff80f4301f801eaadc3e565f7924506',
+    specSha256: '08dbd9046333d67e336dab7f1fdca43bbaaeb5854205543bf1a5ad3a9d1e8be7',
+    className: 'DormantEulerV2EthereumProviderPositionSource',
+    dependencyStems: Object.freeze([
+      'euler-v2-ethereum-finalized-transcript.adapter',
+      'euler-v2-account-position.semantics',
+    ]),
+    minimumTests: 8,
+    capabilityMarkers: Object.freeze([
+      'mayAuthorizeFinancialAction: false',
+      'mayPersist: false',
+      'mayCreatePositionSnapshot: false',
       'maySign: false',
       'mayAccessWalletPrivateKey: false',
     ]),
@@ -264,6 +308,22 @@ const REVIEWED_SEMANTICS_IMPORTS = Object.freeze([
 ]);
 const PROHIBITED_SEMANTICS_RUNTIME =
   /(?:\bprocess(?:\.|\[)|\b(?:fetch|WebSocket|XMLHttpRequest|eval|Function)\s*\()/u;
+const PROHIBITED_PROVIDER_POSITION_SOURCE =
+  /(?:\bprocess(?:\.|\[)|\b(?:fetch|WebSocket|XMLHttpRequest|eval|Function)\s*\(|\b(?:require|import)\s*\(|\b(?:send(?:Raw)?|sign|broadcast)Transaction\b|\bhttps?:\/\/|\bDATABASE_URL\b|@(Injectable|Module|Controller)\s*\()/u;
+const PROHIBITED_PROVIDER_POSITION_IMPORT =
+  /^(?:node:(?:http|https|net|tls|dns|dgram|child_process|fs(?:\/promises)?)|@nestjs\/|pg$|ioredis$|undici$)/u;
+const PREEXISTING_DORMANT_PROVIDER_POSITION_SOURCE_PATHS = new Set([
+  'apps/api/src/mainnet-platforms/infrastructure/dormant-aave-v3-ethereum-provider-position.source.ts',
+  'apps/api/src/mainnet-platforms/infrastructure/dormant-compound-iii-ethereum-provider-position.source.ts',
+  'apps/api/src/mainnet-platforms/infrastructure/dormant-sparklend-ethereum-provider-position.source.ts',
+]);
+const PINNED_DORMANT_PROVIDER_POSITION_SOURCE_PATHS = new Set(
+  ADDITIONAL_DORMANT_PROVIDER_ARTIFACTS.filter(({ path }) =>
+    path.endsWith('-provider-position.source.ts'),
+  ).map(({ path }) => path),
+);
+const DORMANT_PROVIDER_POSITION_SOURCE_REFERENCE =
+  /(?:[A-Za-z0-9._/-]+-provider-position\.source|Dormant[A-Za-z0-9]+ProviderPositionSource)/u;
 const REVIEWED_RUNTIME_DYNAMIC_IMPORTS = new Map([
   ['apps/api/src/application-root.ts', Object.freeze(['./local-development-app.module'])],
   [
@@ -352,8 +412,11 @@ export function validateDormantProviderInventorySnapshot(snapshot) {
   if (new Set(DORMANT_PROVIDER_INVENTORY.map(({ id }) => id)).size !== 10) {
     errors.push('validator inventory contains a duplicate provider id');
   }
-  if (ADDITIONAL_DORMANT_PROVIDER_ARTIFACTS.length !== 1) {
-    errors.push('validator must contain exactly one additional dormant artifact');
+  if (
+    ADDITIONAL_DORMANT_PROVIDER_ARTIFACTS.length !== 3 ||
+    new Set(ADDITIONAL_DORMANT_PROVIDER_ARTIFACTS.map(({ id }) => id)).size !== 3
+  ) {
+    errors.push('validator must contain exactly three distinct additional dormant artifacts');
   }
   if (
     DORMANT_ACCOUNT_POSITION_SEMANTICS.length !== 5 ||
@@ -448,26 +511,40 @@ export function validateDormantProviderInventorySnapshot(snapshot) {
 
   for (const artifact of ADDITIONAL_DORMANT_PROVIDER_ARTIFACTS) {
     exactArtifactPaths.add(artifact.path);
+    if (artifact.specPath) exactArtifactPaths.add(artifact.specPath);
     const provider = DORMANT_PROVIDER_INVENTORY.find(({ id }) => id === artifact.providerId);
     if (
       provider === undefined ||
-      adapterImportStem(provider.adapterPath) !== artifact.dependencyStem
+      !artifact.dependencyStems.includes(adapterImportStem(provider.adapterPath))
     ) {
       errors.push(`${artifact.id} reviewed dormant dependency identity drifted`);
     }
     const source = snapshot.artifacts.get(artifact.path);
+    const spec = artifact.specPath ? snapshot.artifacts.get(artifact.specPath) : undefined;
     if (typeof source !== 'string') {
       errors.push(`${artifact.id} artifact is missing`);
       continue;
     }
+    if (artifact.specPath && typeof spec !== 'string') {
+      errors.push(`${artifact.id} spec artifact is missing`);
+    }
     if (createHash('sha256').update(source, 'utf8').digest('hex') !== artifact.sha256) {
       errors.push(`${artifact.id} artifact bytes drifted`);
+    }
+    if (
+      artifact.specPath &&
+      typeof spec === 'string' &&
+      createHash('sha256').update(spec, 'utf8').digest('hex') !== artifact.specSha256
+    ) {
+      errors.push(`${artifact.id} spec bytes drifted`);
     }
     if (!source.includes(`export class ${artifact.className}`)) {
       errors.push(`${artifact.id} class identity drifted`);
     }
-    if (!source.includes(artifact.dependencyStem)) {
-      errors.push(`${artifact.id} reviewed dormant dependency is missing`);
+    for (const dependencyStem of artifact.dependencyStems) {
+      if (!source.includes(dependencyStem)) {
+        errors.push(`${artifact.id} reviewed dormant dependency is missing: ${dependencyStem}`);
+      }
     }
     if (/@(Injectable|Module|Controller)\s*\(/u.test(source)) {
       errors.push(`${artifact.id} contains a runtime registration decorator`);
@@ -479,6 +556,24 @@ export function validateDormantProviderInventorySnapshot(snapshot) {
       if (!source.includes(marker)) {
         errors.push(`${artifact.id} is missing closed capability marker: ${marker}`);
       }
+    }
+    if (
+      PROHIBITED_PROVIDER_POSITION_SOURCE.test(source) ||
+      importedModules(source).some((dependency) =>
+        PROHIBITED_PROVIDER_POSITION_IMPORT.test(dependency),
+      )
+    ) {
+      errors.push(
+        `${artifact.id} contains transport, persistence, dynamic code, or runtime authority`,
+      );
+    }
+    if (
+      artifact.specPath &&
+      typeof spec === 'string' &&
+      (!spec.includes(`./${adapterImportStem(artifact.path)}`) ||
+        countTests(spec) < artifact.minimumTests)
+    ) {
+      errors.push(`${artifact.id} spec is detached or lacks hostile-path depth`);
     }
   }
 
@@ -552,6 +647,20 @@ export function validateDormantProviderInventorySnapshot(snapshot) {
     if (typeof path !== 'string' || typeof source !== 'string') {
       errors.push('runtime source inventory is malformed');
       continue;
+    }
+    const normalizedRuntimePath = normalizedPath(path);
+    if (PINNED_DORMANT_PROVIDER_POSITION_SOURCE_PATHS.has(normalizedRuntimePath)) {
+      errors.push(`reviewed dormant provider-position source was included as runtime: ${path}`);
+    } else if (
+      normalizedRuntimePath.endsWith('-provider-position.source.ts') &&
+      !PREEXISTING_DORMANT_PROVIDER_POSITION_SOURCE_PATHS.has(normalizedRuntimePath)
+    ) {
+      errors.push(`unreviewed provider-position source artifact: ${path}`);
+    } else if (
+      !PREEXISTING_DORMANT_PROVIDER_POSITION_SOURCE_PATHS.has(normalizedRuntimePath) &&
+      DORMANT_PROVIDER_POSITION_SOURCE_REFERENCE.test(source)
+    ) {
+      errors.push(`dormant provider-position source is referenced by runtime source ${path}`);
     }
     if (hasUnreviewedDynamicLoading(path, source)) {
       errors.push(`runtime source contains unreviewed dynamic loading: ${path}`);
@@ -680,15 +789,17 @@ function loadDormantProviderInventorySnapshotInternal(repositoryRoot, afterFirst
   }
 
   for (const artifact of ADDITIONAL_DORMANT_PROVIDER_ARTIFACTS) {
-    artifacts.set(
-      artifact.path,
-      repositoryFile(
-        repositoryRoot,
-        artifact.path,
-        MAX_DORMANT_PROVIDER_ARTIFACT_BYTES,
-        afterFirstReadForTest,
-      ),
-    );
+    for (const path of [artifact.path, artifact.specPath].filter(Boolean)) {
+      artifacts.set(
+        path,
+        repositoryFile(
+          repositoryRoot,
+          path,
+          MAX_DORMANT_PROVIDER_ARTIFACT_BYTES,
+          afterFirstReadForTest,
+        ),
+      );
+    }
   }
 
   for (const semantics of DORMANT_ACCOUNT_POSITION_SEMANTICS) {
@@ -773,7 +884,7 @@ if (import.meta.url === invokedPath) {
   const errors = validateDormantProviderInventoryFiles();
   if (errors.length === 0) {
     console.log(
-      'Dormant provider inventory is valid: 10 planned, 5 semantics foundations, 0 enabled',
+      'Dormant provider inventory is valid: 10 planned, 5 semantics foundations, 2 byte-pinned position sources, 0 enabled',
     );
   } else {
     for (const error of errors) console.error(`- ${error}`);

@@ -113,7 +113,11 @@ test('the exact ten planning entries have dormant adapter, hostile spec, and res
   );
   assert.deepEqual(
     ADDITIONAL_DORMANT_PROVIDER_ARTIFACTS.map(({ id }) => id),
-    ['kamino-provider-position-source'],
+    [
+      'kamino-provider-position-source',
+      'morpho-provider-position-source',
+      'euler-provider-position-source',
+    ],
   );
   assert.deepEqual(
     DORMANT_ACCOUNT_POSITION_SEMANTICS.map(({ providerId }) => providerId),
@@ -331,6 +335,114 @@ test('the additional Kamino source is byte-pinned, authority-free, and unregiste
   mutations.forEach((mutate, index) =>
     assertMutationRejected(`additional Kamino artifact mutation ${index}`, mutate),
   );
+});
+
+test('the Morpho and Euler provider-position source/spec pairs are exact and authority-free', () => {
+  const artifacts = ADDITIONAL_DORMANT_PROVIDER_ARTIFACTS.filter(({ specPath }) => specPath);
+  assert.deepEqual(
+    artifacts.map(({ providerId }) => providerId),
+    ['morpho', 'euler'],
+  );
+
+  for (const artifact of artifacts) {
+    assert.match(artifact.sha256, /^[0-9a-f]{64}$/u);
+    assert.match(artifact.specSha256, /^[0-9a-f]{64}$/u);
+    assert.ok(artifact.specPath);
+
+    assertMutationRejected(`${artifact.id} missing source`, (value) => {
+      value.artifacts.delete(artifact.path);
+    });
+    assertMutationRejected(`${artifact.id} missing spec`, (value) => {
+      value.artifacts.delete(artifact.specPath);
+    });
+    assertMutationRejected(`${artifact.id} source byte drift`, (value) => {
+      value.artifacts.set(artifact.path, `${value.artifacts.get(artifact.path)}\n// drift`);
+    });
+    assertMutationRejected(`${artifact.id} spec byte drift`, (value) => {
+      value.artifacts.set(artifact.specPath, `${value.artifacts.get(artifact.specPath)}\n// drift`);
+    });
+    assertMutationRejected(`${artifact.id} detached spec`, (value) => {
+      value.artifacts.set(
+        artifact.specPath,
+        value.artifacts
+          .get(artifact.specPath)
+          .replace(`./${artifact.path.slice(artifact.path.lastIndexOf('/') + 1, -3)}`, './other'),
+      );
+    });
+    for (const marker of artifact.capabilityMarkers) {
+      assertMutationRejected(`${artifact.id} authority flip: ${marker}`, (value) => {
+        value.artifacts.set(
+          artifact.path,
+          value.artifacts.get(artifact.path).replace(marker, marker.replace(': false', ': true')),
+        );
+      });
+    }
+    assertMutationRejected(`${artifact.id} transport import`, (value) => {
+      value.artifacts.set(
+        artifact.path,
+        `import { request } from 'node:https';\n${value.artifacts.get(artifact.path)}`,
+      );
+    });
+    assertMutationRejected(`${artifact.id} direct network call`, (value) => {
+      value.artifacts.set(
+        artifact.path,
+        `${value.artifacts.get(artifact.path)}\nfetch('https://rpc.invalid');`,
+      );
+    });
+    assertMutationRejected(`${artifact.id} runtime class reference`, (value) => {
+      value.runtimeSources.set(
+        `apps/api/src/unsafe-${artifact.providerId}.module.ts`,
+        `providers: [${artifact.className}]`,
+      );
+    });
+    assertMutationRejected(`${artifact.id} runtime path reference`, (value) => {
+      value.runtimeSources.set(
+        `apps/api/src/unsafe-${artifact.providerId}.module.ts`,
+        `import './${artifact.path.slice(artifact.path.lastIndexOf('/') + 1, -3)}';`,
+      );
+    });
+    assertMutationRejected(`${artifact.id} included in runtime inventory`, (value) => {
+      value.runtimeSources.set(artifact.path, value.artifacts.get(artifact.path));
+    });
+  }
+});
+
+test('unreviewed provider-position source artifacts fail closed', () => {
+  const path =
+    'apps/api/src/mainnet-platforms/infrastructure/dormant-unreviewed-provider-position.source.ts';
+  assertMutationRejected('unreviewed provider-position source snapshot', (value) => {
+    value.runtimeSources.set(path, 'export class DormantUnreviewedProviderPositionSource {}');
+  });
+  assertMutationRejected('unreviewed provider-position source runtime reference', (value) => {
+    value.runtimeSources.set(
+      'apps/api/src/unsafe-provider-position-consumer.ts',
+      "export * from './mainnet-platforms/infrastructure/dormant-unreviewed-provider-position.source';",
+    );
+  });
+
+  withTemporaryRepository((repositoryRoot) => {
+    writeFixtureFile(
+      repositoryRoot,
+      path,
+      'export class DormantUnreviewedProviderPositionSource {}',
+    );
+    assert.deepEqual(validateDormantProviderInventoryFiles(repositoryRoot), [
+      `unreviewed provider-position source artifact: ${path}`,
+    ]);
+  });
+});
+
+test('repository loading requires both pinned provider-position sources and specs', () => {
+  const [artifact] = ADDITIONAL_DORMANT_PROVIDER_ARTIFACTS.filter(({ specPath }) => specPath);
+  assert.ok(artifact);
+
+  for (const target of [artifact.path, artifact.specPath]) {
+    withTemporaryRepository((repositoryRoot) => {
+      const absolutePath = fixturePath(repositoryRoot, target);
+      rmSync(absolutePath);
+      assertInputRejected(repositoryRoot, absolutePath);
+    });
+  }
 });
 
 test('the five account-position semantics foundations are authority-free and unregistered', () => {
