@@ -256,6 +256,7 @@ export interface ProviderPositionReadBoundaryArtifactSources {
   readonly providerPositionChainAnchorCandidateFinalityPortSource: string;
   readonly providerPositionChainAnchorCandidateFinalityFinalizerSource: string;
   readonly providerPositionAaveV3EthereumSource: string;
+  readonly providerPositionKaminoSource: string;
   readonly providerPositionChainAnchorEvidenceRecorderPortSource: string;
   readonly providerPositionPostgresChainAnchorEvidenceRecorderSource: string;
   readonly providerPositionPostgresDurableChainAnchorReaderSource: string;
@@ -603,6 +604,7 @@ const PROVIDER_POSITION_READ_ARTIFACT_KEYS = Object.freeze([
   'providerPositionChainAnchorCandidateFinalityPortSource',
   'providerPositionChainAnchorCandidateFinalityFinalizerSource',
   'providerPositionAaveV3EthereumSource',
+  'providerPositionKaminoSource',
   'providerPositionChainAnchorEvidenceRecorderPortSource',
   'providerPositionPostgresChainAnchorEvidenceRecorderSource',
   'providerPositionPostgresDurableChainAnchorReaderSource',
@@ -652,6 +654,7 @@ const REVIEWED_PROVIDER_POSITION_READ_ARTIFACT_SHA256 = Object.freeze({
     '581c7c17dac3ca3a09a29ac9757efda55b02cb17ea882fc6788aa3d6cf6c33d8',
   providerPositionAaveV3EthereumSource:
     '7bb670f1435d2a5dbd6ad707a3cfcef80b4ef3452433653a7f49a045440eaba5',
+  providerPositionKaminoSource: 'eacdafa7fcd5fa5574183d0f0e2beb6a02c270cd8ecd71be6b7a120ca60355a6',
   providerPositionChainAnchorEvidenceRecorderPortSource:
     'bd4e1a22eb2fe02540f11a2f5b28ba5eed6e71a726fe5a0027291a062f95951c',
   providerPositionPostgresChainAnchorEvidenceRecorderSource:
@@ -4991,6 +4994,353 @@ function hasDormantAaveV3EthereumProviderPositionSourceContract(
   );
 }
 
+function hasDormantKaminoProviderPositionSourceContract(
+  sourceInput: string,
+  runtimeCompositionSource: string,
+  infrastructureConfigSource: string,
+  networkPolicySource: string,
+  moduleSource: string,
+  indexSource: string,
+  controllerSource: string,
+): boolean {
+  const source = sourceInput.replace(/\r\n/gu, '\n');
+  const importSources = Array.from(
+    source.matchAll(/\bfrom\s+['"]([^'"]+)['"]/gu),
+    (match) => match[1],
+  );
+  const importDeclarationCount = source.match(/^[\t ]*import\b/gmu)?.length ?? 0;
+  const forbiddenCapability =
+    /(?:\bimport\s*\(|\brequire\s*\(|(?:\bfrom\s+|\bimport\s*(?:\(\s*)?)['"](?:node:)?(?:child_process|cluster|dgram|dns|fs|http|http2|https|net|tls|worker_threads)(?:\/[^'"]*)?['"]|(?:\bfrom\s+|\bimport\s*(?:\(\s*)?)['"](?:axios|ethers|got|pg|superagent|undici|web3|@solana\/web3\.js)['"]|\b(?:fetch|setTimeout|setInterval|setImmediate|queueMicrotask|WebSocket|EventSource|XMLHttpRequest|readFileSync|writeFileSync)\s*\(|\.\s*(?:query|connect|end|execute|transaction|persist|save|write)\s*\(|\b(?:process|Deno|Bun)\s*\.\s*env\b|\bimport\s*\.\s*meta\s*\.\s*env\b|['"]https?:\/\/|(?:^|\n)[\t ]*@[A-Za-z_$]|\b(?:NestFactory|PostgresService|DataSource|EntityManager|Repository|loadInfrastructureConfig|createPostgresPool)\b|\bPromise\s*\.\s*(?:all|allSettled|any|race)\s*\()/iu;
+  const forbiddenFeatureSurface =
+    /(?:DormantKaminoProviderPositionAdmissionSource|DormantKaminoPositionTargetContextReader|DormantKaminoFinalizedAccountTranscriptTransport|DORMANT_KAMINO_POSITION_(?:TARGET_CONTEXT|TRANSCRIPT)|dormant-kamino-provider-position-admission\.source)/u;
+  const runtimeSurfaces = [
+    runtimeCompositionSource,
+    infrastructureConfigSource,
+    networkPolicySource,
+    moduleSource,
+    indexSource,
+    controllerSource,
+  ] as const;
+
+  const transcriptKeysStart = source.indexOf('const TRANSCRIPT_CAPABILITY_KEYS = Object.freeze([');
+  const transcriptKeysEnd = source.indexOf('] as const);', transcriptKeysStart);
+  const transcriptKeys =
+    transcriptKeysStart >= 0 && transcriptKeysEnd > transcriptKeysStart
+      ? source.slice(transcriptKeysStart, transcriptKeysEnd)
+      : '';
+  const identityStart = source.indexOf('function assertIdentityFields(');
+  const identityEnd = source.indexOf('\nfunction parseSourceConfig(', identityStart);
+  const identity =
+    identityStart >= 0 && identityEnd > identityStart
+      ? source.slice(identityStart, identityEnd)
+      : '';
+  const admissionStart = source.indexOf('function parseAdmissionRequest(');
+  const contextRequestStart = source.indexOf('function createContextRequest(', admissionStart);
+  const admission =
+    admissionStart >= 0 && contextRequestStart > admissionStart
+      ? source.slice(admissionStart, contextRequestStart)
+      : '';
+  const contextRequestEnd = source.indexOf('\nfunction parseContinuityFloor(', contextRequestStart);
+  const contextRequest =
+    contextRequestStart >= 0 && contextRequestEnd > contextRequestStart
+      ? source.slice(contextRequestStart, contextRequestEnd)
+      : '';
+  const floorStart = source.indexOf('function parseContinuityFloor(', contextRequestEnd);
+  const contextStart = source.indexOf('function parseContextCapability(', floorStart);
+  const floor =
+    floorStart >= 0 && contextStart > floorStart ? source.slice(floorStart, contextStart) : '';
+  const transcriptRequestStart = source.indexOf('function createTranscriptRequest(', contextStart);
+  const context =
+    contextStart >= 0 && transcriptRequestStart > contextStart
+      ? source.slice(contextStart, transcriptRequestStart)
+      : '';
+  const transcriptRequestEnd = source.indexOf(
+    '\nfunction assertBoundedTranscript(',
+    transcriptRequestStart,
+  );
+  const transcriptRequest =
+    transcriptRequestStart >= 0 && transcriptRequestEnd > transcriptRequestStart
+      ? source.slice(transcriptRequestStart, transcriptRequestEnd)
+      : '';
+  const boundedStart = source.indexOf('function assertBoundedTranscript(', transcriptRequestEnd);
+  const lineageStart = source.indexOf('function parseLineage(', boundedStart);
+  const bounded =
+    boundedStart >= 0 && lineageStart > boundedStart
+      ? source.slice(boundedStart, lineageStart)
+      : '';
+  const lineageEnd = source.indexOf('\nfunction accountDataBytes(', lineageStart);
+  const lineage =
+    lineageStart >= 0 && lineageEnd > lineageStart ? source.slice(lineageStart, lineageEnd) : '';
+  const coverageStart = source.indexOf('function parseCoverage(');
+  const transcriptStart = source.indexOf('function parseTranscriptCapability(', coverageStart);
+  const coverage =
+    coverageStart >= 0 && transcriptStart > coverageStart
+      ? source.slice(coverageStart, transcriptStart)
+      : '';
+  const transcriptEnd = source.indexOf('\nfunction staleAfter(', transcriptStart);
+  const transcript =
+    transcriptStart >= 0 && transcriptEnd > transcriptStart
+      ? source.slice(transcriptStart, transcriptEnd)
+      : '';
+  const classStart = source.indexOf(
+    'export class DormantKaminoProviderPositionAdmissionSource implements ProviderPositionAdmissionSourcePort {',
+    transcriptEnd,
+  );
+  const readTargetStart = source.indexOf('  async readTarget(', classStart);
+  const readTarget = readTargetStart >= 0 ? source.slice(readTargetStart) : '';
+  const contextRequestAt = readTarget.indexOf(
+    'const contextRequest = createContextRequest(request);',
+  );
+  const contextReadAt = readTarget.indexOf(
+    'const contextCapability = await invoke(this.readContextMethod, [contextRequest]);',
+    contextRequestAt,
+  );
+  const contextClockAt = readTarget.indexOf(
+    'const afterContext = canonicalClock(invoke(this.nowMethod, []));',
+    contextReadAt,
+  );
+  const contextActiveAt = readTarget.indexOf(
+    'assertActive(request.signal, afterContext, request.deadlineAt);',
+    contextClockAt,
+  );
+  const contextReviewAt = readTarget.indexOf(
+    'invoke(this.reviewContextMethod, [contextCapability, contextRequest]) !== contextCapability',
+    contextActiveAt,
+  );
+  const contextParseAt = readTarget.indexOf(
+    'const context = parseContextCapability(contextCapability, request);',
+    contextReviewAt,
+  );
+  const transcriptRequestAt = readTarget.indexOf(
+    'const transcriptRequest = createTranscriptRequest(request, contextRequest, context);',
+    contextParseAt,
+  );
+  const transcriptReadAt = readTarget.indexOf(
+    'const transcriptCapability = await invoke(this.readTranscriptMethod, [transcriptRequest]);',
+    transcriptRequestAt,
+  );
+  const observedClockAt = readTarget.indexOf(
+    'const observedAt = canonicalClock(invoke(this.nowMethod, []));',
+    transcriptReadAt,
+  );
+  const transcriptActiveAt = readTarget.indexOf(
+    'assertActive(request.signal, observedAt, request.deadlineAt);',
+    observedClockAt,
+  );
+  const transcriptReviewAt = readTarget.indexOf(
+    'invoke(this.reviewTranscriptMethod, [transcriptCapability, transcriptRequest]) !==',
+    transcriptActiveAt,
+  );
+  const contextRereviewAt = readTarget.indexOf(
+    'invoke(this.reviewContextMethod, [contextCapability, contextRequest]) !== contextCapability',
+    transcriptReviewAt,
+  );
+  const transcriptParseAt = readTarget.indexOf(
+    'const transcript = parseTranscriptCapability(transcriptCapability, request, context);',
+    contextRereviewAt,
+  );
+  const publicResultAt = readTarget.indexOf('return frozenNullPrototype({', transcriptParseAt);
+  const publicResultEnd = readTarget.indexOf('\n      });', publicResultAt);
+  const publicResult =
+    publicResultAt >= 0 && publicResultEnd > publicResultAt
+      ? readTarget.slice(publicResultAt, publicResultEnd)
+      : '';
+
+  return (
+    importDeclarationCount === 8 &&
+    importSources.length === 8 &&
+    importSources[0] === 'node:crypto' &&
+    importSources[1] === 'node:util/types' &&
+    importSources[2] === '../../accounts/domain/account-profile' &&
+    importSources[3] === '../../blockchain/domain/chain-observation-policy' &&
+    importSources[4] === '../../wallets/domain/wallet-identity' &&
+    importSources[5] === '../domain/mainnet-provider-position-observation' &&
+    importSources[6] === '../application/provider-position-admission.coordinator' &&
+    importSources[7] ===
+      '../../smart-lending/infrastructure/kamino/kamino-lend-solana-finalized-transcript.adapter' &&
+    !forbiddenCapability.test(source) &&
+    !/(?:@Injectable|@Module|@Controller)\s*\(/u.test(source) &&
+    exactExecutableLineCount(
+      source,
+      'export const DORMANT_KAMINO_POSITION_TARGET_CONTEXT_VERSION = 1 as const;',
+    ) === 1 &&
+    source.includes("'DORMANT_KAMINO_POSITION_TARGET_CONTEXT_ONLY' as const;") &&
+    exactExecutableLineCount(
+      source,
+      'export const DORMANT_KAMINO_POSITION_TRANSCRIPT_VERSION = 1 as const;',
+    ) === 1 &&
+    source.includes("'DORMANT_KAMINO_FINALIZED_ACCOUNT_TRANSCRIPT_ONLY' as const;") &&
+    exactExecutableLineCount(source, "const PROVIDER_ID = 'kamino' as const;") === 1 &&
+    exactExecutableLineCount(source, "const PROTOCOL_ID = 'kamino-lend' as const;") === 1 &&
+    exactExecutableLineCount(
+      source,
+      "const MARKET_ID = 'kamino-lend-solana-mainnet-main-usdc' as const;",
+    ) === 1 &&
+    exactExecutableLineCount(source, 'const MAX_DEADLINE_MILLISECONDS = 30_000;') === 1 &&
+    exactExecutableLineCount(source, 'const MAX_TRANSCRIPT_BYTES = 1024 * 1024;') === 1 &&
+    exactExecutableLineCount(source, 'const MAX_TRANSCRIPT_NODES = 2_048;') === 1 &&
+    exactExecutableLineCount(source, 'const MAX_TRANSCRIPT_DEPTH = 12;') === 1 &&
+    exactExecutableLineCount(source, 'const MAX_LINEAGE_BLOCKS = 128;') === 1 &&
+    exactExecutableLineCount(source, 'const MAX_OBLIGATION_ACCOUNTS = 16;') === 1 &&
+    exactExecutableLineCount(source, 'const MAX_ACCOUNT_DATA_BYTES = 32 * 1024;') === 1 &&
+    exactExecutableLineCount(source, 'readonly mayAuthorizeFinancialAction: false;') === 3 &&
+    exactExecutableLineCount(source, 'mayAuthorizeFinancialAction: false as const,') === 3 &&
+    !/mayAuthorizeFinancialAction\s*:\s*true/u.test(source) &&
+    !/mayPersist\s*:\s*true|maySign\s*:\s*true|mayAccessWalletPrivateKey\s*:\s*true/u.test(
+      source,
+    ) &&
+    source.includes(
+      'readContext(request: ReadDormantKaminoPositionTargetContextRequestV1): Promise<unknown>;',
+    ) &&
+    source.includes(
+      'readTranscript(request: ReadDormantKaminoFinalizedAccountTranscriptRequestV1): Promise<unknown>;',
+    ) &&
+    admission.includes('accountId = parseAccountId(record.accountId);') &&
+    admission.includes('record.sourceFamilyId !== config.sourceFamilyId ||') &&
+    admission.includes('record.sourceId !== config.sourceId ||') &&
+    admission.includes('record.sourceKind !== config.sourceKind ||') &&
+    admission.includes('record.providerId !== PROVIDER_ID ||') &&
+    admission.includes('record.protocolId !== PROTOCOL_ID ||') &&
+    admission.includes('record.marketId !== MARKET_ID ||') &&
+    admission.includes('record.networkId !== NETWORK_ID ||') &&
+    source.includes("record.stablecoin !== 'USDC' ||") &&
+    source.includes('record.identity !== USDC_MINT_ADDRESS ||') &&
+    identity.includes('record.accountId !== request.accountId ||') &&
+    identity.includes('record.correlationId !== request.correlationId ||') &&
+    identity.includes('record.deadlineAt !== request.deadlineAt.value ||') &&
+    identity.includes('record.sourceFamilyId !== request.sourceFamilyId ||') &&
+    identity.includes('record.sourceId !== request.sourceId ||') &&
+    identity.includes('record.sourceKind !== request.sourceKind ||') &&
+    identity.includes('record.walletId !== request.walletId ||') &&
+    identity.includes('record.providerId !== PROVIDER_ID ||') &&
+    identity.includes('record.protocolId !== PROTOCOL_ID ||') &&
+    identity.includes('record.marketId !== MARKET_ID ||') &&
+    identity.includes('record.networkId !== NETWORK_ID') &&
+    contextRequest.includes('admissionRequest: request.request,') &&
+    contextRequest.includes('accountId: request.accountId,') &&
+    contextRequest.includes('deadlineAt: request.deadlineAt.value,') &&
+    contextRequest.includes('signal: request.signal,') &&
+    contextRequest.includes('sourceFamilyId: request.sourceFamilyId,') &&
+    contextRequest.includes('sourceId: request.sourceId,') &&
+    contextRequest.includes('walletId: request.walletId,') &&
+    contextRequest.includes('providerId: PROVIDER_ID,') &&
+    contextRequest.includes('protocolId: PROTOCOL_ID,') &&
+    contextRequest.includes('marketId: MARKET_ID,') &&
+    contextRequest.includes('networkId: NETWORK_ID,') &&
+    context.includes('const record = exactDataRecord(value, CONTEXT_CAPABILITY_KEYS,') &&
+    context.includes("assertIdentityFields(record, request, 'CONTEXT_UNAVAILABLE');") &&
+    context.includes('record.mayAuthorizeFinancialAction !== false ||') &&
+    context.includes('record.mayPersist !== false ||') &&
+    context.includes('record.maySign !== false ||') &&
+    context.includes('record.mayAccessWalletPrivateKey !== false') &&
+    context.includes('const canonicalWalletAddress = canonicalPublicKey(') &&
+    context.includes("parseContinuityFloor(record.continuityFloor, 'CONTEXT_UNAVAILABLE')") &&
+    context.includes('record.continuityFloorBlockhash,') &&
+    floor.includes("record.kind !== 'SOLANA_SLOT' || BigInt(root) > BigInt(slot)") &&
+    transcriptRequest.includes('admissionRequest: request.request,') &&
+    transcriptRequest.includes('contextRequest,') &&
+    transcriptRequest.includes('contextCapability: context.capability,') &&
+    transcriptRequest.includes('canonicalWalletAddress: context.canonicalWalletAddress,') &&
+    transcriptRequest.includes('continuityFloor: context.continuityFloor,') &&
+    transcriptRequest.includes('continuityFloorBlockhash: context.continuityFloorBlockhash,') &&
+    transcriptRequest.includes("commitment: 'finalized' as const,") &&
+    transcriptRequest.includes('genesisHash: GENESIS_HASH,') &&
+    transcriptRequest.includes('programAddress: PROGRAM_ADDRESS,') &&
+    transcriptRequest.includes('lendingMarketAddress: MARKET_ADDRESS,') &&
+    transcriptRequest.includes('reserveAddress: RESERVE_ADDRESS,') &&
+    transcriptRequest.includes('assetMintAddress: USDC_MINT_ADDRESS,') &&
+    transcriptRequest.includes('decoderCommitSha: KLEND_SDK_COMMIT_SHA,') &&
+    transcriptRequest.includes('signal: request.signal,') &&
+    bounded.includes('if (nodes > MAX_TRANSCRIPT_NODES || depth > MAX_TRANSCRIPT_DEPTH) {') &&
+    bounded.includes('if (bytes > MAX_TRANSCRIPT_BYTES)') &&
+    bounded.includes('if (isProxy(candidate) || seen.has(candidate))') &&
+    transcript.includes('assertBoundedTranscript(value);') &&
+    transcript.includes('TRANSCRIPT_CAPABILITY_KEYS,') &&
+    transcript.includes("assertIdentityFields(record, request, 'TRANSCRIPT_UNAVAILABLE');") &&
+    transcript.includes("record.commitment !== 'finalized' ||") &&
+    transcript.includes('record.genesisHash !== GENESIS_HASH ||') &&
+    transcript.includes('record.programAddress !== PROGRAM_ADDRESS ||') &&
+    transcript.includes('record.lendingMarketAddress !== MARKET_ADDRESS ||') &&
+    transcript.includes('record.reserveAddress !== RESERVE_ADDRESS ||') &&
+    transcript.includes('record.assetMintAddress !== USDC_MINT_ADDRESS ||') &&
+    transcript.includes('record.decoderCommitSha !== KLEND_SDK_COMMIT_SHA') &&
+    transcript.includes('BigInt(finalizedRootSlot) < BigInt(context.continuityFloor.slot) ||') &&
+    transcript.includes('BigInt(finalizedRootSlot) < BigInt(context.continuityFloor.root)') &&
+    lineage.includes('slot !== context.continuityFloor.slot ||') &&
+    lineage.includes('blockhash !== context.continuityFloorBlockhash') &&
+    lineage.includes('parentSlot !== previousSlot ||') &&
+    lineage.includes('parentBlockhash !== previousBlockhash ||') &&
+    lineage.includes('BigInt(slot) <= BigInt(previousSlot)') &&
+    lineage.includes(
+      'if (previousSlot !== finalizedRootSlot || previousBlockhash !== finalizedRootBlockhash) {',
+    ) &&
+    transcriptKeys.length > 0 &&
+    !/'continuityFloor'|'continuityFloorBlockhash'|'observedAt'|'staleAfter'|'resolvedAt'/u.test(
+      transcriptKeys,
+    ) &&
+    coverage.includes("record.status !== 'COMPLETE' ||") &&
+    coverage.includes('record.nextPageToken !== null ||') &&
+    coverage.includes('contextSlot !== finalizedRootSlot ||') &&
+    coverage.includes('BigInt(matchedAccountCount) !== BigInt(accounts.length)') &&
+    coverage.includes('MAX_OBLIGATION_ACCOUNTS,') &&
+    coverage.includes('seenAccounts.has(accountAddress) ||') &&
+    coverage.includes('account.ownerProgramAddress !== PROGRAM_ADDRESS ||') &&
+    coverage.includes("account.decodeStatus !== 'COMPLETE' ||") &&
+    coverage.includes('account.decodedOwnerAddress !== context.canonicalWalletAddress ||') &&
+    coverage.includes('account.lendingMarketAddress !== MARKET_ADDRESS') &&
+    coverage.includes("createHash('sha256').update(bytes).digest('hex')") &&
+    coverage.includes("if (supply > 0n) positions.push(position('SUPPLY', supply, asset));") &&
+    coverage.includes("if (borrow > 0n) positions.push(position('BORROW', borrow, asset));") &&
+    contextRequestAt >= 0 &&
+    contextReadAt > contextRequestAt &&
+    contextClockAt > contextReadAt &&
+    contextActiveAt > contextClockAt &&
+    contextReviewAt > contextActiveAt &&
+    contextParseAt > contextReviewAt &&
+    transcriptRequestAt > contextParseAt &&
+    transcriptReadAt > transcriptRequestAt &&
+    observedClockAt > transcriptReadAt &&
+    transcriptActiveAt > observedClockAt &&
+    transcriptReviewAt > transcriptActiveAt &&
+    contextRereviewAt > transcriptReviewAt &&
+    transcriptParseAt > contextRereviewAt &&
+    publicResultAt > transcriptParseAt &&
+    exactExecutableLineCount(
+      readTarget,
+      'assertActive(request.signal, started, request.deadlineAt);',
+    ) === 1 &&
+    exactExecutableLineCount(
+      readTarget,
+      'assertActive(request.signal, afterContext, request.deadlineAt);',
+    ) === 1 &&
+    exactExecutableLineCount(
+      readTarget,
+      'assertActive(request.signal, observedAt, request.deadlineAt);',
+    ) === 1 &&
+    readTarget.includes(
+      'request.deadlineAt.milliseconds - started.milliseconds > MAX_DEADLINE_MILLISECONDS',
+    ) &&
+    readTarget.includes('if (afterContext.milliseconds < started.milliseconds)') &&
+    readTarget.includes('if (observedAt.milliseconds < afterContext.milliseconds)') &&
+    publicResult.length > 0 &&
+    publicResult.includes("status: 'COMPLETE' as const,") &&
+    publicResult.includes('observedAt: observedAt.value,') &&
+    publicResult.includes('staleAfter: staleAfter(observedAt, request.deadlineAt),') &&
+    !/(?:canonicalWalletAddress|continuityFloorBlockhash|finalizedRootBlockhash|accountAddress|blockhash)/u.test(
+      publicResult,
+    ) &&
+    exactExecutableLineCount(
+      source,
+      "super('Kamino provider-position source is unavailable.');",
+    ) === 1 &&
+    readTarget.includes(
+      'if (error instanceof DormantKaminoProviderPositionAdmissionSourceUnavailableError)\n        throw error;',
+    ) &&
+    !/\b(?:console|logger)\s*\.|\berror\s*\./u.test(source) &&
+    runtimeSurfaces.every((runtimeSource) => !forbiddenFeatureSurface.test(runtimeSource))
+  );
+}
+
 function hasDormantProviderPositionReadBoundaryContract(
   sources: ProviderPositionReadBoundaryArtifactSources,
 ): boolean {
@@ -5007,6 +5357,7 @@ function hasDormantProviderPositionReadBoundaryContract(
   const chainAnchorCandidateFinalityFinalizer =
     sources.providerPositionChainAnchorCandidateFinalityFinalizerSource.replace(/\r\n/gu, '\n');
   const aaveV3EthereumSource = sources.providerPositionAaveV3EthereumSource.replace(/\r\n/gu, '\n');
+  const kaminoSource = sources.providerPositionKaminoSource.replace(/\r\n/gu, '\n');
   const chainAnchorEvidenceRecorderPort =
     sources.providerPositionChainAnchorEvidenceRecorderPortSource.replace(/\r\n/gu, '\n');
   const postgresChainAnchorEvidenceRecorder =
@@ -5088,6 +5439,7 @@ function hasDormantProviderPositionReadBoundaryContract(
     chainAnchorCandidateFinalityPort,
     chainAnchorCandidateFinalityFinalizer,
     aaveV3EthereumSource,
+    kaminoSource,
     chainAnchorEvidenceRecorderPort,
     chainAnchorRecordIntentReconciliationPort,
     postgresChainAnchorRecordIntentReconciliationProcessor,
@@ -5962,6 +6314,15 @@ function hasDormantProviderPositionReadBoundaryContract(
     ) &&
     hasDormantAaveV3EthereumProviderPositionSourceContract(
       aaveV3EthereumSource,
+      runtimeComposition,
+      infrastructureConfig,
+      mainnetLaunchNetworkPolicy,
+      moduleSource,
+      indexSource,
+      controller,
+    ) &&
+    hasDormantKaminoProviderPositionSourceContract(
+      kaminoSource,
       runtimeComposition,
       infrastructureConfig,
       mainnetLaunchNetworkPolicy,
@@ -12804,6 +13165,13 @@ export function loadRepositoryProductionPreflightInput(
         resolve(
           repositoryRoot,
           'apps/api/src/mainnet-platforms/infrastructure/dormant-aave-v3-ethereum-provider-position.source.ts',
+        ),
+        'utf8',
+      ),
+      providerPositionKaminoSource: readFileSync(
+        resolve(
+          repositoryRoot,
+          'apps/api/src/mainnet-platforms/infrastructure/dormant-kamino-provider-position-admission.source.ts',
         ),
         'utf8',
       ),

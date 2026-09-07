@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { readdirSync, realpathSync } from 'node:fs';
 import { dirname, relative, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -164,6 +165,23 @@ export const DORMANT_PROVIDER_INVENTORY = Object.freeze([
   }),
 ]);
 
+export const ADDITIONAL_DORMANT_PROVIDER_ARTIFACTS = Object.freeze([
+  Object.freeze({
+    id: 'kamino-provider-position-source',
+    providerId: 'kamino',
+    path: 'apps/api/src/mainnet-platforms/infrastructure/dormant-kamino-provider-position-admission.source.ts',
+    sha256: 'eacdafa7fcd5fa5574183d0f0e2beb6a02c270cd8ecd71be6b7a120ca60355a6',
+    className: 'DormantKaminoProviderPositionAdmissionSource',
+    dependencyStem: 'kamino-lend-solana-finalized-transcript.adapter',
+    capabilityMarkers: Object.freeze([
+      'mayAuthorizeFinancialAction: false',
+      'mayPersist: false',
+      'maySign: false',
+      'mayAccessWalletPrivateKey: false',
+    ]),
+  }),
+]);
+
 const STANDARD_CAPABILITY_MARKERS = Object.freeze([
   'mayPersist: false',
   'mayEstablishRecommendationEligibility: false',
@@ -171,7 +189,7 @@ const STANDARD_CAPABILITY_MARKERS = Object.freeze([
 ]);
 
 const UNSAFE_CAPABILITY =
-  /\b(?:mayPersist|mayEstablishRecommendationEligibility|mayAuthorizeFinancialAction)\s*:\s*true\b/u;
+  /\b(?:mayPersist|mayEstablishRecommendationEligibility|mayAuthorizeFinancialAction|maySign|mayAccessWalletPrivateKey)\s*:\s*true\b/u;
 const PLANNED_PLATFORM =
   /plannedPlatform\(\s*\{\s*id:\s*'([^']+)'\s*,\s*name:\s*'([^']+)'\s*,\s*protocol:\s*'([^']+)'\s*\}\s*,\s*'(EVM|SOLANA)'\s*,\s*\[\s*(ETHEREUM|SOLANA)\s*,?\s*\]\s*\)/gu;
 
@@ -234,6 +252,9 @@ export function validateDormantProviderInventorySnapshot(snapshot) {
   }
   if (new Set(DORMANT_PROVIDER_INVENTORY.map(({ id }) => id)).size !== 10) {
     errors.push('validator inventory contains a duplicate provider id');
+  }
+  if (ADDITIONAL_DORMANT_PROVIDER_ARTIFACTS.length !== 1) {
+    errors.push('validator must contain exactly one additional dormant artifact');
   }
 
   const plannedProviders = parsePlannedProviders(snapshot.directorySource);
@@ -317,6 +338,42 @@ export function validateDormantProviderInventorySnapshot(snapshot) {
     }
   }
 
+  for (const artifact of ADDITIONAL_DORMANT_PROVIDER_ARTIFACTS) {
+    exactArtifactPaths.add(artifact.path);
+    const provider = DORMANT_PROVIDER_INVENTORY.find(({ id }) => id === artifact.providerId);
+    if (
+      provider === undefined ||
+      adapterImportStem(provider.adapterPath) !== artifact.dependencyStem
+    ) {
+      errors.push(`${artifact.id} reviewed dormant dependency identity drifted`);
+    }
+    const source = snapshot.artifacts.get(artifact.path);
+    if (typeof source !== 'string') {
+      errors.push(`${artifact.id} artifact is missing`);
+      continue;
+    }
+    if (createHash('sha256').update(source, 'utf8').digest('hex') !== artifact.sha256) {
+      errors.push(`${artifact.id} artifact bytes drifted`);
+    }
+    if (!source.includes(`export class ${artifact.className}`)) {
+      errors.push(`${artifact.id} class identity drifted`);
+    }
+    if (!source.includes(artifact.dependencyStem)) {
+      errors.push(`${artifact.id} reviewed dormant dependency is missing`);
+    }
+    if (/@(Injectable|Module|Controller)\s*\(/u.test(source)) {
+      errors.push(`${artifact.id} contains a runtime registration decorator`);
+    }
+    if (UNSAFE_CAPABILITY.test(source)) {
+      errors.push(`${artifact.id} enables a prohibited provider capability`);
+    }
+    for (const marker of artifact.capabilityMarkers) {
+      if (!source.includes(marker)) {
+        errors.push(`${artifact.id} is missing closed capability marker: ${marker}`);
+      }
+    }
+  }
+
   for (const path of snapshot.artifacts.keys()) {
     if (!exactArtifactPaths.has(path)) errors.push(`unexpected inventory artifact: ${path}`);
   }
@@ -332,6 +389,14 @@ export function validateDormantProviderInventorySnapshot(snapshot) {
         source.includes(adapterImportStem(provider.adapterPath))
       ) {
         errors.push(`${provider.id} dormant adapter is referenced by runtime source ${path}`);
+      }
+    }
+    for (const artifact of ADDITIONAL_DORMANT_PROVIDER_ARTIFACTS) {
+      if (
+        source.includes(artifact.className) ||
+        source.includes(adapterImportStem(artifact.path))
+      ) {
+        errors.push(`${artifact.id} is referenced by runtime source ${path}`);
       }
     }
   }
@@ -410,7 +475,22 @@ function loadDormantProviderInventorySnapshotInternal(repositoryRoot, afterFirst
     }
   }
 
-  const adapterPaths = new Set(DORMANT_PROVIDER_INVENTORY.map(({ adapterPath }) => adapterPath));
+  for (const artifact of ADDITIONAL_DORMANT_PROVIDER_ARTIFACTS) {
+    artifacts.set(
+      artifact.path,
+      repositoryFile(
+        repositoryRoot,
+        artifact.path,
+        MAX_DORMANT_PROVIDER_ARTIFACT_BYTES,
+        afterFirstReadForTest,
+      ),
+    );
+  }
+
+  const adapterPaths = new Set([
+    ...DORMANT_PROVIDER_INVENTORY.map(({ adapterPath }) => adapterPath),
+    ...ADDITIONAL_DORMANT_PROVIDER_ARTIFACTS.map(({ path }) => path),
+  ]);
   const runtimeSources = new Map();
   let runtimeBytes = 0;
   for (const path of runtimeSourcePaths(repositoryRoot)) {

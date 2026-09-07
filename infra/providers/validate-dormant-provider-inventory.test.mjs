@@ -13,6 +13,7 @@ import { dirname, join } from 'node:path';
 import test from 'node:test';
 
 import {
+  ADDITIONAL_DORMANT_PROVIDER_ARTIFACTS,
   DIRECTORY_PATH,
   DORMANT_PROVIDER_INVENTORY_INPUT_ERROR,
   DORMANT_PROVIDER_INVENTORY,
@@ -108,6 +109,10 @@ test('the exact ten planning entries have dormant adapter, hostile spec, and res
       'project-0',
       'jupiter',
     ],
+  );
+  assert.deepEqual(
+    ADDITIONAL_DORMANT_PROVIDER_ARTIFACTS.map(({ id }) => id),
+    ['kamino-provider-position-source'],
   );
 });
 
@@ -274,6 +279,53 @@ test('decorators and any runtime reference to a dormant adapter fail closed', ()
       );
     });
   }
+});
+
+test('the additional Kamino source is byte-pinned, authority-free, and unregistered', () => {
+  const [artifact] = ADDITIONAL_DORMANT_PROVIDER_ARTIFACTS;
+  assert.ok(artifact);
+  assert.equal(
+    artifact.path,
+    'apps/api/src/mainnet-platforms/infrastructure/dormant-kamino-provider-position-admission.source.ts',
+  );
+
+  const mutations = [
+    (value) => value.artifacts.delete(artifact.path),
+    (value) => {
+      value.artifacts.set(
+        artifact.path,
+        value.artifacts
+          .get(artifact.path)
+          .replace('mayAuthorizeFinancialAction: false', 'mayAuthorizeFinancialAction: true'),
+      );
+    },
+    (value) => {
+      value.artifacts.set(
+        artifact.path,
+        value.artifacts
+          .get(artifact.path)
+          .replace(
+            'kamino-lend-solana-finalized-transcript.adapter',
+            'unreviewed-transcript.adapter',
+          ),
+      );
+    },
+    (value) => {
+      value.runtimeSources.set(
+        'apps/api/src/unsafe-kamino-provider-position.module.ts',
+        `providers: [${artifact.className}]`,
+      );
+    },
+    (value) => {
+      value.runtimeSources.set(
+        'apps/api/src/unsafe-kamino-provider-position.module.ts',
+        `import './${artifact.path.slice(artifact.path.lastIndexOf('/') + 1, -3)}';`,
+      );
+    },
+  ];
+  mutations.forEach((mutate, index) =>
+    assertMutationRejected(`additional Kamino artifact mutation ${index}`, mutate),
+  );
 });
 
 test('malformed snapshots fail closed without escaping', () => {

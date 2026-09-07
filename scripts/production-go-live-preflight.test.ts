@@ -471,6 +471,13 @@ const PROVIDER_POSITION_READ_ARTIFACTS = Object.freeze({
     ),
     'utf8',
   ),
+  providerPositionKaminoSource: readFileSync(
+    resolve(
+      __dirname,
+      '../apps/api/src/mainnet-platforms/infrastructure/dormant-kamino-provider-position-admission.source.ts',
+    ),
+    'utf8',
+  ),
   providerPositionChainAnchorEvidenceRecorderPortSource: readFileSync(
     resolve(
       __dirname,
@@ -1203,7 +1210,7 @@ function mutateProviderPositionReadArtifact(
 }
 
 test('provider-position read inspection pins the exact dormant critical source slice', () => {
-  assert.equal(Object.keys(PROVIDER_POSITION_READ_ARTIFACTS).length, 39);
+  assert.equal(Object.keys(PROVIDER_POSITION_READ_ARTIFACTS).length, 40);
   const inspected = inspectProviderPositionReadBoundaryArtifacts(PROVIDER_POSITION_READ_ARTIFACTS);
   assert.deepEqual(inspected, EXPECTED_DORMANT_PROVIDER_POSITION_READ_BOUNDARY);
   assert.equal(Object.isFrozen(inspected), true);
@@ -1257,9 +1264,13 @@ test('provider-position read semantic gate contains no disabled-check bypass', (
     'function hasDormantAaveV3EthereumProviderPositionSourceContract(',
     reconciliationLifecycleStart,
   );
+  const kaminoStart = source.indexOf(
+    'function hasDormantKaminoProviderPositionSourceContract(',
+    aaveV3EthereumStart,
+  );
   const start = source.indexOf(
     'function hasDormantProviderPositionReadBoundaryContract(',
-    aaveV3EthereumStart,
+    kaminoStart,
   );
   const end = source.indexOf('\nfunction ', start + 1);
   assert.ok(
@@ -1271,7 +1282,8 @@ test('provider-position read semantic gate contains no disabled-check bypass', (
       reconciliationStart > recordIntentMigrationStart &&
       reconciliationLifecycleStart > reconciliationStart &&
       aaveV3EthereumStart > reconciliationLifecycleStart &&
-      start > aaveV3EthereumStart &&
+      kaminoStart > aaveV3EthereumStart &&
+      start > kaminoStart &&
       end > start,
   );
   const semanticGateSource = source
@@ -1891,6 +1903,211 @@ test('provider-position read inspection rejects dormant Aave V3 Ethereum source 
       'mainnetPlatformsControllerSource',
       'constructor(private readonly directory: MainnetPlatformDirectoryService) {}',
       'constructor(private readonly source: DormantAaveV3EthereumProviderPositionSource) {}',
+    ],
+  ];
+
+  for (const [key, approved, rejected] of mutations) {
+    assert.deepEqual(
+      inspectProviderPositionReadBoundaryArtifacts(
+        mutateProviderPositionReadArtifact(key, approved, rejected),
+      ),
+      INVALID_PROVIDER_POSITION_READ_BOUNDARY,
+      `${key}: ${approved}`,
+    );
+  }
+});
+
+test('provider-position read inspection rejects dormant Kamino source drift', () => {
+  const mutations: readonly (readonly [
+    keyof ProviderPositionReadBoundaryArtifactSources,
+    string,
+    string,
+  ])[] = [
+    [
+      'providerPositionKaminoSource',
+      'readonly mayAuthorizeFinancialAction: false;',
+      'readonly mayAuthorizeFinancialAction: true;',
+    ],
+    [
+      'providerPositionKaminoSource',
+      "import { createHash } from 'node:crypto';",
+      "import { request } from 'node:https';",
+    ],
+    [
+      'providerPositionKaminoSource',
+      'const contextCapability = await invoke(this.readContextMethod, [contextRequest]);',
+      'const contextCapability = await invoke(this.readTranscriptMethod, [contextRequest]);',
+    ],
+    [
+      'providerPositionKaminoSource',
+      'invoke(this.reviewContextMethod, [contextCapability, contextRequest]) !== contextCapability',
+      'invoke(this.reviewContextMethod, [contextCapability, { ...contextRequest }]) !== contextCapability',
+    ],
+    [
+      'providerPositionKaminoSource',
+      'invoke(this.reviewTranscriptMethod, [transcriptCapability, transcriptRequest]) !==',
+      'invoke(this.reviewTranscriptMethod, [transcriptCapability, { ...transcriptRequest }]) !==',
+    ],
+    [
+      'providerPositionKaminoSource',
+      'contextCapability: context.capability,',
+      'contextCapability: Object.freeze({}),',
+    ],
+    [
+      'providerPositionKaminoSource',
+      'record.providerId !== PROVIDER_ID ||',
+      'record.providerId === PROVIDER_ID ||',
+    ],
+    [
+      'providerPositionKaminoSource',
+      'return parseSolanaWalletAddress(value);',
+      'return String(value);',
+    ],
+    [
+      'providerPositionKaminoSource',
+      "record.kind !== 'SOLANA_SLOT' || BigInt(root) > BigInt(slot)",
+      "record.kind !== 'SOLANA_SLOT' || BigInt(root) < BigInt(slot)",
+    ],
+    [
+      'providerPositionKaminoSource',
+      'slot !== context.continuityFloor.slot ||',
+      'slot === context.continuityFloor.slot ||',
+    ],
+    [
+      'providerPositionKaminoSource',
+      'blockhash !== context.continuityFloorBlockhash',
+      'blockhash === context.continuityFloorBlockhash',
+    ],
+    [
+      'providerPositionKaminoSource',
+      'parentBlockhash !== previousBlockhash ||',
+      'parentBlockhash === previousBlockhash ||',
+    ],
+    [
+      'providerPositionKaminoSource',
+      'if (previousSlot !== finalizedRootSlot || previousBlockhash !== finalizedRootBlockhash) {',
+      'if (previousSlot !== finalizedRootSlot && previousBlockhash !== finalizedRootBlockhash) {',
+    ],
+    [
+      'providerPositionKaminoSource',
+      'BigInt(finalizedRootSlot) < BigInt(context.continuityFloor.slot) ||',
+      'BigInt(finalizedRootSlot) > BigInt(context.continuityFloor.slot) ||',
+    ],
+    [
+      'providerPositionKaminoSource',
+      "commitment: 'finalized' as const,",
+      "commitment: 'confirmed' as const,",
+    ],
+    [
+      'providerPositionKaminoSource',
+      "record.commitment !== 'finalized' ||",
+      "record.commitment !== 'confirmed' ||",
+    ],
+    [
+      'providerPositionKaminoSource',
+      'const MAX_TRANSCRIPT_BYTES = 1024 * 1024;',
+      'const MAX_TRANSCRIPT_BYTES = 16 * 1024 * 1024;',
+    ],
+    ['providerPositionKaminoSource', 'assertBoundedTranscript(value);', 'void value;'],
+    [
+      'providerPositionKaminoSource',
+      "record.status !== 'COMPLETE' ||",
+      "record.status !== 'PARTIAL' ||",
+    ],
+    [
+      'providerPositionKaminoSource',
+      'record.nextPageToken !== null ||',
+      'record.nextPageToken === null ||',
+    ],
+    [
+      'providerPositionKaminoSource',
+      'BigInt(matchedAccountCount) !== BigInt(accounts.length)',
+      'BigInt(matchedAccountCount) < BigInt(accounts.length)',
+    ],
+    [
+      'providerPositionKaminoSource',
+      'const MAX_OBLIGATION_ACCOUNTS = 16;',
+      'const MAX_OBLIGATION_ACCOUNTS = 1_600;',
+    ],
+    [
+      'providerPositionKaminoSource',
+      'seenAccounts.has(accountAddress) ||',
+      'seenAccounts.has(accountAddress) &&',
+    ],
+    [
+      'providerPositionKaminoSource',
+      "if (supply > 0n) positions.push(position('SUPPLY', supply, asset));",
+      "if (supply >= 0n) positions.push(position('SUPPLY', supply, asset));",
+    ],
+    [
+      'providerPositionKaminoSource',
+      "'finalizedRootSlot',",
+      "'continuityFloor',\n  'finalizedRootSlot',",
+    ],
+    [
+      'providerPositionKaminoSource',
+      "'finalizedRootSlot',",
+      "'observedAt',\n  'finalizedRootSlot',",
+    ],
+    [
+      'providerPositionKaminoSource',
+      'positions: transcript.positions,',
+      'canonicalWalletAddress: context.canonicalWalletAddress,\n        positions: transcript.positions,',
+    ],
+    [
+      'providerPositionKaminoSource',
+      'positions: transcript.positions,',
+      'finalizedRootBlockhash: context.continuityFloorBlockhash,\n        positions: transcript.positions,',
+    ],
+    [
+      'providerPositionKaminoSource',
+      'assertActive(request.signal, afterContext, request.deadlineAt);',
+      'void afterContext;',
+    ],
+    [
+      'providerPositionKaminoSource',
+      'const transcriptCapability = await invoke(this.readTranscriptMethod, [transcriptRequest]);',
+      'const transcriptCapability = invoke(this.readTranscriptMethod, [transcriptRequest]);',
+    ],
+    [
+      'providerPositionKaminoSource',
+      'request.deadlineAt.milliseconds - started.milliseconds > MAX_DEADLINE_MILLISECONDS',
+      'request.deadlineAt.milliseconds - started.milliseconds > 300_000',
+    ],
+    [
+      'providerPositionKaminoSource',
+      "super('Kamino provider-position source is unavailable.');",
+      'super(`Kamino source failed: ${code}`);',
+    ],
+    [
+      'providerPositionRuntimeCompositionSource',
+      'const DEPENDENCY_KEYS = Object.freeze([',
+      'type DormantKaminoProviderPositionAdmissionSource = unknown;\nconst DEPENDENCY_KEYS = Object.freeze([',
+    ],
+    [
+      'providerPositionInfrastructureConfigSource',
+      'export interface InfrastructureConfig {',
+      'type DormantKaminoFinalizedAccountTranscriptTransport = unknown;\nexport interface InfrastructureConfig {',
+    ],
+    [
+      'mainnetLaunchNetworkPolicySource',
+      'export const MAINNET_LAUNCH_NETWORK_IDS = Object.freeze([',
+      'type DormantKaminoProviderPositionAdmissionSource = unknown;\nexport const MAINNET_LAUNCH_NETWORK_IDS = Object.freeze([',
+    ],
+    [
+      'mainnetPlatformsModuleSource',
+      'providers: [MainnetPlatformDirectoryService, MainnetPlatformsPrivacyInterceptor],',
+      'providers: [MainnetPlatformDirectoryService, DormantKaminoProviderPositionAdmissionSource],',
+    ],
+    [
+      'mainnetPlatformsIndexSource',
+      "export { MainnetPlatformDirectoryService } from './application/mainnet-platform-directory.service';",
+      "export { DormantKaminoProviderPositionAdmissionSource } from './infrastructure/dormant-kamino-provider-position-admission.source';",
+    ],
+    [
+      'mainnetPlatformsControllerSource',
+      'constructor(private readonly directory: MainnetPlatformDirectoryService) {}',
+      'constructor(private readonly source: DormantKaminoProviderPositionAdmissionSource) {}',
     ],
   ];
 
@@ -3511,7 +3728,7 @@ test('provider-position read artifact shape and private brand fail closed', () =
     Object.fromEntries(
       Object.keys(PROVIDER_POSITION_READ_ARTIFACTS).map((key) => [
         key,
-        'x'.repeat(Math.floor((960 * 1024) / 39) + 1),
+        'x'.repeat(Math.floor((960 * 1024) / 40) + 1),
       ]),
     ),
     accessor,
