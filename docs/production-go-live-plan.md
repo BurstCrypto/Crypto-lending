@@ -468,6 +468,21 @@ not deployed evidence or production readiness. Preflight must retain
 database, external-egress, RPC/provider, operations, authority, and every other
 production blocker remain open.
 
+The same offline inspection now pins the exact dormant Ethereum and Solana
+deployment manifests and identity-verifier implementations. Both checked-in
+manifests remain empty and `NOT_APPROVED`, and neither concrete verifier is
+barrel-exported, registered, or composed into a runtime. This closes a local
+source-integrity gap only. Three activation blockers remain machine-readable:
+`BALANCE_CONSUMER_DEPLOYMENT_MANIFEST_FINGERPRINT_APPROVAL_MISSING` requires a
+separately governed, release-bound approval;
+`BALANCE_CONSUMER_SOLANA_EXACT_SLOT_RPC_CAPABILITY_EVIDENCE_MISSING` requires
+no-cost validation that an approved provider can satisfy the verifier's
+exact-slot `getMultipleAccounts` contract; and
+`BALANCE_CONSUMER_SOLANA_PYUSD_TOKEN_2022_POLICY_EVIDENCE_MISSING` requires an
+independently captured real PYUSD mint golden fixture, exact Token-2022 extension
+inventory, and reviewed mutable-field window policy. None of that evidence is
+fabricated or inferred by this source-only slice.
+
 ### Dormant provider-position record-intent boundary
 
 Migration `0030` locally supersedes migration `0029`'s record verification. It

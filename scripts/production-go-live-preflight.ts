@@ -68,6 +68,9 @@ export type ProductionPreflightBlockerId =
   | 'BALANCE_CONSUMER_IAM_NOT_PROVISIONED'
   | 'BALANCE_CONSUMER_DATABASE_CAPABILITY_NOT_ENABLED'
   | 'BALANCE_CONSUMER_DEPLOYED_EVIDENCE_MISSING'
+  | 'BALANCE_CONSUMER_SOLANA_EXACT_SLOT_RPC_CAPABILITY_EVIDENCE_MISSING'
+  | 'BALANCE_CONSUMER_SOLANA_PYUSD_TOKEN_2022_POLICY_EVIDENCE_MISSING'
+  | 'BALANCE_CONSUMER_DEPLOYMENT_MANIFEST_FINGERPRINT_APPROVAL_MISSING'
   | 'PROVIDER_POSITION_READ_BOUNDARY_INSPECTION_FAILED'
   | 'PROVIDER_POSITION_READER_FEATURE_REGISTRATION_MISSING'
   | 'PROVIDER_POSITION_TRUSTED_ASSESSMENT_FEATURE_REGISTRATION_MISSING'
@@ -185,6 +188,10 @@ export interface BalanceConsumerArtifactSources {
   readonly nodeHttpsBalanceJsonRpcTransportSource: string;
   readonly ethereumBalanceIndexerSource: string;
   readonly solanaBalanceIndexerSource: string;
+  readonly ethereumMainnetBalanceDeploymentManifestSource: string;
+  readonly ethereumMainnetBalanceDeploymentIdentityVerifierSource: string;
+  readonly solanaMainnetBalanceDeploymentManifestSource: string;
+  readonly solanaMainnetBalanceDeploymentIdentityVerifierSource: string;
   readonly supportedAssetRegistrySource: string;
   readonly walletIdentitySource: string;
   readonly solanaTokenAccountSource: string;
@@ -749,6 +756,10 @@ const BALANCE_CONSUMER_ARTIFACT_KEYS = Object.freeze([
   'nodeHttpsBalanceJsonRpcTransportSource',
   'ethereumBalanceIndexerSource',
   'solanaBalanceIndexerSource',
+  'ethereumMainnetBalanceDeploymentManifestSource',
+  'ethereumMainnetBalanceDeploymentIdentityVerifierSource',
+  'solanaMainnetBalanceDeploymentManifestSource',
+  'solanaMainnetBalanceDeploymentIdentityVerifierSource',
   'supportedAssetRegistrySource',
   'walletIdentitySource',
   'solanaTokenAccountSource',
@@ -826,6 +837,14 @@ const REVIEWED_BALANCE_CONSUMER_ARTIFACT_SHA256 = Object.freeze({
     '429f008baa77c7e6791171d7cfd300e795c093d9c7eebb12d0bdd15e6301741f',
   ethereumBalanceIndexerSource: 'd5fb11f282817206bbdb7e054962f1830f4a0f6122ffa3786094a65e7c4cb353',
   solanaBalanceIndexerSource: '1958e16a9878b0df9328d912a7bc855b102cda643818cb97d52d5ee521387d9e',
+  ethereumMainnetBalanceDeploymentManifestSource:
+    '29b94784ca4a7bb9337cc8fbe915600d5149d8f4a91e0cc9ea8c0d11b0c3dd1e',
+  ethereumMainnetBalanceDeploymentIdentityVerifierSource:
+    '7fcedfe0c9ac64591daa7d550ffabc3395aa3abdb6df08670d0cce97d0b5a084',
+  solanaMainnetBalanceDeploymentManifestSource:
+    'bff74375d01844c0f68a6f77c12b16e64e8e94e435279be810772be69b3796f5',
+  solanaMainnetBalanceDeploymentIdentityVerifierSource:
+    'a1c3b95c4f8f1d857bff7f69da399aebd87d71f366465396297b2b26f2f17e1b',
   supportedAssetRegistrySource: '025ef9ebffc0a2e676394bca110ee203274e00d0d95b5fb4fe239953d235fc54',
   walletIdentitySource: 'a22e1c8e8ce5ddcd8c2e43007c37faf82868929afe6b2806e978611d19e788dd',
   solanaTokenAccountSource: '3e853238987144873c3193b8bdf2f41dcf4baf1ff62e84941a7f7a335e316d5a',
@@ -898,7 +917,7 @@ const REVIEWED_BALANCE_CONSUMER_ARTIFACT_SHA256 = Object.freeze({
 } satisfies Readonly<Record<keyof BalanceConsumerArtifactSources, string>>);
 const MAX_BALANCE_CONSUMER_ARTIFACT_BYTES = 256 * 1024;
 const MAX_BALANCE_CONSUMER_PACKAGE_LOCK_BYTES = 768 * 1024;
-const MAX_BALANCE_CONSUMER_TOTAL_BYTES = 2 * 1024 * 1024;
+const MAX_BALANCE_CONSUMER_TOTAL_BYTES = 2176 * 1024;
 const NON_PRODUCTION_ENVIRONMENT_ALLOWED_PATTERN = "'^(dev|test|qa|sandbox|staging)(-[a-z0-9]+)*$'";
 const PRODUCTION_AWARE_ENVIRONMENT_PATTERN_SOURCE =
   '/^(?:dev|test|qa|sandbox|staging|production)(?:-[a-z0-9]+)*$/u';
@@ -1413,6 +1432,9 @@ export function evaluateProductionPreflight(
       'BALANCE_CONSUMER_IAM_NOT_PROVISIONED',
       'BALANCE_CONSUMER_DATABASE_CAPABILITY_NOT_ENABLED',
       'BALANCE_CONSUMER_DEPLOYED_EVIDENCE_MISSING',
+      'BALANCE_CONSUMER_SOLANA_EXACT_SLOT_RPC_CAPABILITY_EVIDENCE_MISSING',
+      'BALANCE_CONSUMER_SOLANA_PYUSD_TOKEN_2022_POLICY_EVIDENCE_MISSING',
+      'BALANCE_CONSUMER_DEPLOYMENT_MANIFEST_FINGERPRINT_APPROVAL_MISSING',
     );
   }
 
@@ -9447,6 +9469,189 @@ function hasExactBalanceDeploymentIdentityBindingContract(
   );
 }
 
+function hasDormantMainnetBalanceDeploymentIdentityArtifactContract(
+  sources: BalanceConsumerArtifactSources,
+): boolean {
+  const ethereumManifest = sources.ethereumMainnetBalanceDeploymentManifestSource.replace(
+    /\r\n/gu,
+    '\n',
+  );
+  const ethereumVerifier = sources.ethereumMainnetBalanceDeploymentIdentityVerifierSource.replace(
+    /\r\n/gu,
+    '\n',
+  );
+  const solanaManifest = sources.solanaMainnetBalanceDeploymentManifestSource.replace(
+    /\r\n/gu,
+    '\n',
+  );
+  const solanaVerifier = sources.solanaMainnetBalanceDeploymentIdentityVerifierSource.replace(
+    /\r\n/gu,
+    '\n',
+  );
+  const launchSources = [
+    sources.blockchainSyncIndexSource,
+    sources.activationSource,
+    sources.cliSource,
+    sources.cliModeSource,
+    sources.compositionSource,
+    sources.runtimeSource,
+    sources.balanceConsumerResourceSource,
+    sources.balanceConsumerLifecycleSource,
+    sources.balanceConsumerConfigSource,
+    sources.infrastructureConfigSource,
+    sources.blockchainSyncModuleSource,
+    sources.appModuleSource,
+    sources.applicationRootSource,
+    sources.localDevelopmentAppModuleSource,
+    sources.mainSource,
+    sources.outboxWorkerCliSource,
+    sources.redisSessionRevocationCliSource,
+    sources.migrationCliSource,
+    sources.applicationTemplateSource,
+    sources.applicationValidatorSource,
+    sources.workloadTemplateSource,
+    sources.workloadValidatorSource,
+    sources.balanceConsumerEnvelopeSource,
+    sources.balanceConsumerEnvelopeValidatorSource,
+    sources.balanceConsumerMetadataTransitionValidatorSource,
+    sources.releaseManifestSource,
+    sources.apiPackageSource,
+    sources.rootPackageSource,
+    sources.rootPackageLockSource,
+    sources.productionContainerValidatorSource,
+  ] as const;
+  const concreteDeploymentCapability =
+    /\b(?:createDormantEthereumMainnetBalanceDeploymentIdentityVerifier|createDormantSolanaMainnetBalanceDeploymentIdentityVerifier|DORMANT_ETHEREUM_MAINNET_BALANCE_DEPLOYMENT_MANIFEST|SOLANA_MAINNET_BALANCE_DEPLOYMENT_MANIFEST_V1)\b|(?:ethereum|solana)-mainnet-balance-deployment(?:-identity\.verifier|\.manifest)/u;
+  const forbiddenCapability =
+    /\b(?:fetch|setTimeout|setInterval|setImmediate|queueMicrotask)\s*\(|\b(?:process|Deno|Bun)\s*\.\s*env\b|\bimport\s*\.\s*meta\s*\.\s*env\b|\bnew\s+(?:URL|URLSearchParams|WebSocket|EventSource|Connection|[A-Za-z0-9_]*Client|[A-Za-z0-9_]*Agent)\s*\(|\b(?:http|https|dns|net|tls)\s*\.\s*[A-Za-z][A-Za-z0-9_]*\s*\(|\b(?:axios|got|request|retry|backoff)\s*\(|\b(?:client|endpoint|hostname|credential|apiKey|password|secret|rpcUrl|baseUrl|retry|backoff)\s*(?::|=)|@(?:Injectable|Module)\s*\(|\b(?:NestFactory|createApplicationContext)\b|\.(?:listen|connect)\s*\(|['"]https?:\/\//iu;
+  const forbiddenImport =
+    /(?:\bfrom\s+|\bimport\s*(?:\(\s*)?)['"](?:node:)?(?:dns|http|http2|https|net|tls)(?:\/[^'"]*)?['"]|(?:\bfrom\s+|\bimport\s*(?:\(\s*)?)['"](?:axios|ethers|got|superagent|undici|web3|@solana\/web3\.js)['"]/iu;
+
+  return (
+    exactExecutableLineCount(
+      ethereumManifest,
+      'export const DORMANT_ETHEREUM_MAINNET_BALANCE_DEPLOYMENT_MANIFEST = Object.freeze({',
+    ) === 1 &&
+    exactExecutableLineCount(ethereumManifest, "approvalStatus: 'NOT_APPROVED' as const,") === 1 &&
+    exactExecutableLineCount(
+      ethereumManifest,
+      'authorityApprovedForProduction: false as const,',
+    ) === 1 &&
+    exactExecutableLineCount(ethereumManifest, 'assets: Object.freeze([]),') === 1 &&
+    exactExecutableLineCount(ethereumManifest, "networkId: 'eip155:1' as const,") === 1 &&
+    exactExecutableLineCount(ethereumManifest, "chainId: '0x1' as const,") === 1 &&
+    exactExecutableLineCount(
+      ethereumManifest,
+      "blockBinding: 'EIP1898_BLOCK_HASH_REQUIRE_CANONICAL' as const,",
+    ) === 1 &&
+    exactExecutableLineCount(
+      ethereumManifest,
+      "address: '0x6c3ea9036406852006290770bedfcaba0e23a0e8' as const,",
+    ) === 1 &&
+    exactExecutableLineCount(
+      ethereumManifest,
+      "address: '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48' as const,",
+    ) === 1 &&
+    exactExecutableLineCount(
+      ethereumManifest,
+      "address: '0xdac17f958d2ee523a2206206994597c13d831ec7' as const,",
+    ) === 1 &&
+    exactExecutableLineCount(
+      ethereumManifest,
+      "'crypto-lending:ethereum-mainnet-balance-deployment-manifest:v1',",
+    ) === 1 &&
+    exactExecutableLineCount(
+      ethereumVerifier,
+      'export function createDormantEthereumMainnetBalanceDeploymentIdentityVerifier(',
+    ) === 1 &&
+    exactExecutableLineCount(
+      ethereumVerifier,
+      'snapshot.requiredApprovedManifestFingerprintSha256 !== approvedManifestFingerprintSha256',
+    ) === 1 &&
+    exactExecutableLineCount(ethereumVerifier, 'requireCanonical: true as const,') === 1 &&
+    exactExecutableLineCount(
+      ethereumVerifier,
+      "if ((await rpc.read('eth_chainId', [])) !== '0x1') return fail();",
+    ) === 1 &&
+    exactExecutableLineCount(
+      ethereumVerifier,
+      "await rpc.read('eth_getBlockByNumber', [expectedNumber, false]),",
+    ) === 1 &&
+    exactExecutableLineCount(
+      ethereumVerifier,
+      "'crypto-lending:ethereum-mainnet-balance-deployment-observation:v1',",
+    ) === 1 &&
+    exactExecutableLineCount(
+      solanaManifest,
+      'export const SOLANA_MAINNET_BALANCE_DEPLOYMENT_MANIFEST_V1: SolanaMainnetBalanceDeploymentManifestV1 =',
+    ) === 1 &&
+    exactExecutableLineCount(solanaManifest, "approvalStatus: 'NOT_APPROVED',") === 1 &&
+    exactExecutableLineCount(solanaManifest, 'approvedAt: null,') === 1 &&
+    exactExecutableLineCount(solanaManifest, 'expiresAt: null,') === 1 &&
+    exactExecutableLineCount(solanaManifest, 'validFromSlot: null,') === 1 &&
+    exactExecutableLineCount(solanaManifest, 'validThroughSlot: null,') === 1 &&
+    exactExecutableLineCount(solanaManifest, 'assets: Object.freeze([]),') === 1 &&
+    exactExecutableLineCount(solanaManifest, 'programs: Object.freeze([]),') === 1 &&
+    exactExecutableLineCount(
+      solanaManifest,
+      "'2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo': SOLANA_TOKEN_PROGRAM_IDS.TOKEN_2022,",
+    ) === 1 &&
+    exactExecutableLineCount(
+      solanaManifest,
+      'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v: SOLANA_TOKEN_PROGRAM_IDS.LEGACY,',
+    ) === 1 &&
+    exactExecutableLineCount(
+      solanaManifest,
+      'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB: SOLANA_TOKEN_PROGRAM_IDS.LEGACY,',
+    ) === 1 &&
+    exactExecutableLineCount(
+      solanaManifest,
+      ".update('crypto-lending:solana-mainnet-balance-deployment-manifest:v1\\0', 'utf8')",
+    ) === 1 &&
+    exactExecutableLineCount(
+      solanaVerifier,
+      'export function createDormantSolanaMainnetBalanceDeploymentIdentityVerifier(',
+    ) === 1 &&
+    exactExecutableLineCount(
+      solanaVerifier,
+      'independentlyApprovedManifestFingerprintSha256 !== manifest.fingerprintSha256',
+    ) === 1 &&
+    exactExecutableLineCount(solanaVerifier, "manifest?.approvalStatus !== 'APPROVED' ||") === 1 &&
+    exactExecutableLineCount(solanaVerifier, 'data.fill(0, 36, 44);') === 1 &&
+    exactExecutableLineCount(
+      solanaVerifier,
+      'const TOKEN_2022_MINT_EXTENSION_TYPES = new Set([',
+    ) === 1 &&
+    exactExecutableLineCount(
+      solanaVerifier,
+      '1, 3, 4, 6, 9, 10, 12, 14, 16, 18, 19, 20, 21, 22, 23, 24, 25, 26, 28,',
+    ) === 1 &&
+    exactExecutableLineCount(solanaVerifier, "'getMultipleAccounts',") === 1 &&
+    exactExecutableLineCount(
+      solanaVerifier,
+      "Object.freeze({ commitment: 'finalized', encoding: 'base64', minContextSlot: slot }),",
+    ) === 1 &&
+    exactExecutableLineCount(solanaVerifier, 'context.slot !== slot ||') === 1 &&
+    exactExecutableLineCount(
+      solanaVerifier,
+      'const initialAnchor = await readBlockAnchor(transport, execution, slot, request.sourceHash);',
+    ) === 1 &&
+    exactExecutableLineCount(
+      solanaVerifier,
+      'const completedAnchor = await readBlockAnchor(transport, execution, slot, request.sourceHash);',
+    ) === 1 &&
+    exactExecutableLineCount(
+      solanaVerifier,
+      "'crypto-lending:solana-mainnet-balance-observed-deployment-identity:v1',",
+    ) === 1 &&
+    !forbiddenCapability.test(ethereumVerifier) &&
+    !forbiddenImport.test(ethereumVerifier) &&
+    !forbiddenCapability.test(solanaVerifier) &&
+    !forbiddenImport.test(solanaVerifier) &&
+    launchSources.every((source) => !concreteDeploymentCapability.test(source))
+  );
+}
+
 function hasDormantProviderNeutralBalanceRpcContract(
   sources: BalanceConsumerArtifactSources,
 ): boolean {
@@ -13662,6 +13867,7 @@ export function inspectBalanceConsumerDeploymentArtifacts(
       hasAuthenticatedBalanceSyncFailureContract(sources) &&
       hasExactBalanceAdapterDependencyContract(sources) &&
       hasExactBalanceDeploymentIdentityBindingContract(sources) &&
+      hasDormantMainnetBalanceDeploymentIdentityArtifactContract(sources) &&
       hasDormantProviderNeutralBalanceRpcContract(sources) &&
       hasDormantNodeHttpsBalanceRpcTransportContract(sources) &&
       hasExactBalanceSyncExecutionCancellationContract(sources) &&
@@ -14434,6 +14640,34 @@ export function loadRepositoryProductionPreflightInput(
         resolve(
           repositoryRoot,
           'apps/api/src/blockchain-sync/infrastructure/rpc/solana-mainnet-balance-indexer.adapter.ts',
+        ),
+        'utf8',
+      ),
+      ethereumMainnetBalanceDeploymentManifestSource: readFileSync(
+        resolve(
+          repositoryRoot,
+          'apps/api/src/blockchain-sync/infrastructure/rpc/ethereum-mainnet-balance-deployment.manifest.ts',
+        ),
+        'utf8',
+      ),
+      ethereumMainnetBalanceDeploymentIdentityVerifierSource: readFileSync(
+        resolve(
+          repositoryRoot,
+          'apps/api/src/blockchain-sync/infrastructure/rpc/ethereum-mainnet-balance-deployment-identity.verifier.ts',
+        ),
+        'utf8',
+      ),
+      solanaMainnetBalanceDeploymentManifestSource: readFileSync(
+        resolve(
+          repositoryRoot,
+          'apps/api/src/blockchain-sync/infrastructure/rpc/solana-mainnet-balance-deployment.manifest.ts',
+        ),
+        'utf8',
+      ),
+      solanaMainnetBalanceDeploymentIdentityVerifierSource: readFileSync(
+        resolve(
+          repositoryRoot,
+          'apps/api/src/blockchain-sync/infrastructure/rpc/solana-mainnet-balance-deployment-identity.verifier.ts',
         ),
         'utf8',
       ),

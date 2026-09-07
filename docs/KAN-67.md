@@ -142,8 +142,9 @@ financial action.
   reader instances; current identity-validated evidence; an exact Ethereum
   block-number/hash/parent checkpoint or Solana rooted finalized-slot/block/
   parent checkpoint; identical complete stablecoin balances; and an approved
-  deployment-manifest fingerprint that exactly matches each source's observed
-  deployment-identity fingerprint. Its immutable V2 candidate preserves both
+  deployment-manifest fingerprint that exactly matches each source's approved-
+  manifest claim, while the two domain-separated observed deployment-identity
+  fingerprints must match each other. Its immutable V2 candidate preserves both
   deployment-aware source attestations and a domain-separated agreement
   fingerprint, while setting both persistence and financial authority false.
   Migration `0027` established the separate append-only
@@ -179,14 +180,23 @@ decode('00', 'hex')` separators. The V2 database path
   well as the dormant provider-position boundaries.
   The checked-in source-pair registry is empty and `NOT_APPROVED`; the
   coordinator and transcript adapters remain unregistered and own no endpoint
-  or egress path. Distinct synthetic aliases do not establish real provider
-  independence. An isolated balance-sync source/DLQ and publisher contract
-  exist, but no dedicated consumer task/service or receive/delete IAM capability
-  is active. Live indexing is still blocked on that approved consumer/runtime,
-  durable message idempotency, independently approved RPC identities and live
-  evidence, secrets, egress, and operational controls. The boundary is
-  deliberately not registered in Nest, the balance worker, or
-  any endpoint and does not make `mayPersist` or financial authority true.
+  or egress path. Production preflight now also byte-pins the dormant Ethereum
+  and Solana deployment manifests and concrete identity verifiers, including
+  their empty `NOT_APPROVED` state, external fingerprint gates, chain-specific
+  checkpoint semantics, and absence from launch roots. These sources do not
+  constitute approval. Activation remains blocked on a separately governed,
+  release-bound manifest-fingerprint approval; evidence that an approved Solana
+  provider can satisfy the `getMultipleAccounts` exact-slot contract; and an
+  independently captured real PYUSD Token-2022 golden fixture with its exact
+  extension inventory and reviewed mutable-field window policy. Distinct
+  synthetic aliases do not establish real provider independence. An isolated
+  balance-sync source/DLQ and publisher contract exist, but no dedicated
+  consumer task/service or receive/delete IAM capability is active. Live
+  indexing is still blocked on that approved consumer/runtime, durable message
+  idempotency, independently approved RPC identities and live evidence, secrets,
+  egress, and operational controls. The boundary is deliberately not registered
+  in Nest, the balance worker, or any endpoint and does not make `mayPersist` or
+  financial authority true.
   Persisting only the nested observation candidate would discard required
   provenance and remains prohibited.
 - **BAL-001 / KAN-66:** the durable price-evidence reader/store and dormant Pyth

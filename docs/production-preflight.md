@@ -98,11 +98,25 @@ Each chain adapter must also receive an opaque, privately branded deployment-
 identity verifier. The adapter binds a nonzero approved-manifest fingerprint
 and observed-identity fingerprint into its candidate only after the verifier
 authenticates the exact request and deployment. The V2 agreement coordinator
-requires both sources to match the registry's one approved manifest and to
-report that same value as their observed identity. The checked-in registry
-remains empty and `NOT_APPROVED`; no verifier constructor appears in any launch
-root. These pins establish a dormant source contract, not a live deployment
-identity or provider approval.
+requires each source's approved-manifest fingerprint to match the registry and
+requires the two independently observed deployment-identity fingerprints to
+match each other. The manifest and observed-identity fingerprints are distinct,
+domain-separated values. The checked-in registry remains empty and
+`NOT_APPROVED`; no verifier constructor appears in any launch root. These pins
+establish a dormant source contract, not a live deployment identity or provider
+approval.
+
+Preflight also byte-pins the concrete dormant Ethereum and Solana deployment
+manifests and identity verifiers. It requires the checked-in manifests to remain
+`NOT_APPROVED` with empty deployment inventories, preserves Ethereum's exact
+EIP-1898 canonical block-hash checks and Solana's exact-slot response gate, and
+rejects owned endpoints, credentials, environment lookup, network clients,
+timers, or any barrel/runtime registration. This does not approve either
+manifest. Activation remains explicitly blocked until a separately governed,
+release-bound manifest fingerprint is approved; an approved Solana provider
+demonstrates that `getMultipleAccounts` can satisfy the verifier's exact-slot
+contract; and an independently captured real PYUSD Token-2022 golden fixture,
+exact extension inventory, and reviewed mutable-field window policy exist.
 
 The same closed artifact set now includes one provider-neutral, source-only
 Node HTTPS transport capsule. Preflight pins its exact SHA-256 and requires its
@@ -191,7 +205,7 @@ selected block header; null or any position/hash/parent mismatch fails as
 `PROVIDER_UNAVAILABLE`. These are source-integrity checks, not provider or
 mainnet observations.
 
-The 68-artifact balance-consumer slice also byte-pins the exact migration
+The 72-artifact balance-consumer slice also byte-pins the exact migration
 `0005` principal constants inherited through `0028`, immutable migration
 `0027`, migration `0032`, and the migration index. Its semantic inspection
 requires a separate permanent append-only
@@ -799,6 +813,9 @@ Relevant machine-readable launch blocker IDs include:
 - `BALANCE_CONSUMER_IAM_NOT_PROVISIONED`
 - `BALANCE_CONSUMER_DATABASE_CAPABILITY_NOT_ENABLED`
 - `BALANCE_CONSUMER_DEPLOYED_EVIDENCE_MISSING`
+- `BALANCE_CONSUMER_SOLANA_EXACT_SLOT_RPC_CAPABILITY_EVIDENCE_MISSING`
+- `BALANCE_CONSUMER_SOLANA_PYUSD_TOKEN_2022_POLICY_EVIDENCE_MISSING`
+- `BALANCE_CONSUMER_DEPLOYMENT_MANIFEST_FINGERPRINT_APPROVAL_MISSING`
 - `AUTH_DEPLOYED_EVIDENCE_MISSING`
 - `DATABASE_MASTER_SECRET_NOT_RDS_MANAGED`
 - `RDS_MASTER_LIFECYCLE_EVIDENCE_MISSING`

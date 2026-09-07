@@ -204,6 +204,34 @@ const BALANCE_CONSUMER_ARTIFACTS = Object.freeze({
     ),
     'utf8',
   ),
+  ethereumMainnetBalanceDeploymentManifestSource: readFileSync(
+    resolve(
+      __dirname,
+      '../apps/api/src/blockchain-sync/infrastructure/rpc/ethereum-mainnet-balance-deployment.manifest.ts',
+    ),
+    'utf8',
+  ),
+  ethereumMainnetBalanceDeploymentIdentityVerifierSource: readFileSync(
+    resolve(
+      __dirname,
+      '../apps/api/src/blockchain-sync/infrastructure/rpc/ethereum-mainnet-balance-deployment-identity.verifier.ts',
+    ),
+    'utf8',
+  ),
+  solanaMainnetBalanceDeploymentManifestSource: readFileSync(
+    resolve(
+      __dirname,
+      '../apps/api/src/blockchain-sync/infrastructure/rpc/solana-mainnet-balance-deployment.manifest.ts',
+    ),
+    'utf8',
+  ),
+  solanaMainnetBalanceDeploymentIdentityVerifierSource: readFileSync(
+    resolve(
+      __dirname,
+      '../apps/api/src/blockchain-sync/infrastructure/rpc/solana-mainnet-balance-deployment-identity.verifier.ts',
+    ),
+    'utf8',
+  ),
   supportedAssetRegistrySource: readFileSync(
     resolve(__dirname, '../apps/api/src/blockchain/domain/supported-asset-registry.ts'),
     'utf8',
@@ -727,6 +755,9 @@ const EXPECTED_DORMANT_BALANCE_CONSUMER_BLOCKERS = Object.freeze([
   'BALANCE_CONSUMER_IAM_NOT_PROVISIONED',
   'BALANCE_CONSUMER_DATABASE_CAPABILITY_NOT_ENABLED',
   'BALANCE_CONSUMER_DEPLOYED_EVIDENCE_MISSING',
+  'BALANCE_CONSUMER_SOLANA_EXACT_SLOT_RPC_CAPABILITY_EVIDENCE_MISSING',
+  'BALANCE_CONSUMER_SOLANA_PYUSD_TOKEN_2022_POLICY_EVIDENCE_MISSING',
+  'BALANCE_CONSUMER_DEPLOYMENT_MANIFEST_FINGERPRINT_APPROVAL_MISSING',
 ] satisfies readonly ProductionPreflightBlockerId[]);
 const EXPECTED_DORMANT_PROVIDER_POSITION_READ_BOUNDARY = Object.freeze({
   inspected: true,
@@ -6103,8 +6134,139 @@ test('balance-consumer inspection pins cancellable PostgreSQL ownership and shut
   }
 });
 
+test('balance-consumer inspection pins dormant mainnet deployment manifests and verifiers', () => {
+  const mutations: readonly (readonly [
+    string,
+    keyof BalanceConsumerArtifactSources,
+    string,
+    string,
+  ])[] = [
+    [
+      'Ethereum checked-in approval status',
+      'ethereumMainnetBalanceDeploymentManifestSource',
+      "approvalStatus: 'NOT_APPROVED' as const,",
+      "approvalStatus: 'APPROVED' as const,",
+    ],
+    [
+      'Ethereum checked-in authority approval',
+      'ethereumMainnetBalanceDeploymentManifestSource',
+      'authorityApprovedForProduction: false as const,',
+      'authorityApprovedForProduction: true as const,',
+    ],
+    [
+      'Ethereum empty checked-in deployment inventory',
+      'ethereumMainnetBalanceDeploymentManifestSource',
+      'assets: Object.freeze([]),',
+      'assets: ETHEREUM_MAINNET_BALANCE_ASSETS,',
+    ],
+    [
+      'Ethereum separately supplied manifest fingerprint',
+      'ethereumMainnetBalanceDeploymentIdentityVerifierSource',
+      'snapshot.requiredApprovedManifestFingerprintSha256 !== approvedManifestFingerprintSha256',
+      'snapshot.requiredApprovedManifestFingerprintSha256 === approvedManifestFingerprintSha256',
+    ],
+    [
+      'Ethereum canonical block-hash binding',
+      'ethereumMainnetBalanceDeploymentIdentityVerifierSource',
+      'requireCanonical: true as const,',
+      'requireCanonical: false as const,',
+    ],
+    [
+      'Solana checked-in approval status',
+      'solanaMainnetBalanceDeploymentManifestSource',
+      "approvalStatus: 'NOT_APPROVED',",
+      "approvalStatus: 'APPROVED',",
+    ],
+    [
+      'Solana empty checked-in program inventory',
+      'solanaMainnetBalanceDeploymentManifestSource',
+      'programs: Object.freeze([]),',
+      'programs: EXPECTED_PROGRAMS,',
+    ],
+    [
+      'Solana PYUSD Token-2022 binding',
+      'solanaMainnetBalanceDeploymentManifestSource',
+      "'2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo': SOLANA_TOKEN_PROGRAM_IDS.TOKEN_2022,",
+      "'2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo': SOLANA_TOKEN_PROGRAM_IDS.LEGACY,",
+    ],
+    [
+      'Solana independently supplied manifest fingerprint',
+      'solanaMainnetBalanceDeploymentIdentityVerifierSource',
+      'independentlyApprovedManifestFingerprintSha256 !== manifest.fingerprintSha256',
+      'independentlyApprovedManifestFingerprintSha256 === manifest.fingerprintSha256',
+    ],
+    [
+      'Solana exact-slot request floor',
+      'solanaMainnetBalanceDeploymentIdentityVerifierSource',
+      "Object.freeze({ commitment: 'finalized', encoding: 'base64', minContextSlot: slot }),",
+      "Object.freeze({ commitment: 'finalized', encoding: 'base64' }),",
+    ],
+    [
+      'Solana exact-slot response gate',
+      'solanaMainnetBalanceDeploymentIdentityVerifierSource',
+      'context.slot !== slot ||',
+      'context.slot < slot ||',
+    ],
+    [
+      'Solana mint mutable-field window',
+      'solanaMainnetBalanceDeploymentIdentityVerifierSource',
+      'data.fill(0, 36, 44);',
+      'data.fill(0, 0, 44);',
+    ],
+    [
+      'Solana Token-2022 extension allowlist',
+      'solanaMainnetBalanceDeploymentIdentityVerifierSource',
+      '1, 3, 4, 6, 9, 10, 12, 14, 16, 18, 19, 20, 21, 22, 23, 24, 25, 26, 28,',
+      '1, 3, 4, 6, 9, 10, 12, 14, 16, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28,',
+    ],
+  ];
+  for (const [label, key, approved, rejected] of mutations) {
+    assert.deepEqual(
+      inspectBalanceConsumerDeploymentArtifacts(
+        mutateBalanceConsumerArtifact(key, approved, rejected),
+      ),
+      INVALID_BALANCE_CONSUMER_DEPLOYMENT,
+      label,
+    );
+  }
+
+  const directCapabilities: readonly BalanceConsumerArtifactSources[] = [
+    {
+      ...BALANCE_CONSUMER_ARTIFACTS,
+      ethereumMainnetBalanceDeploymentIdentityVerifierSource: `${BALANCE_CONSUMER_ARTIFACTS.ethereumMainnetBalanceDeploymentIdentityVerifierSource}\nimport { request } from 'node:https';\nvoid request;\n`,
+    },
+    {
+      ...BALANCE_CONSUMER_ARTIFACTS,
+      solanaMainnetBalanceDeploymentIdentityVerifierSource: `${BALANCE_CONSUMER_ARTIFACTS.solanaMainnetBalanceDeploymentIdentityVerifierSource}\nconst rpcUrl = process.env.SOLANA_RPC_URL;\nvoid rpcUrl;\n`,
+    },
+  ];
+  for (const candidate of directCapabilities) {
+    assert.deepEqual(
+      inspectBalanceConsumerDeploymentArtifacts(candidate),
+      INVALID_BALANCE_CONSUMER_DEPLOYMENT,
+    );
+  }
+
+  const launchRegistrations: readonly BalanceConsumerArtifactSources[] = [
+    {
+      ...BALANCE_CONSUMER_ARTIFACTS,
+      blockchainSyncIndexSource: `${BALANCE_CONSUMER_ARTIFACTS.blockchainSyncIndexSource}\nexport { createDormantSolanaMainnetBalanceDeploymentIdentityVerifier } from './infrastructure/rpc/solana-mainnet-balance-deployment-identity.verifier';\n`,
+    },
+    {
+      ...BALANCE_CONSUMER_ARTIFACTS,
+      runtimeSource: `${BALANCE_CONSUMER_ARTIFACTS.runtimeSource}\nvoid DORMANT_ETHEREUM_MAINNET_BALANCE_DEPLOYMENT_MANIFEST;\n`,
+    },
+  ];
+  for (const candidate of launchRegistrations) {
+    assert.deepEqual(
+      inspectBalanceConsumerDeploymentArtifacts(candidate),
+      INVALID_BALANCE_CONSUMER_DEPLOYMENT,
+    );
+  }
+});
+
 test('balance-consumer inspection brands and freezes only the exact dormant local contract', () => {
-  assert.equal(Object.keys(BALANCE_CONSUMER_ARTIFACTS).length, 68);
+  assert.equal(Object.keys(BALANCE_CONSUMER_ARTIFACTS).length, 72);
   const inspected = inspectBalanceConsumerDeploymentArtifacts(BALANCE_CONSUMER_ARTIFACTS);
   assert.deepEqual(inspected, EXPECTED_DORMANT_BALANCE_CONSUMER_DEPLOYMENT);
   assert.equal(Object.isFrozen(inspected), true);
