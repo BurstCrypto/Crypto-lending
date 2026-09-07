@@ -9,6 +9,7 @@ import {
   DEFAULT_PRODUCTION_DEPLOYMENT_INTENT_EXAMPLE,
   MAX_PRODUCTION_DEPLOYMENT_INTENT_BYTES,
   PRODUCTION_DEPLOYMENT_INTENT_AUTHORITY_KEY_REGISTRY,
+  PRODUCTION_DEPLOYMENT_LIFECYCLE_STATES,
   PRODUCTION_DEPLOYMENT_INTENT_OPERATIONS,
   PRODUCTION_DEPLOYMENT_INTENT_SCOPE,
   PRODUCTION_DEPLOYMENT_INTENT_SIGNER_ROLES,
@@ -16,16 +17,17 @@ import {
   isProductionAuthorizedDeploymentIntentReport,
   isUnbrandedDeploymentIntentReportFreshAtForTest,
   loadAndVerifyProductionDeploymentIntent,
-  productionDeploymentAuthorityStateSha256,
+  productionDeploymentChainGenesisSha256,
   productionDeploymentIntentContentSha256,
   productionDeploymentIntentSigningBytes,
+  productionDeploymentStateSha256,
   revalidateProductionDeploymentIntentReportForApplication,
   revalidateUnbrandedDeploymentIntentReportAtForTest,
   validateProductionDeploymentIntentExample,
   verifyProductionDeploymentIntent,
   verifyProductionDeploymentIntentAuthorizationLifecycleForTest,
   verifyProductionDeploymentIntentAtTrustedClockWithTestRegistry,
-  verifyProductionDeploymentIntentAgainstProductionTargetWithTestRegistry,
+  verifyProductionDeploymentIntentAgainstProductionDestinationWithTestRegistry,
   verifyProductionDeploymentIntentBytes,
   verifyProductionDeploymentIntentBytesWithTestRegistry,
   verifyProductionDeploymentIntentWithTestRegistry,
@@ -39,8 +41,21 @@ const EXPIRES_AT = '2026-09-07T12:30:00Z';
 const ZERO_SHA256 = '0'.repeat(64);
 const SOURCE_REVISION = 'a'.repeat(40);
 const RELEASE_MANIFEST_SHA256 = '1'.repeat(64);
-const DEPLOYMENT_TARGET_SHA256 = '2'.repeat(64);
 const PREDECESSOR_SHA256 = 'f'.repeat(64);
+const PREDECESSOR_RESERVATION_SHA256 = 'e'.repeat(64);
+const PREDECESSOR_RESULT_SHA256 = 'd'.repeat(64);
+const PREDECESSOR_HEAD_SHA256 = 'c'.repeat(64);
+const DESTINATION_BINDING = Object.freeze({
+  destinationId: 'production-provisioning-us-east-1',
+  destinationSha256: '2'.repeat(64),
+  epochId: '3'.repeat(64),
+  destinationRegistrySha256: '4'.repeat(64),
+  environment: 'production',
+  accountId: '123456789012',
+  region: 'us-east-1',
+  stackName: 'crypto-lending-production',
+  publicOrigin: 'https://app.example.com',
+});
 
 const INERT_AUTHORITY = Object.freeze({
   apiDesiredCount: 0,
@@ -65,6 +80,32 @@ const READ_ONLY_AUTHORITY = Object.freeze({
   financialWritesEnabled: false,
 });
 
+function state(lifecycle, authority = INERT_AUTHORITY) {
+  return Object.freeze({ lifecycle, authority });
+}
+
+const DEFAULT_TRANSITIONS = Object.freeze({
+  PROVISION_INERT: Object.freeze([state('ABSENT'), state('INERT_DEPLOYED')]),
+  ABORT_PROVISION: Object.freeze([state('ABSENT'), state('PROVISION_ABORTED')]),
+  ACTIVATE_READ_ONLY: Object.freeze([
+    state('INERT_DEPLOYED'),
+    state('READ_ONLY_ACTIVE', READ_ONLY_AUTHORITY),
+  ]),
+  UPDATE_READ_ONLY: Object.freeze([
+    state('READ_ONLY_ACTIVE', READ_ONLY_AUTHORITY),
+    state('READ_ONLY_ACTIVE', READ_ONLY_AUTHORITY),
+  ]),
+  ROLLBACK: Object.freeze([
+    state('READ_ONLY_ACTIVE', READ_ONLY_AUTHORITY),
+    state('INERT_DEPLOYED'),
+  ]),
+  EMERGENCY_KILL: Object.freeze([
+    state('READ_ONLY_ACTIVE', READ_ONLY_AUTHORITY),
+    state('KILLED_INERT'),
+  ]),
+  DELETE: Object.freeze([state('INERT_DEPLOYED'), state('DELETED')]),
+});
+
 const keyPairs = Object.fromEntries(
   PRODUCTION_DEPLOYMENT_INTENT_SIGNER_ROLES.map((role) => [role, generateKeyPairSync('ed25519')]),
 );
@@ -77,8 +118,8 @@ function testRegistry({
   validUntil = '2027-08-01T00:00:00Z',
 } = {}) {
   return Object.freeze({
-    schemaVersion: 1,
-    artifactType: 'PRODUCTION_DEPLOYMENT_INTENT_AUTHORITY_KEY_REGISTRY',
+    schemaVersion: 2,
+    artifactType: 'PRODUCTION_DEPLOYMENT_INTENT_AUTHORITY_KEY_REGISTRY_V2',
     keys: Object.freeze(
       PRODUCTION_DEPLOYMENT_INTENT_SIGNER_ROLES.map((role) =>
         Object.freeze({
@@ -103,51 +144,72 @@ const TEST_REGISTRY = testRegistry();
 
 function buildContent({
   operation = 'PROVISION_INERT',
-  currentAuthority = operation === 'PROVISION_INERT' ? INERT_AUTHORITY : READ_ONLY_AUTHORITY,
-  proposedAuthority = operation === 'ACTIVATE_READ_ONLY' ? READ_ONLY_AUTHORITY : INERT_AUTHORITY,
-  predecessorIntentSha256 = operation === 'PROVISION_INERT' ? ZERO_SHA256 : PREDECESSOR_SHA256,
+  intentId = `production/${operation.toLowerCase().replaceAll('_', '-')}/2026-09-07/intent-001`,
+  destinationBinding = DESTINATION_BINDING,
+  currentState = DEFAULT_TRANSITIONS[operation]?.[0],
+  proposedState = DEFAULT_TRANSITIONS[operation]?.[1],
+  sequence = operation === 'PROVISION_INERT' || operation === 'ABORT_PROVISION' ? 1 : 2,
+  predecessor = {
+    sequence: sequence - 1,
+    committedHeadSha256:
+      sequence === 1
+        ? productionDeploymentChainGenesisSha256(destinationBinding)
+        : PREDECESSOR_HEAD_SHA256,
+    intentSha256: sequence === 1 ? ZERO_SHA256 : PREDECESSOR_SHA256,
+    reservationSha256: sequence === 1 ? ZERO_SHA256 : PREDECESSOR_RESERVATION_SHA256,
+    resultSha256: sequence === 1 ? ZERO_SHA256 : PREDECESSOR_RESULT_SHA256,
+    stateSha256: productionDeploymentStateSha256(currentState),
+  },
+  abortedProvisionIntentSha256 = operation === 'ABORT_PROVISION' ? 'a'.repeat(64) : ZERO_SHA256,
+  abortedProvisionReservationSha256 = operation === 'ABORT_PROVISION'
+    ? 'b'.repeat(64)
+    : ZERO_SHA256,
+  deploymentConfigurationSha256 = '5'.repeat(64),
+  changeSetName = 'reviewed-production-intent-001',
   issuedAt = ISSUED_AT,
   expiresAt = EXPIRES_AT,
 } = {}) {
   return {
     status: 'AUTHORIZED',
-    intentId: `production/${operation.toLowerCase().replaceAll('_', '-')}/2026-09-07/intent-001`,
+    intentId,
     operation,
+    sequence,
     issuedAt,
     expiresAt,
+    destinationBinding,
     deployment: {
-      accountId: '123456789012',
-      region: 'us-east-1',
-      stackName: 'crypto-lending-production',
-      changeSetName: 'reviewed-production-intent-001',
+      accountId: destinationBinding.accountId,
+      region: destinationBinding.region,
+      stackName: destinationBinding.stackName,
+      changeSetName,
     },
     sourceRevision: SOURCE_REVISION,
     releaseCandidateManifestSha256: RELEASE_MANIFEST_SHA256,
-    deploymentTargetId: 'aws-production-us-east-1-crypto-lending',
-    deploymentTargetSha256: DEPLOYMENT_TARGET_SHA256,
     bindings: {
-      infrastructureContractSha256: '3'.repeat(64),
-      infrastructureTemplateSha256: '4'.repeat(64),
-      deploymentConfigurationSha256: '5'.repeat(64),
+      infrastructureContractSha256: '5'.repeat(64),
+      infrastructureTemplateSha256: '6'.repeat(64),
+      deploymentConfigurationSha256,
       billingControlSha256: '6'.repeat(64),
       egressPolicySha256: '7'.repeat(64),
       credentialStateSha256: '8'.repeat(64),
-      currentStateSha256: productionDeploymentAuthorityStateSha256(currentAuthority),
-      proposedStateSha256: productionDeploymentAuthorityStateSha256(proposedAuthority),
+      currentStateSha256: productionDeploymentStateSha256(currentState),
+      proposedStateSha256: productionDeploymentStateSha256(proposedState),
       rollbackPlanSha256: '9'.repeat(64),
-      killStateSha256: productionDeploymentAuthorityStateSha256(INERT_AUTHORITY),
-      predecessorIntentSha256,
+      killStateSha256: productionDeploymentStateSha256(state('KILLED_INERT')),
+      abortedProvisionIntentSha256,
+      abortedProvisionReservationSha256,
     },
-    currentAuthority,
-    proposedAuthority,
+    predecessor,
+    currentState,
+    proposedState,
   };
 }
 
 function buildRecord({ signedAt = SIGNED_AT, ...configuration } = {}) {
   const content = buildContent(configuration);
   const unsigned = {
-    schemaVersion: 1,
-    artifactType: 'PRODUCTION_INFRASTRUCTURE_DEPLOYMENT_INTENT',
+    schemaVersion: 2,
+    artifactType: 'PRODUCTION_INFRASTRUCTURE_DEPLOYMENT_INTENT_V2',
     intentSha256: productionDeploymentIntentContentSha256(content),
     content,
   };
@@ -175,12 +237,23 @@ function optionsFor(record, overrides = {}) {
   return {
     evaluatedAt: EVALUATED_AT,
     expectedOperation: record.content.operation,
+    expectedSequence: record.content.sequence,
     expectedIntentSha256: record.intentSha256,
-    expectedPredecessorIntentSha256: record.content.bindings.predecessorIntentSha256,
+    expectedDestinationId: record.content.destinationBinding.destinationId,
+    expectedDestinationSha256: record.content.destinationBinding.destinationSha256,
+    expectedDestinationEpochId: record.content.destinationBinding.epochId,
+    expectedDestinationRegistrySha256: record.content.destinationBinding.destinationRegistrySha256,
+    expectedPublicOrigin: record.content.destinationBinding.publicOrigin,
+    expectedPredecessorSequence: record.content.predecessor.sequence,
+    expectedPredecessorCommittedHeadSha256: record.content.predecessor.committedHeadSha256,
+    expectedPredecessorIntentSha256: record.content.predecessor.intentSha256,
+    expectedPredecessorReservationSha256: record.content.predecessor.reservationSha256,
+    expectedPredecessorResultSha256: record.content.predecessor.resultSha256,
+    expectedAbortedProvisionIntentSha256: record.content.bindings.abortedProvisionIntentSha256,
+    expectedAbortedProvisionReservationSha256:
+      record.content.bindings.abortedProvisionReservationSha256,
     expectedSourceRevision: SOURCE_REVISION,
     expectedReleaseCandidateManifestSha256: RELEASE_MANIFEST_SHA256,
-    expectedDeploymentTargetId: record.content.deploymentTargetId,
-    expectedDeploymentTargetSha256: DEPLOYMENT_TARGET_SHA256,
     expectedInfrastructureContractSha256: record.content.bindings.infrastructureContractSha256,
     expectedInfrastructureTemplateSha256: record.content.bindings.infrastructureTemplateSha256,
     expectedDeploymentConfigurationSha256: record.content.bindings.deploymentConfigurationSha256,
@@ -226,7 +299,16 @@ test('accepts an exact two-role intent only through the injected unbranded test 
   assert.equal(report.readyForAuthorizedPlan, false);
   assert.equal(report.executionAllowed, false);
   assert.equal(report.operation, 'PROVISION_INERT');
+  assert.equal(report.sequence, 1);
   assert.equal(report.intentSha256, record.intentSha256);
+  assert.equal(report.callerExpectedPredecessorMatched, true);
+  assert.equal(report.durableCasRequired, true);
+  assert.equal(report.durableCasAccepted, false);
+  assert.equal(report.reservationCommitted, false);
+  assert.equal(
+    report.plan.kind,
+    'LOCAL_ONLY_NON_EXECUTABLE_PRODUCTION_DEPLOYMENT_RESERVATION_REQUEST',
+  );
   assert.equal(isProductionAuthorizedDeploymentIntentReport(report), false);
   assert.equal(Object.isFrozen(report), true);
 
@@ -241,25 +323,179 @@ test('accepts an exact two-role intent only through the injected unbranded test 
   );
 });
 
-test('supports only the five reviewed operations and never proposes financial writes', () => {
+test('supports only the seven reviewed operations and never proposes financial writes', () => {
   assert.deepEqual(PRODUCTION_DEPLOYMENT_INTENT_OPERATIONS, [
     'PROVISION_INERT',
+    'ABORT_PROVISION',
     'ACTIVATE_READ_ONLY',
+    'UPDATE_READ_ONLY',
     'ROLLBACK',
     'EMERGENCY_KILL',
     'DELETE',
+  ]);
+  assert.deepEqual(PRODUCTION_DEPLOYMENT_LIFECYCLE_STATES, [
+    'ABSENT',
+    'INERT_DEPLOYED',
+    'READ_ONLY_ACTIVE',
+    'KILLED_INERT',
+    'DELETED',
+    'PROVISION_ABORTED',
   ]);
   for (const operation of PRODUCTION_DEPLOYMENT_INTENT_OPERATIONS) {
     const record = buildRecord({ operation });
     const report = verifyWithTestRegistry(record);
     assert.equal(report.ok, true, operation);
     assert.equal(report.executionAllowed, false, operation);
-    assert.equal(record.content.proposedAuthority.financialWritesEnabled, false, operation);
+    assert.equal(record.content.proposedState.authority.financialWritesEnabled, false, operation);
+    assert.equal(report.durableCasAccepted, false, operation);
   }
 
   const unknown = structuredClone(buildRecord());
   unknown.content.operation = 'ACTIVATE_WRITE';
   assert.equal(verifyWithTestRegistry(unknown).ok, false);
+});
+
+test('hard-rejects the complete version-one intent, scope, registry, and signing protocol', () => {
+  assert.equal(PRODUCTION_DEPLOYMENT_INTENT_SCOPE.endsWith('_V2'), true);
+  assert.equal(PRODUCTION_DEPLOYMENT_INTENT_AUTHORITY_KEY_REGISTRY.schemaVersion, 2);
+  assert.equal(
+    PRODUCTION_DEPLOYMENT_INTENT_AUTHORITY_KEY_REGISTRY.artifactType,
+    'PRODUCTION_DEPLOYMENT_INTENT_AUTHORITY_KEY_REGISTRY_V2',
+  );
+
+  const record = buildRecord();
+  const versionOneRoot = structuredClone(record);
+  versionOneRoot.schemaVersion = 1;
+  versionOneRoot.artifactType = 'PRODUCTION_INFRASTRUCTURE_DEPLOYMENT_INTENT';
+  assert.equal(verifyWithTestRegistry(versionOneRoot).ok, false);
+
+  const versionOneRegistry = structuredClone(TEST_REGISTRY);
+  versionOneRegistry.schemaVersion = 1;
+  versionOneRegistry.artifactType = 'PRODUCTION_DEPLOYMENT_INTENT_AUTHORITY_KEY_REGISTRY';
+  assert.equal(verifyWithTestRegistry(record, optionsFor(record), versionOneRegistry).ok, false);
+
+  const versionOneScope = structuredClone(TEST_REGISTRY);
+  versionOneScope.keys[0].scope = 'PRODUCTION_INFRASTRUCTURE_DEPLOYMENT_INTENT';
+  assert.equal(verifyWithTestRegistry(record, optionsFor(record), versionOneScope).ok, false);
+});
+
+test('two intents may assert one head but neither acquires a durable reservation or CAS brand', () => {
+  const first = buildRecord({
+    operation: 'UPDATE_READ_ONLY',
+    intentId: 'production/update-read-only/2026-09-07/intent-first',
+    changeSetName: 'reviewed-update-first',
+    deploymentConfigurationSha256: 'a'.repeat(64),
+  });
+  const second = buildRecord({
+    operation: 'UPDATE_READ_ONLY',
+    intentId: 'production/update-read-only/2026-09-07/intent-second',
+    changeSetName: 'reviewed-update-second',
+    deploymentConfigurationSha256: 'b'.repeat(64),
+  });
+  assert.equal(first.content.predecessor.committedHeadSha256, PREDECESSOR_HEAD_SHA256);
+  assert.equal(second.content.predecessor.committedHeadSha256, PREDECESSOR_HEAD_SHA256);
+  assert.notEqual(first.intentSha256, second.intentSha256);
+  for (const candidate of [first, second]) {
+    const report = verifyWithTestRegistry(candidate);
+    assert.equal(report.ok, true);
+    assert.equal(report.callerExpectedPredecessorMatched, true);
+    assert.equal(report.durableCasAccepted, false);
+    assert.equal(report.reservationCommitted, false);
+    assert.equal(report.executionAllowed, false);
+  }
+});
+
+test('binds genesis to stable destination-epoch identity and rejects sequence gaps and overflow', () => {
+  const replacementDestination = {
+    ...DESTINATION_BINDING,
+    epochId: 'a'.repeat(64),
+  };
+  assert.notEqual(
+    productionDeploymentChainGenesisSha256(DESTINATION_BINDING),
+    productionDeploymentChainGenesisSha256(replacementDestination),
+  );
+  assert.equal(
+    productionDeploymentChainGenesisSha256(DESTINATION_BINDING),
+    productionDeploymentChainGenesisSha256({
+      ...DESTINATION_BINDING,
+      destinationRegistrySha256: 'b'.repeat(64),
+    }),
+  );
+  for (const [field, value] of [
+    ['destinationId', 'replacement-production-destination'],
+    ['destinationSha256', 'c'.repeat(64)],
+    ['accountId', '210987654321'],
+    ['region', 'us-west-2'],
+    ['stackName', 'replacement-production-stack'],
+    ['publicOrigin', 'https://replacement.example.com'],
+  ]) {
+    assert.notEqual(
+      productionDeploymentChainGenesisSha256(DESTINATION_BINDING),
+      productionDeploymentChainGenesisSha256({ ...DESTINATION_BINDING, [field]: value }),
+      field,
+    );
+  }
+  assert.throws(() =>
+    productionDeploymentIntentContentSha256(
+      buildContent({
+        destinationBinding: replacementDestination,
+        predecessor: buildContent().predecessor,
+      }),
+    ),
+  );
+  assert.throws(() =>
+    productionDeploymentIntentContentSha256(
+      buildContent({
+        operation: 'ACTIVATE_READ_ONLY',
+        sequence: 3,
+        predecessor: {
+          ...buildContent({ operation: 'ACTIVATE_READ_ONLY' }).predecessor,
+          sequence: 1,
+        },
+      }),
+    ),
+  );
+  assert.throws(() =>
+    productionDeploymentIntentContentSha256(
+      buildContent({ operation: 'ACTIVATE_READ_ONLY', sequence: Number.MAX_SAFE_INTEGER + 1 }),
+    ),
+  );
+});
+
+test('abort binds an exact provision attempt and terminal states have no outgoing edge', () => {
+  const abort = buildRecord({ operation: 'ABORT_PROVISION' });
+  assert.equal(verifyWithTestRegistry(abort).ok, true);
+  for (const field of ['abortedProvisionIntentSha256', 'abortedProvisionReservationSha256']) {
+    const missing = structuredClone(abort.content);
+    missing.bindings[field] = ZERO_SHA256;
+    assert.throws(() => productionDeploymentIntentContentSha256(missing), undefined, field);
+  }
+  const unrelated = buildContent();
+  unrelated.bindings.abortedProvisionIntentSha256 = 'a'.repeat(64);
+  assert.throws(() => productionDeploymentIntentContentSha256(unrelated));
+
+  for (const terminalLifecycle of ['DELETED', 'PROVISION_ABORTED']) {
+    assert.throws(() =>
+      productionDeploymentIntentContentSha256(
+        buildContent({
+          operation: 'ACTIVATE_READ_ONLY',
+          currentState: state(terminalLifecycle),
+        }),
+      ),
+    );
+  }
+});
+
+test('destination physical coordinates must exactly match the deployment request', () => {
+  for (const [field, value] of [
+    ['accountId', '210987654321'],
+    ['region', 'us-west-2'],
+    ['stackName', 'different-production-stack'],
+  ]) {
+    const content = buildContent();
+    content.deployment[field] = value;
+    assert.throws(() => productionDeploymentIntentContentSha256(content), undefined, field);
+  }
 });
 
 test('the empty production registry cannot authorize any otherwise valid intent', () => {
@@ -278,7 +514,7 @@ test('the empty production registry cannot authorize any otherwise valid intent'
     false,
   );
   const keysPresentButTargetEmpty =
-    verifyProductionDeploymentIntentAgainstProductionTargetWithTestRegistry(
+    verifyProductionDeploymentIntentAgainstProductionDestinationWithTestRegistry(
       record,
       optionsFor(record),
       TEST_REGISTRY,
@@ -502,18 +738,28 @@ test('authorization lifecycle makes observed clock rollback sticky and rejects u
   );
 });
 
-test('rejects expired, future, stale-head replayed, and wrongly bound intents', () => {
+test('rejects expired, future, caller-expected predecessor mismatches, and wrong bindings', () => {
   const record = buildRecord();
   const invalidOptions = [
     optionsFor(record, { evaluatedAt: EXPIRES_AT }),
     optionsFor(record, { evaluatedAt: '2026-09-07T11:59:59Z' }),
     optionsFor(record, { expectedIntentSha256: 'e'.repeat(64) }),
+    optionsFor(record, { expectedSequence: 2 }),
+    optionsFor(record, { expectedDestinationId: 'different-production-destination' }),
+    optionsFor(record, { expectedDestinationSha256: 'a'.repeat(64) }),
+    optionsFor(record, { expectedDestinationEpochId: 'b'.repeat(64) }),
+    optionsFor(record, { expectedDestinationRegistrySha256: 'c'.repeat(64) }),
+    optionsFor(record, { expectedPublicOrigin: 'https://other.example.com' }),
+    optionsFor(record, { expectedPredecessorSequence: 1 }),
+    optionsFor(record, { expectedPredecessorCommittedHeadSha256: 'd'.repeat(64) }),
     optionsFor(record, { expectedPredecessorIntentSha256: record.intentSha256 }),
+    optionsFor(record, { expectedPredecessorReservationSha256: 'e'.repeat(64) }),
+    optionsFor(record, { expectedPredecessorResultSha256: 'd'.repeat(64) }),
+    optionsFor(record, { expectedAbortedProvisionIntentSha256: 'a'.repeat(64) }),
+    optionsFor(record, { expectedAbortedProvisionReservationSha256: 'b'.repeat(64) }),
     optionsFor(record, { expectedOperation: 'DELETE' }),
     optionsFor(record, { expectedSourceRevision: 'b'.repeat(40) }),
     optionsFor(record, { expectedReleaseCandidateManifestSha256: 'b'.repeat(64) }),
-    optionsFor(record, { expectedDeploymentTargetId: 'different-production-target' }),
-    optionsFor(record, { expectedDeploymentTargetSha256: 'b'.repeat(64) }),
     optionsFor(record, { expectedInfrastructureContractSha256: 'b'.repeat(64) }),
     optionsFor(record, { expectedInfrastructureTemplateSha256: 'b'.repeat(64) }),
     optionsFor(record, { expectedDeploymentConfigurationSha256: 'b'.repeat(64) }),
@@ -562,9 +808,9 @@ test('rejects wrong roles, keys, signatures, content digests, and target binding
   driftedBinding.content.bindings.egressPolicySha256 = 'c'.repeat(64);
   mutations.push(driftedBinding);
 
-  const driftedTarget = structuredClone(record);
-  driftedTarget.content.deploymentTargetSha256 = 'b'.repeat(64);
-  mutations.push(driftedTarget);
+  const driftedDestination = structuredClone(record);
+  driftedDestination.content.destinationBinding.destinationSha256 = 'b'.repeat(64);
+  mutations.push(driftedDestination);
 
   for (const candidate of mutations) {
     assert.equal(verifyWithTestRegistry(candidate).ok, false);
@@ -623,27 +869,29 @@ test('emergency kill, rollback, delete, and read-only activation cannot increase
   const unsafeCases = [
     {
       operation: 'EMERGENCY_KILL',
-      currentAuthority: READ_ONLY_AUTHORITY,
-      proposedAuthority: READ_ONLY_AUTHORITY,
-      predecessorIntentSha256: PREDECESSOR_SHA256,
+      currentState: state('READ_ONLY_ACTIVE', READ_ONLY_AUTHORITY),
+      proposedState: state('KILLED_INERT', READ_ONLY_AUTHORITY),
     },
     {
       operation: 'ROLLBACK',
-      currentAuthority: INERT_AUTHORITY,
-      proposedAuthority: READ_ONLY_AUTHORITY,
-      predecessorIntentSha256: PREDECESSOR_SHA256,
+      currentState: state('READ_ONLY_ACTIVE', READ_ONLY_AUTHORITY),
+      proposedState: state('READ_ONLY_ACTIVE', {
+        ...READ_ONLY_AUTHORITY,
+        apiDesiredCount: 3,
+      }),
     },
     {
       operation: 'DELETE',
-      currentAuthority: READ_ONLY_AUTHORITY,
-      proposedAuthority: { ...INERT_AUTHORITY, apiDesiredCount: 1 },
-      predecessorIntentSha256: PREDECESSOR_SHA256,
+      currentState: state('READ_ONLY_ACTIVE', READ_ONLY_AUTHORITY),
+      proposedState: state('DELETED'),
     },
     {
       operation: 'ACTIVATE_READ_ONLY',
-      currentAuthority: INERT_AUTHORITY,
-      proposedAuthority: { ...READ_ONLY_AUTHORITY, financialWritesEnabled: true },
-      predecessorIntentSha256: PREDECESSOR_SHA256,
+      currentState: state('INERT_DEPLOYED'),
+      proposedState: state('READ_ONLY_ACTIVE', {
+        ...READ_ONLY_AUTHORITY,
+        financialWritesEnabled: true,
+      }),
     },
   ];
   for (const candidate of unsafeCases) {
@@ -652,9 +900,9 @@ test('emergency kill, rollback, delete, and read-only activation cannot increase
 
   const kill = buildRecord({ operation: 'EMERGENCY_KILL' });
   assert.equal(verifyWithTestRegistry(kill).ok, true);
-  assert.equal(kill.content.proposedAuthority.apiDesiredCount, 0);
-  assert.equal(kill.content.proposedAuthority.externalEgressMode, 'NO_EXTERNAL_EGRESS');
-  assert.deepEqual(kill.content.proposedAuthority.allowedNetworkIds, []);
+  assert.equal(kill.content.proposedState.authority.apiDesiredCount, 0);
+  assert.equal(kill.content.proposedState.authority.externalEgressMode, 'NO_EXTERNAL_EGRESS');
+  assert.deepEqual(kill.content.proposedState.authority.allowedNetworkIds, []);
 });
 
 test('rejects hostile object shapes and ambiguous, noncanonical, or oversized JSON bytes', () => {
@@ -712,7 +960,7 @@ test('checked-in example is exact, inert, unsigned, and CLI validation is local-
   assert.deepEqual(example.signatures, []);
 
   const activated = structuredClone(example);
-  activated.content.proposedAuthority.apiDesiredCount = 1;
+  activated.content.proposedState.authority.apiDesiredCount = 1;
   assert.equal(validateProductionDeploymentIntentExample(activated).ok, false);
 
   const cli = spawnSync(process.execPath, [VALIDATOR_PATH], {

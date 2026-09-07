@@ -4,7 +4,9 @@
  * Offline validation for production infrastructure deployment intents.
  * This module has no cloud, network, subprocess, credential-read, mutation, or
  * deployment capability. A verified intent is only an input to a future,
- * separately reviewed plan; executionAllowed is always false here.
+ * separately reviewed durable reservation/CAS protocol; executionAllowed is
+ * always false here. A matching predecessor is only a caller-expected binding;
+ * it is not a durable chain-head observation.
  */
 
 import { createHash, createPublicKey, verify as verifySignature } from 'node:crypto';
@@ -28,22 +30,34 @@ export const MAX_PRODUCTION_DEPLOYMENT_INTENT_BYTES = 131_072;
 
 export const PRODUCTION_DEPLOYMENT_INTENT_OPERATIONS = Object.freeze([
   'PROVISION_INERT',
+  'ABORT_PROVISION',
   'ACTIVATE_READ_ONLY',
+  'UPDATE_READ_ONLY',
   'ROLLBACK',
   'EMERGENCY_KILL',
   'DELETE',
+]);
+export const PRODUCTION_DEPLOYMENT_LIFECYCLE_STATES = Object.freeze([
+  'ABSENT',
+  'INERT_DEPLOYED',
+  'READ_ONLY_ACTIVE',
+  'KILLED_INERT',
+  'DELETED',
+  'PROVISION_ABORTED',
 ]);
 export const PRODUCTION_DEPLOYMENT_INTENT_SIGNER_ROLES = Object.freeze([
   'DEPLOYMENT_OWNER',
   'INDEPENDENT_SECURITY',
 ]);
-export const PRODUCTION_DEPLOYMENT_INTENT_SCOPE = 'PRODUCTION_INFRASTRUCTURE_DEPLOYMENT_INTENT';
+export const PRODUCTION_DEPLOYMENT_INTENT_SCOPE = 'PRODUCTION_INFRASTRUCTURE_DEPLOYMENT_INTENT_V2';
 
-const SIGNING_DOMAIN = 'crypto-lending:production-deployment-intent-signature:v1';
-const INTENT_HASH_DOMAIN = 'crypto-lending:production-deployment-intent:v1';
-const AUTHORITY_STATE_HASH_DOMAIN = 'crypto-lending:production-deployment-authority-state:v1';
+const SIGNING_DOMAIN = 'crypto-lending:production-deployment-intent-signature:v2';
+const INTENT_HASH_DOMAIN = 'crypto-lending:production-deployment-intent:v2';
+const AUTHORITY_STATE_HASH_DOMAIN = 'crypto-lending:production-deployment-authority-state:v2';
+const DEPLOYMENT_STATE_HASH_DOMAIN = 'crypto-lending:production-deployment-state:v2';
+const CHAIN_GENESIS_HASH_DOMAIN = 'crypto-lending:production-deployment-chain-genesis:v1';
 const AUTHORITY_REGISTRY_HASH_DOMAIN =
-  'crypto-lending:production-deployment-intent-authority-registry:v1';
+  'crypto-lending:production-deployment-intent-authority-registry:v2';
 const MAX_INTENT_VALIDITY_MILLISECONDS = 60 * 60 * 1_000;
 const MAX_KEY_VALIDITY_MILLISECONDS = 400 * 24 * 60 * 60 * 1_000;
 const MAX_AUTHORITY_KEYS = 16;
@@ -67,12 +81,22 @@ const READ_MONOTONIC_TIME_MILLISECONDS = performance.now.bind(performance);
 
 const VERIFICATION_BINDING_KEYS = Object.freeze([
   'expectedOperation',
+  'expectedSequence',
   'expectedIntentSha256',
+  'expectedDestinationId',
+  'expectedDestinationSha256',
+  'expectedDestinationEpochId',
+  'expectedDestinationRegistrySha256',
+  'expectedPublicOrigin',
+  'expectedPredecessorSequence',
+  'expectedPredecessorCommittedHeadSha256',
   'expectedPredecessorIntentSha256',
+  'expectedPredecessorReservationSha256',
+  'expectedPredecessorResultSha256',
+  'expectedAbortedProvisionIntentSha256',
+  'expectedAbortedProvisionReservationSha256',
   'expectedSourceRevision',
   'expectedReleaseCandidateManifestSha256',
-  'expectedDeploymentTargetId',
-  'expectedDeploymentTargetSha256',
   'expectedInfrastructureContractSha256',
   'expectedInfrastructureTemplateSha256',
   'expectedDeploymentConfigurationSha256',
@@ -96,16 +120,28 @@ const EXACT_KEYS = Object.freeze({
     'status',
     'intentId',
     'operation',
+    'sequence',
     'issuedAt',
     'expiresAt',
+    'destinationBinding',
     'deployment',
     'sourceRevision',
     'releaseCandidateManifestSha256',
-    'deploymentTargetId',
-    'deploymentTargetSha256',
     'bindings',
-    'currentAuthority',
-    'proposedAuthority',
+    'predecessor',
+    'currentState',
+    'proposedState',
+  ],
+  destinationBinding: [
+    'destinationId',
+    'destinationSha256',
+    'epochId',
+    'destinationRegistrySha256',
+    'environment',
+    'accountId',
+    'region',
+    'stackName',
+    'publicOrigin',
   ],
   deployment: ['accountId', 'region', 'stackName', 'changeSetName'],
   bindings: [
@@ -119,8 +155,18 @@ const EXACT_KEYS = Object.freeze({
     'proposedStateSha256',
     'rollbackPlanSha256',
     'killStateSha256',
-    'predecessorIntentSha256',
+    'abortedProvisionIntentSha256',
+    'abortedProvisionReservationSha256',
   ],
+  predecessor: [
+    'sequence',
+    'committedHeadSha256',
+    'intentSha256',
+    'reservationSha256',
+    'resultSha256',
+    'stateSha256',
+  ],
+  deploymentState: ['lifecycle', 'authority'],
   authority: [
     'apiDesiredCount',
     'webDesiredCount',
@@ -164,8 +210,8 @@ const ZERO_CALLS = Object.freeze({
 });
 
 export const PRODUCTION_DEPLOYMENT_INTENT_AUTHORITY_KEY_REGISTRY = Object.freeze({
-  schemaVersion: 1,
-  artifactType: 'PRODUCTION_DEPLOYMENT_INTENT_AUTHORITY_KEY_REGISTRY',
+  schemaVersion: 2,
+  artifactType: 'PRODUCTION_DEPLOYMENT_INTENT_AUTHORITY_KEY_REGISTRY_V2',
   keys: Object.freeze([]),
 });
 
@@ -400,6 +446,17 @@ function boundedCount(value) {
   return value;
 }
 
+function chainSequence(value, allowGenesis = false) {
+  if (
+    !Number.isSafeInteger(value) ||
+    value < (allowGenesis ? 0 : 1) ||
+    value > Number.MAX_SAFE_INTEGER
+  ) {
+    return invalid();
+  }
+  return value;
+}
+
 function boolean(value) {
   return typeof value === 'boolean' ? value : invalid();
 }
@@ -407,6 +464,90 @@ function boolean(value) {
 function operation(value) {
   if (!PRODUCTION_DEPLOYMENT_INTENT_OPERATIONS.includes(value)) return invalid();
   return value;
+}
+
+function lifecycle(value) {
+  if (!PRODUCTION_DEPLOYMENT_LIFECYCLE_STATES.includes(value)) return invalid();
+  return value;
+}
+
+function canonicalHttpsOrigin(value) {
+  if (typeof value !== 'string' || value.length > 255) return invalid();
+  let url;
+  try {
+    url = new URL(value);
+  } catch {
+    return invalid();
+  }
+  const labels = url.hostname.split('.');
+  if (
+    url.protocol !== 'https:' ||
+    url.username !== '' ||
+    url.password !== '' ||
+    url.port !== '' ||
+    url.pathname !== '/' ||
+    url.search !== '' ||
+    url.hash !== '' ||
+    url.hostname !== url.hostname.toLowerCase() ||
+    labels.length < 2 ||
+    labels.some(
+      (label) =>
+        label.length < 1 || label.length > 63 || !/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/u.test(label),
+    ) ||
+    !/[a-z]/u.test(url.hostname) ||
+    value !== url.origin
+  ) {
+    return invalid();
+  }
+  return value;
+}
+
+function destinationBinding(value) {
+  const parsed = dataRecord(value, EXACT_KEYS.destinationBinding);
+  if (
+    parsed.environment !== 'production' ||
+    typeof parsed.accountId !== 'string' ||
+    !/^\d{12}$/u.test(parsed.accountId) ||
+    parsed.accountId === '0'.repeat(12) ||
+    typeof parsed.region !== 'string' ||
+    !REGION_PATTERN.test(parsed.region) ||
+    typeof parsed.stackName !== 'string' ||
+    !STACK_NAME_PATTERN.test(parsed.stackName)
+  ) {
+    return invalid();
+  }
+  return Object.freeze({
+    destinationId: boundedIdentifier(parsed.destinationId, 96),
+    destinationSha256: digest(parsed.destinationSha256),
+    epochId: digest(parsed.epochId),
+    destinationRegistrySha256: digest(parsed.destinationRegistrySha256),
+    environment: 'production',
+    accountId: parsed.accountId,
+    region: parsed.region,
+    stackName: parsed.stackName,
+    publicOrigin: canonicalHttpsOrigin(parsed.publicOrigin),
+  });
+}
+
+export function productionDeploymentChainGenesisSha256(value) {
+  try {
+    const destination = destinationBinding(value);
+    return domainHash(
+      CHAIN_GENESIS_HASH_DOMAIN,
+      canonicalizeProductionDeploymentIntentValue({
+        destinationId: destination.destinationId,
+        destinationSha256: destination.destinationSha256,
+        epochId: destination.epochId,
+        environment: destination.environment,
+        accountId: destination.accountId,
+        region: destination.region,
+        stackName: destination.stackName,
+        publicOrigin: destination.publicOrigin,
+      }),
+    );
+  } catch {
+    return invalid();
+  }
 }
 
 function authorityState(value) {
@@ -463,15 +604,49 @@ const INERT_AUTHORITY_STATE = deepFreeze({
   allowedNetworkIds: Object.freeze([]),
   financialWritesEnabled: false,
 });
-const INERT_AUTHORITY_STATE_SHA256 =
-  productionDeploymentAuthorityStateSha256(INERT_AUTHORITY_STATE);
-
 function sameAuthorityState(left, right) {
   return (
     productionDeploymentAuthorityStateSha256(left) ===
     productionDeploymentAuthorityStateSha256(right)
   );
 }
+
+function deploymentState(value) {
+  const parsed = dataRecord(value, EXACT_KEYS.deploymentState);
+  const parsedLifecycle = lifecycle(parsed.lifecycle);
+  const authority = authorityState(parsed.authority);
+  const authorityIsInert = sameAuthorityState(authority, INERT_AUTHORITY_STATE);
+  if (
+    (parsedLifecycle === 'READ_ONLY_ACTIVE' &&
+      (authorityIsInert ||
+        authority.apiDesiredCount === 0 ||
+        authority.webDesiredCount === 0 ||
+        authority.migrationTaskEnabled ||
+        !authority.publicIngressEnabled ||
+        authority.externalEgressMode !== 'ETHEREUM_SOLANA_READ_ONLY' ||
+        authority.financialWritesEnabled)) ||
+    (parsedLifecycle !== 'READ_ONLY_ACTIVE' && !authorityIsInert)
+  ) {
+    return invalid();
+  }
+  return deepFreeze({ lifecycle: parsedLifecycle, authority });
+}
+
+export function productionDeploymentStateSha256(value) {
+  try {
+    return domainHash(
+      DEPLOYMENT_STATE_HASH_DOMAIN,
+      canonicalizeProductionDeploymentIntentValue(deploymentState(value)),
+    );
+  } catch {
+    return invalid();
+  }
+}
+
+const KILLED_INERT_STATE_SHA256 = productionDeploymentStateSha256({
+  lifecycle: 'KILLED_INERT',
+  authority: INERT_AUTHORITY_STATE,
+});
 
 function authorityDoesNotIncrease(current, proposed) {
   const egressRank = (mode) => (mode === 'NO_EXTERNAL_EGRESS' ? 0 : 1);
@@ -509,7 +684,7 @@ function deployment(value) {
   });
 }
 
-function bindings(value, currentAuthority, proposedAuthority) {
+function bindings(value, currentState, proposedState) {
   const parsed = dataRecord(value, EXACT_KEYS.bindings);
   const snapshot = Object.freeze({
     infrastructureContractSha256: digest(parsed.infrastructureContractSha256),
@@ -522,44 +697,110 @@ function bindings(value, currentAuthority, proposedAuthority) {
     proposedStateSha256: digest(parsed.proposedStateSha256),
     rollbackPlanSha256: digest(parsed.rollbackPlanSha256),
     killStateSha256: digest(parsed.killStateSha256),
-    predecessorIntentSha256: digest(parsed.predecessorIntentSha256, true),
+    abortedProvisionIntentSha256: digest(parsed.abortedProvisionIntentSha256, true),
+    abortedProvisionReservationSha256: digest(parsed.abortedProvisionReservationSha256, true),
   });
   if (
-    snapshot.currentStateSha256 !== productionDeploymentAuthorityStateSha256(currentAuthority) ||
-    snapshot.proposedStateSha256 !== productionDeploymentAuthorityStateSha256(proposedAuthority) ||
-    snapshot.killStateSha256 !== INERT_AUTHORITY_STATE_SHA256
+    snapshot.currentStateSha256 !== productionDeploymentStateSha256(currentState) ||
+    snapshot.proposedStateSha256 !== productionDeploymentStateSha256(proposedState) ||
+    snapshot.killStateSha256 !== KILLED_INERT_STATE_SHA256
   ) {
     return invalid();
   }
   return snapshot;
 }
 
-function operationSemantics(parsedOperation, current, proposed, parsedBindings) {
-  if (proposed.financialWritesEnabled) return invalid();
+function predecessor(value) {
+  const parsed = dataRecord(value, EXACT_KEYS.predecessor);
+  return Object.freeze({
+    sequence: chainSequence(parsed.sequence, true),
+    committedHeadSha256: digest(parsed.committedHeadSha256),
+    intentSha256: digest(parsed.intentSha256, true),
+    reservationSha256: digest(parsed.reservationSha256, true),
+    resultSha256: digest(parsed.resultSha256, true),
+    stateSha256: digest(parsed.stateSha256),
+  });
+}
+
+const ALLOWED_LIFECYCLE_TRANSITIONS = Object.freeze({
+  PROVISION_INERT: Object.freeze(['ABSENT', 'INERT_DEPLOYED']),
+  ABORT_PROVISION: Object.freeze(['ABSENT', 'PROVISION_ABORTED']),
+  ACTIVATE_READ_ONLY: Object.freeze([
+    Object.freeze(['INERT_DEPLOYED', 'READ_ONLY_ACTIVE']),
+    Object.freeze(['KILLED_INERT', 'READ_ONLY_ACTIVE']),
+  ]),
+  UPDATE_READ_ONLY: Object.freeze(['READ_ONLY_ACTIVE', 'READ_ONLY_ACTIVE']),
+  ROLLBACK: Object.freeze([
+    Object.freeze(['READ_ONLY_ACTIVE', 'READ_ONLY_ACTIVE']),
+    Object.freeze(['READ_ONLY_ACTIVE', 'INERT_DEPLOYED']),
+  ]),
+  EMERGENCY_KILL: Object.freeze([
+    Object.freeze(['INERT_DEPLOYED', 'KILLED_INERT']),
+    Object.freeze(['READ_ONLY_ACTIVE', 'KILLED_INERT']),
+  ]),
+  DELETE: Object.freeze([
+    Object.freeze(['INERT_DEPLOYED', 'DELETED']),
+    Object.freeze(['KILLED_INERT', 'DELETED']),
+  ]),
+});
+
+function lifecycleTransitionAllowed(parsedOperation, currentLifecycle, proposedLifecycle) {
+  const configured = ALLOWED_LIFECYCLE_TRANSITIONS[parsedOperation];
+  if (!Array.isArray(configured)) return false;
+  const candidates = Array.isArray(configured[0]) ? configured : [configured];
+  return candidates.some(
+    ([current, proposed]) => current === currentLifecycle && proposed === proposedLifecycle,
+  );
+}
+
+function operationSemantics(
+  parsedOperation,
+  sequence,
+  destination,
+  current,
+  proposed,
+  parsedBindings,
+  parsedPredecessor,
+) {
   if (
-    parsedOperation === 'PROVISION_INERT' &&
-    (parsedBindings.predecessorIntentSha256 !== ZERO_SHA256 ||
-      !sameAuthorityState(current, INERT_AUTHORITY_STATE) ||
-      !sameAuthorityState(proposed, INERT_AUTHORITY_STATE))
+    !lifecycleTransitionAllowed(parsedOperation, current.lifecycle, proposed.lifecycle) ||
+    sequence !== parsedPredecessor.sequence + 1 ||
+    parsedPredecessor.stateSha256 !== parsedBindings.currentStateSha256
   ) {
     return invalid();
   }
+
+  const genesisOperation =
+    parsedOperation === 'PROVISION_INERT' || parsedOperation === 'ABORT_PROVISION';
+  const predecessorArtifacts = [
+    parsedPredecessor.intentSha256,
+    parsedPredecessor.reservationSha256,
+    parsedPredecessor.resultSha256,
+  ];
   if (
-    parsedOperation !== 'PROVISION_INERT' &&
-    parsedBindings.predecessorIntentSha256 === ZERO_SHA256
+    (genesisOperation &&
+      (sequence !== 1 ||
+        parsedPredecessor.sequence !== 0 ||
+        parsedPredecessor.committedHeadSha256 !==
+          productionDeploymentChainGenesisSha256(destination) ||
+        predecessorArtifacts.some((value) => value !== ZERO_SHA256))) ||
+    (!genesisOperation &&
+      (sequence < 2 || predecessorArtifacts.some((value) => value === ZERO_SHA256)))
   ) {
     return invalid();
   }
+
+  const abortBindings = [
+    parsedBindings.abortedProvisionIntentSha256,
+    parsedBindings.abortedProvisionReservationSha256,
+  ];
   if (
-    (parsedOperation === 'ROLLBACK' || parsedOperation === 'EMERGENCY_KILL') &&
-    !authorityDoesNotIncrease(current, proposed)
-  ) {
-    return invalid();
-  }
-  if (
-    (parsedOperation === 'EMERGENCY_KILL' || parsedOperation === 'DELETE') &&
-    (!sameAuthorityState(proposed, INERT_AUTHORITY_STATE) ||
-      parsedBindings.proposedStateSha256 !== parsedBindings.killStateSha256)
+    (parsedOperation === 'ABORT_PROVISION' &&
+      abortBindings.some((value) => value === ZERO_SHA256)) ||
+    (parsedOperation !== 'ABORT_PROVISION' &&
+      abortBindings.some((value) => value !== ZERO_SHA256)) ||
+    ((parsedOperation === 'ROLLBACK' || parsedOperation === 'EMERGENCY_KILL') &&
+      !authorityDoesNotIncrease(current.authority, proposed.authority))
   ) {
     return invalid();
   }
@@ -577,24 +818,44 @@ function parsedContent(value) {
     return invalid();
   }
   const parsedOperation = operation(parsed.operation);
-  const currentAuthority = authorityState(parsed.currentAuthority);
-  const proposedAuthority = authorityState(parsed.proposedAuthority);
-  const parsedBindings = bindings(parsed.bindings, currentAuthority, proposedAuthority);
-  operationSemantics(parsedOperation, currentAuthority, proposedAuthority, parsedBindings);
+  const sequence = chainSequence(parsed.sequence);
+  const destination = destinationBinding(parsed.destinationBinding);
+  const parsedDeployment = deployment(parsed.deployment);
+  if (
+    parsedDeployment.accountId !== destination.accountId ||
+    parsedDeployment.region !== destination.region ||
+    parsedDeployment.stackName !== destination.stackName
+  ) {
+    return invalid();
+  }
+  const currentState = deploymentState(parsed.currentState);
+  const proposedState = deploymentState(parsed.proposedState);
+  const parsedBindings = bindings(parsed.bindings, currentState, proposedState);
+  const parsedPredecessor = predecessor(parsed.predecessor);
+  operationSemantics(
+    parsedOperation,
+    sequence,
+    destination,
+    currentState,
+    proposedState,
+    parsedBindings,
+    parsedPredecessor,
+  );
   const content = deepFreeze({
     status: 'AUTHORIZED',
     intentId: boundedIdentifier(parsed.intentId, 192),
     operation: parsedOperation,
+    sequence,
     issuedAt: issuedAt.text,
     expiresAt: expiresAt.text,
-    deployment: deployment(parsed.deployment),
+    destinationBinding: destination,
+    deployment: parsedDeployment,
     sourceRevision: sourceRevision(parsed.sourceRevision),
     releaseCandidateManifestSha256: digest(parsed.releaseCandidateManifestSha256),
-    deploymentTargetId: boundedIdentifier(parsed.deploymentTargetId),
-    deploymentTargetSha256: digest(parsed.deploymentTargetSha256),
     bindings: parsedBindings,
-    currentAuthority,
-    proposedAuthority,
+    predecessor: parsedPredecessor,
+    currentState,
+    proposedState,
   });
   return Object.freeze({ content, issuedAt, expiresAt });
 }
@@ -632,8 +893,8 @@ function signer(value) {
 function unsignedRoot(value) {
   const parsed = dataRecord(value, EXACT_KEYS.unsignedRoot);
   if (
-    parsed.schemaVersion !== 1 ||
-    parsed.artifactType !== 'PRODUCTION_INFRASTRUCTURE_DEPLOYMENT_INTENT'
+    parsed.schemaVersion !== 2 ||
+    parsed.artifactType !== 'PRODUCTION_INFRASTRUCTURE_DEPLOYMENT_INTENT_V2'
   ) {
     return invalid();
   }
@@ -642,8 +903,8 @@ function unsignedRoot(value) {
   if (intentSha256 !== productionDeploymentIntentContentSha256(content.content)) return invalid();
   return Object.freeze({
     value: Object.freeze({
-      schemaVersion: 1,
-      artifactType: 'PRODUCTION_INFRASTRUCTURE_DEPLOYMENT_INTENT',
+      schemaVersion: 2,
+      artifactType: 'PRODUCTION_INFRASTRUCTURE_DEPLOYMENT_INTENT_V2',
       intentSha256,
       content: content.content,
     }),
@@ -696,8 +957,8 @@ function canonicalBase64(value, expectedBytes) {
 function parsedRegistry(value) {
   const parsed = dataRecord(value, EXACT_KEYS.registry);
   if (
-    parsed.schemaVersion !== 1 ||
-    parsed.artifactType !== 'PRODUCTION_DEPLOYMENT_INTENT_AUTHORITY_KEY_REGISTRY'
+    parsed.schemaVersion !== 2 ||
+    parsed.artifactType !== 'PRODUCTION_DEPLOYMENT_INTENT_AUTHORITY_KEY_REGISTRY_V2'
   ) {
     return invalid();
   }
@@ -812,12 +1073,25 @@ function verificationOptions(value, trustedEvaluationInstant) {
   return Object.freeze({
     evaluatedAt,
     expectedOperation: operation(parsed.expectedOperation),
+    expectedSequence: chainSequence(parsed.expectedSequence),
     expectedIntentSha256: digest(parsed.expectedIntentSha256),
+    expectedDestinationId: boundedIdentifier(parsed.expectedDestinationId, 96),
+    expectedDestinationSha256: digest(parsed.expectedDestinationSha256),
+    expectedDestinationEpochId: digest(parsed.expectedDestinationEpochId),
+    expectedDestinationRegistrySha256: digest(parsed.expectedDestinationRegistrySha256),
+    expectedPublicOrigin: canonicalHttpsOrigin(parsed.expectedPublicOrigin),
+    expectedPredecessorSequence: chainSequence(parsed.expectedPredecessorSequence, true),
+    expectedPredecessorCommittedHeadSha256: digest(parsed.expectedPredecessorCommittedHeadSha256),
     expectedPredecessorIntentSha256: digest(parsed.expectedPredecessorIntentSha256, true),
+    expectedPredecessorReservationSha256: digest(parsed.expectedPredecessorReservationSha256, true),
+    expectedPredecessorResultSha256: digest(parsed.expectedPredecessorResultSha256, true),
+    expectedAbortedProvisionIntentSha256: digest(parsed.expectedAbortedProvisionIntentSha256, true),
+    expectedAbortedProvisionReservationSha256: digest(
+      parsed.expectedAbortedProvisionReservationSha256,
+      true,
+    ),
     expectedSourceRevision: sourceRevision(parsed.expectedSourceRevision),
     expectedReleaseCandidateManifestSha256: digest(parsed.expectedReleaseCandidateManifestSha256),
-    expectedDeploymentTargetId: boundedIdentifier(parsed.expectedDeploymentTargetId),
-    expectedDeploymentTargetSha256: digest(parsed.expectedDeploymentTargetSha256),
     expectedInfrastructureContractSha256: digest(parsed.expectedInfrastructureContractSha256),
     expectedInfrastructureTemplateSha256: digest(parsed.expectedInfrastructureTemplateSha256),
     expectedDeploymentConfigurationSha256: digest(parsed.expectedDeploymentConfigurationSha256),
@@ -860,9 +1134,10 @@ function parsedRoot(value) {
   return Object.freeze({ unsigned, signatures: Object.freeze(signatures) });
 }
 
-function requireIntegratedProductionTarget() {
-  // The checked-in target registry is intentionally empty. A later reviewed
-  // integration must replace this refusal with the existing branded resolver.
+function requireIntegratedProductionDestination() {
+  // The checked-in prospective-destination registry is intentionally empty. A
+  // later reviewed integration must replace this refusal with its branded
+  // resolver and a separately branded durable chain-head snapshot.
   return invalid();
 }
 
@@ -892,7 +1167,12 @@ function verifyIntent(
   value,
   optionsValue,
   registryValue,
-  { requireProductionTarget, brandProduction, trustedEvaluationInstant, authorizationLifecycle },
+  {
+    requireProductionDestination,
+    brandProduction,
+    trustedEvaluationInstant,
+    authorizationLifecycle,
+  },
 ) {
   try {
     if (
@@ -912,11 +1192,24 @@ function verifyIntent(
     if (
       parsed.unsigned.value.intentSha256 !== options.expectedIntentSha256 ||
       content.operation !== options.expectedOperation ||
-      content.bindings.predecessorIntentSha256 !== options.expectedPredecessorIntentSha256 ||
+      content.sequence !== options.expectedSequence ||
+      content.destinationBinding.destinationId !== options.expectedDestinationId ||
+      content.destinationBinding.destinationSha256 !== options.expectedDestinationSha256 ||
+      content.destinationBinding.epochId !== options.expectedDestinationEpochId ||
+      content.destinationBinding.destinationRegistrySha256 !==
+        options.expectedDestinationRegistrySha256 ||
+      content.destinationBinding.publicOrigin !== options.expectedPublicOrigin ||
+      content.predecessor.sequence !== options.expectedPredecessorSequence ||
+      content.predecessor.committedHeadSha256 !== options.expectedPredecessorCommittedHeadSha256 ||
+      content.predecessor.intentSha256 !== options.expectedPredecessorIntentSha256 ||
+      content.predecessor.reservationSha256 !== options.expectedPredecessorReservationSha256 ||
+      content.predecessor.resultSha256 !== options.expectedPredecessorResultSha256 ||
+      content.bindings.abortedProvisionIntentSha256 !==
+        options.expectedAbortedProvisionIntentSha256 ||
+      content.bindings.abortedProvisionReservationSha256 !==
+        options.expectedAbortedProvisionReservationSha256 ||
       content.sourceRevision !== options.expectedSourceRevision ||
       content.releaseCandidateManifestSha256 !== options.expectedReleaseCandidateManifestSha256 ||
-      content.deploymentTargetId !== options.expectedDeploymentTargetId ||
-      content.deploymentTargetSha256 !== options.expectedDeploymentTargetSha256 ||
       content.bindings.infrastructureContractSha256 !==
         options.expectedInfrastructureContractSha256 ||
       content.bindings.infrastructureTemplateSha256 !==
@@ -939,7 +1232,7 @@ function verifyIntent(
     ) {
       return invalid();
     }
-    if (requireProductionTarget) requireIntegratedProductionTarget();
+    if (requireProductionDestination) requireIntegratedProductionDestination();
     const registry = parsedRegistry(registryValue);
     const usedPublicKeys = new Set();
     for (const signature of parsed.signatures) {
@@ -983,18 +1276,27 @@ function verifyIntent(
       ok: true,
       signatureValidated: true,
       productionAuthorityValidated: brandProduction,
-      readyForAuthorizedPlan: brandProduction,
+      readyForAuthorizedPlan: false,
+      callerExpectedPredecessorMatched: true,
+      durableCasRequired: true,
+      durableCasAccepted: false,
+      reservationCommitted: false,
       executionAllowed: false,
       operation: content.operation,
+      sequence: content.sequence,
       intentSha256: parsed.unsigned.value.intentSha256,
-      predecessorIntentSha256: content.bindings.predecessorIntentSha256,
+      destinationBinding: content.destinationBinding,
+      predecessor: content.predecessor,
       authorityRegistrySha256: registry.registrySha256,
       validUntil: content.expiresAt,
       plan: Object.freeze({
-        kind: 'LOCAL_ONLY_NON_EXECUTABLE_PRODUCTION_DEPLOYMENT_PLAN',
+        kind: 'LOCAL_ONLY_NON_EXECUTABLE_PRODUCTION_DEPLOYMENT_RESERVATION_REQUEST',
         operation: content.operation,
+        sequence: content.sequence,
+        committedHeadSha256: content.predecessor.committedHeadSha256,
+        durableCasAccepted: false,
         executionAllowed: false,
-        separateInvokerAndLiveEvidenceRequired: true,
+        durableCasAndLiveEvidenceRequired: true,
       }),
       errors: Object.freeze([]),
       ...ZERO_CALLS,
@@ -1012,6 +1314,10 @@ function failureReport(errors = ['Production deployment intent validation failed
     signatureValidated: false,
     productionAuthorityValidated: false,
     readyForAuthorizedPlan: false,
+    callerExpectedPredecessorMatched: false,
+    durableCasRequired: true,
+    durableCasAccepted: false,
+    reservationCommitted: false,
     executionAllowed: false,
     errors: Object.freeze([...errors]),
     ...ZERO_CALLS,
@@ -1022,12 +1328,12 @@ function verifyIntentAtTrustedCurrentTime(
   value,
   options,
   registry,
-  { requireProductionTarget, brandProduction },
+  { requireProductionDestination, brandProduction },
 ) {
   try {
     const initialReading = trustedClockReading();
     return verifyIntent(value, options, registry, {
-      requireProductionTarget,
+      requireProductionDestination,
       brandProduction,
       trustedEvaluationInstant: initialReading.wall,
       authorizationLifecycle: brandProduction
@@ -1081,7 +1387,7 @@ function revalidateReportFromClock(value, registry, readClock) {
 /** Test-only trust seam. A successful report is deliberately never production-branded. */
 export function verifyProductionDeploymentIntentWithTestRegistry(value, options, registry) {
   return verifyIntent(value, options, registry, {
-    requireProductionTarget: false,
+    requireProductionDestination: false,
     brandProduction: false,
   });
 }
@@ -1093,7 +1399,7 @@ export function verifyProductionDeploymentIntentAtTrustedClockWithTestRegistry(
   registry,
 ) {
   return verifyIntentAtTrustedCurrentTime(value, options, registry, {
-    requireProductionTarget: false,
+    requireProductionDestination: false,
     brandProduction: false,
   });
 }
@@ -1113,7 +1419,7 @@ export function verifyProductionDeploymentIntentAuthorizationLifecycleForTest(
     const readClock = testClockSequence(clockReadings);
     const initialReading = readClock();
     return verifyIntent(value, options, registry, {
-      requireProductionTarget: false,
+      requireProductionDestination: false,
       brandProduction: false,
       trustedEvaluationInstant: initialReading.wall,
       authorizationLifecycle: Object.freeze({
@@ -1127,14 +1433,14 @@ export function verifyProductionDeploymentIntentAuthorizationLifecycleForTest(
   }
 }
 
-/** Test-only seam: injected keys still cannot bypass the empty production target registry. */
-export function verifyProductionDeploymentIntentAgainstProductionTargetWithTestRegistry(
+/** Test-only seam: injected keys cannot bypass the empty production destination registry. */
+export function verifyProductionDeploymentIntentAgainstProductionDestinationWithTestRegistry(
   value,
   options,
   registry,
 ) {
   return verifyIntent(value, options, registry, {
-    requireProductionTarget: true,
+    requireProductionDestination: true,
     brandProduction: false,
   });
 }
@@ -1145,7 +1451,7 @@ export function verifyProductionDeploymentIntent(value, options) {
     options,
     PRODUCTION_DEPLOYMENT_INTENT_AUTHORITY_KEY_REGISTRY,
     {
-      requireProductionTarget: true,
+      requireProductionDestination: true,
       brandProduction: true,
     },
   );
@@ -1194,7 +1500,7 @@ function parsedCanonicalBytes(bytes) {
 export function verifyProductionDeploymentIntentBytesWithTestRegistry(bytes, options, registry) {
   try {
     return verifyIntent(parsedCanonicalBytes(bytes), options, registry, {
-      requireProductionTarget: false,
+      requireProductionDestination: false,
       brandProduction: false,
     });
   } catch {
@@ -1208,7 +1514,7 @@ export function verifyProductionDeploymentIntentBytes(bytes, options) {
       parsedCanonicalBytes(bytes),
       options,
       PRODUCTION_DEPLOYMENT_INTENT_AUTHORITY_KEY_REGISTRY,
-      { requireProductionTarget: true, brandProduction: true },
+      { requireProductionDestination: true, brandProduction: true },
     );
   } catch {
     return failureReport();
@@ -1255,30 +1561,43 @@ export function loadAndVerifyProductionDeploymentIntent(path, options) {
 function exactInertExample(value) {
   const parsed = dataRecord(value, EXACT_KEYS.root);
   if (
-    parsed.schemaVersion !== 1 ||
-    parsed.artifactType !== 'PRODUCTION_INFRASTRUCTURE_DEPLOYMENT_INTENT' ||
+    parsed.schemaVersion !== 2 ||
+    parsed.artifactType !== 'PRODUCTION_INFRASTRUCTURE_DEPLOYMENT_INTENT_V2' ||
     parsed.intentSha256 !== 'NOT_AUTHORIZED' ||
     strictArray(parsed.signatures, 0).length !== 0
   ) {
     return false;
   }
   const content = dataRecord(parsed.content, EXACT_KEYS.content);
+  const exampleDestination = dataRecord(content.destinationBinding, EXACT_KEYS.destinationBinding);
   const exampleDeployment = dataRecord(content.deployment, EXACT_KEYS.deployment);
   const exampleBindings = dataRecord(content.bindings, EXACT_KEYS.bindings);
+  const examplePredecessor = dataRecord(content.predecessor, EXACT_KEYS.predecessor);
+  const currentState = dataRecord(content.currentState, EXACT_KEYS.deploymentState);
+  const proposedState = dataRecord(content.proposedState, EXACT_KEYS.deploymentState);
   return (
     content.status === 'NOT_AUTHORIZED' &&
     content.intentId === 'NOT_AUTHORIZED' &&
     content.operation === 'PROVISION_INERT' &&
+    content.sequence === 1 &&
     content.issuedAt === 'NOT_RUN' &&
     content.expiresAt === 'NOT_RUN' &&
+    exampleDestination.environment === 'production' &&
+    Object.entries(exampleDestination).every(
+      ([key, entry]) => key === 'environment' || entry === 'NOT_CAPTURED',
+    ) &&
     Object.values(exampleDeployment).every((entry) => entry === 'NOT_AUTHORIZED') &&
     content.sourceRevision === 'NOT_CAPTURED' &&
     content.releaseCandidateManifestSha256 === 'NOT_CAPTURED' &&
-    content.deploymentTargetId === 'NOT_REGISTERED' &&
-    content.deploymentTargetSha256 === 'NOT_CAPTURED' &&
     Object.values(exampleBindings).every((entry) => entry === 'NOT_CAPTURED') &&
-    sameAuthorityState(authorityState(content.currentAuthority), INERT_AUTHORITY_STATE) &&
-    sameAuthorityState(authorityState(content.proposedAuthority), INERT_AUTHORITY_STATE)
+    examplePredecessor.sequence === 0 &&
+    Object.entries(examplePredecessor).every(
+      ([key, entry]) => key === 'sequence' || entry === 'NOT_CAPTURED',
+    ) &&
+    currentState.lifecycle === 'ABSENT' &&
+    sameAuthorityState(authorityState(currentState.authority), INERT_AUTHORITY_STATE) &&
+    proposedState.lifecycle === 'INERT_DEPLOYED' &&
+    sameAuthorityState(authorityState(proposedState.authority), INERT_AUTHORITY_STATE)
   );
 }
 

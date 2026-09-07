@@ -1,13 +1,25 @@
 {
-  "schemaVersion": 1,
-  "artifactType": "PRODUCTION_INFRASTRUCTURE_DEPLOYMENT_INTENT",
+  "schemaVersion": 2,
+  "artifactType": "PRODUCTION_INFRASTRUCTURE_DEPLOYMENT_INTENT_V2",
   "intentSha256": "NOT_AUTHORIZED",
   "content": {
     "status": "NOT_AUTHORIZED",
     "intentId": "NOT_AUTHORIZED",
     "operation": "PROVISION_INERT",
+    "sequence": 1,
     "issuedAt": "NOT_RUN",
     "expiresAt": "NOT_RUN",
+    "destinationBinding": {
+      "destinationId": "NOT_CAPTURED",
+      "destinationSha256": "NOT_CAPTURED",
+      "epochId": "NOT_CAPTURED",
+      "destinationRegistrySha256": "NOT_CAPTURED",
+      "environment": "production",
+      "accountId": "NOT_CAPTURED",
+      "region": "NOT_CAPTURED",
+      "stackName": "NOT_CAPTURED",
+      "publicOrigin": "NOT_CAPTURED"
+    },
     "deployment": {
       "accountId": "NOT_AUTHORIZED",
       "region": "NOT_AUTHORIZED",
@@ -16,8 +28,6 @@
     },
     "sourceRevision": "NOT_CAPTURED",
     "releaseCandidateManifestSha256": "NOT_CAPTURED",
-    "deploymentTargetId": "NOT_REGISTERED",
-    "deploymentTargetSha256": "NOT_CAPTURED",
     "bindings": {
       "infrastructureContractSha256": "NOT_CAPTURED",
       "infrastructureTemplateSha256": "NOT_CAPTURED",
@@ -29,29 +39,44 @@
       "proposedStateSha256": "NOT_CAPTURED",
       "rollbackPlanSha256": "NOT_CAPTURED",
       "killStateSha256": "NOT_CAPTURED",
-      "predecessorIntentSha256": "NOT_CAPTURED"
+      "abortedProvisionIntentSha256": "NOT_CAPTURED",
+      "abortedProvisionReservationSha256": "NOT_CAPTURED"
     },
-    "currentAuthority": {
-      "apiDesiredCount": 0,
-      "webDesiredCount": 0,
-      "outboxWorkerDesiredCount": 0,
-      "balanceConsumerDesiredCount": 0,
-      "migrationTaskEnabled": false,
-      "publicIngressEnabled": false,
-      "externalEgressMode": "NO_EXTERNAL_EGRESS",
-      "allowedNetworkIds": [],
-      "financialWritesEnabled": false
+    "predecessor": {
+      "sequence": 0,
+      "committedHeadSha256": "NOT_CAPTURED",
+      "intentSha256": "NOT_CAPTURED",
+      "reservationSha256": "NOT_CAPTURED",
+      "resultSha256": "NOT_CAPTURED",
+      "stateSha256": "NOT_CAPTURED"
     },
-    "proposedAuthority": {
-      "apiDesiredCount": 0,
-      "webDesiredCount": 0,
-      "outboxWorkerDesiredCount": 0,
-      "balanceConsumerDesiredCount": 0,
-      "migrationTaskEnabled": false,
-      "publicIngressEnabled": false,
-      "externalEgressMode": "NO_EXTERNAL_EGRESS",
-      "allowedNetworkIds": [],
-      "financialWritesEnabled": false
+    "currentState": {
+      "lifecycle": "ABSENT",
+      "authority": {
+        "apiDesiredCount": 0,
+        "webDesiredCount": 0,
+        "outboxWorkerDesiredCount": 0,
+        "balanceConsumerDesiredCount": 0,
+        "migrationTaskEnabled": false,
+        "publicIngressEnabled": false,
+        "externalEgressMode": "NO_EXTERNAL_EGRESS",
+        "allowedNetworkIds": [],
+        "financialWritesEnabled": false
+      }
+    },
+    "proposedState": {
+      "lifecycle": "INERT_DEPLOYED",
+      "authority": {
+        "apiDesiredCount": 0,
+        "webDesiredCount": 0,
+        "outboxWorkerDesiredCount": 0,
+        "balanceConsumerDesiredCount": 0,
+        "migrationTaskEnabled": false,
+        "publicIngressEnabled": false,
+        "externalEgressMode": "NO_EXTERNAL_EGRESS",
+        "allowedNetworkIds": [],
+        "financialWritesEnabled": false
+      }
     }
   },
   "signatures": []
