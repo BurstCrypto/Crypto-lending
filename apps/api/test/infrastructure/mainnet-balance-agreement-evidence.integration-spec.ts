@@ -50,6 +50,48 @@ const NUMERIC_DEPLOYMENT_FINGERPRINT = '1'.repeat(64);
 const MIGRATIONS_THROUGH_0031 = DATABASE_TEST_SCHEMA_MIGRATION_LIST.filter(
   ({ id }) => id <= '0031',
 );
+const EXPECTED_V2_CHECK_CATALOG = Object.freeze([
+  Object.freeze({
+    name: 'balance_sync_financial_agreement_v2_column_binding_check',
+    expressionOctets: 4488,
+    expressionSha256: '020c7a59d085f7b3ceebdc434a29a71172abfb36a85c4e10cf98cc7b2a76ca43',
+    legacyMarkers: Object.freeze([
+      'approvedManifestFingerprintSha256',
+      'observedIdentityFingerprintSha256',
+    ]),
+  }),
+  Object.freeze({
+    name: 'balance_sync_financial_agreement_v2_envelope_check',
+    expressionOctets: 86,
+    expressionSha256: 'ce3ccb4a34937a960276c59d13bd36b2c325b334adaafb75f8f7f1188a0fbe2c',
+    legacyMarkers: Object.freeze(['mainnet_balance_financial_agreement_envelope_v2_valid']),
+  }),
+  Object.freeze({
+    name: 'balance_sync_financial_agreement_v2_network_check',
+    expressionOctets: 599,
+    expressionSha256: 'e408d79f63011e3e1370023a5d12af0da65a7c079d0cfc2461f728157518c6d4',
+    legacyMarkers: Object.freeze(['eip155:1', 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp']),
+  }),
+  Object.freeze({
+    name: 'balance_sync_financial_agreement_v2_static_state_check',
+    expressionOctets: 1555,
+    expressionSha256: 'd92728ecaced60440ac887d5ace48ab8cc5b79c7ec81d645985aee4b3e414344',
+    legacyMarkers: Object.freeze([
+      'agreement_version = 2',
+      'approved_manifest_fingerprint_sha256',
+      'observed_identity_fingerprint_sha256',
+      'may_authorize_financial_action = false',
+    ]),
+  }),
+] as const);
+
+type V2CheckCatalogRow = Readonly<{
+  conname: string;
+  definition: string;
+  expression: string;
+  expression_octets: number;
+  expression_sha256: string;
+}>;
 
 function quoteIdentifier(value: string): string {
   if (!IDENTIFIER.test(value)) throw new Error(`Unsafe test identifier: ${value}`);
@@ -1086,5 +1128,113 @@ describeWithPostgres('mainnet balance two-source agreement evidence boundary', (
         [PRODUCTION_DATABASE_PRINCIPALS.workerRuntimeRole],
       ),
     ).toMatchObject({ rows: [{ worker_can_record_price: false }] });
+  });
+
+  it('fails closed when any V2 CHECK expression drifts while legacy markers remain', async () => {
+    const v2Verifier =
+      createMainnetBalanceAgreementEvidenceV2TestSchemaMigrationV0032.verifySql ??
+      'SELECT false AS valid';
+    const server = await operationPool.query<{ server_version_num: number }>(
+      `SELECT pg_catalog.current_setting('server_version_num')::integer
+         AS server_version_num`,
+    );
+    expect(server.rows[0]?.server_version_num).toBeGreaterThanOrEqual(160_000);
+    expect(server.rows[0]?.server_version_num).toBeLessThan(170_000);
+
+    const catalog = await operationPool.query<V2CheckCatalogRow>(
+      `SELECT constraint_record.conname,
+              pg_catalog.pg_get_constraintdef(constraint_record.oid, false) AS definition,
+              pg_catalog.pg_get_expr(
+                constraint_record.conbin, constraint_record.conrelid, false
+              ) AS expression,
+              pg_catalog.octet_length(pg_catalog.convert_to(
+                pg_catalog.pg_get_expr(
+                  constraint_record.conbin, constraint_record.conrelid, false
+                ),
+                'UTF8'
+              )) AS expression_octets,
+              pg_catalog.encode(pg_catalog.sha256(pg_catalog.convert_to(
+                pg_catalog.pg_get_expr(
+                  constraint_record.conbin, constraint_record.conrelid, false
+                ),
+                'UTF8'
+              )), 'hex') AS expression_sha256
+       FROM pg_catalog.pg_constraint AS constraint_record
+       WHERE constraint_record.conrelid = pg_catalog.to_regclass(
+         'balance_sync_financial_agreement_evidence_v2'
+       )
+         AND constraint_record.contype = 'c'
+       ORDER BY constraint_record.conname`,
+    );
+    expect(
+      catalog.rows.map(({ conname, expression_octets, expression_sha256 }) => ({
+        name: conname,
+        expressionOctets: expression_octets,
+        expressionSha256: expression_sha256,
+      })),
+    ).toEqual(
+      EXPECTED_V2_CHECK_CATALOG.map(({ name, expressionOctets, expressionSha256 }) => ({
+        name,
+        expressionOctets,
+        expressionSha256,
+      })),
+    );
+    await expect(operationPool.query<{ valid: boolean }>(v2Verifier)).resolves.toMatchObject({
+      rows: [{ valid: true }],
+    });
+
+    for (const expected of EXPECTED_V2_CHECK_CATALOG) {
+      const original = catalog.rows.find(({ conname }) => conname === expected.name);
+      if (!original) throw new Error(`Missing V2 CHECK catalog row: ${expected.name}`);
+      try {
+        await operationPool.query(
+          `ALTER TABLE balance_sync_financial_agreement_evidence_v2
+             DROP CONSTRAINT ${quoteIdentifier(expected.name)}`,
+        );
+        await operationPool.query(
+          `ALTER TABLE balance_sync_financial_agreement_evidence_v2
+             ADD CONSTRAINT ${quoteIdentifier(expected.name)}
+             CHECK ((${original.expression}) AND
+               pg_catalog.octet_length(agreement_fingerprint_sha256) >= 0)`,
+        );
+        const drifted = await operationPool.query<{
+          definition: string;
+          expression_sha256: string;
+        }>(
+          `SELECT pg_catalog.pg_get_constraintdef(constraint_record.oid, false) AS definition,
+                  pg_catalog.encode(pg_catalog.sha256(pg_catalog.convert_to(
+                    pg_catalog.pg_get_expr(
+                      constraint_record.conbin, constraint_record.conrelid, false
+                    ),
+                    'UTF8'
+                  )), 'hex') AS expression_sha256
+           FROM pg_catalog.pg_constraint AS constraint_record
+           WHERE constraint_record.conrelid = pg_catalog.to_regclass(
+             'balance_sync_financial_agreement_evidence_v2'
+           )
+             AND constraint_record.conname = $1`,
+          [expected.name],
+        );
+        expect(drifted.rows[0]?.expression_sha256).not.toBe(expected.expressionSha256);
+        for (const marker of expected.legacyMarkers) {
+          expect(drifted.rows[0]?.definition).toContain(marker);
+        }
+        await expect(operationPool.query<{ valid: boolean }>(v2Verifier)).resolves.toMatchObject({
+          rows: [{ valid: false }],
+        });
+      } finally {
+        await operationPool.query(
+          `ALTER TABLE balance_sync_financial_agreement_evidence_v2
+             DROP CONSTRAINT IF EXISTS ${quoteIdentifier(expected.name)}`,
+        );
+        await operationPool.query(
+          `ALTER TABLE balance_sync_financial_agreement_evidence_v2
+             ADD CONSTRAINT ${quoteIdentifier(expected.name)} ${original.definition}`,
+        );
+      }
+      await expect(operationPool.query<{ valid: boolean }>(v2Verifier)).resolves.toMatchObject({
+        rows: [{ valid: true }],
+      });
+    }
   });
 });

@@ -19,6 +19,24 @@ const VALIDATE_ENVELOPE =
   'mainnet_balance_financial_agreement_envelope_v2_valid(jsonb,timestamp with time zone)';
 const RECORD_AGREEMENT = 'record_balance_sync_financial_agreement_evidence_v2(jsonb)';
 const V2_FUNCTIONS = Object.freeze([SOLANA_IDENTITY, VALIDATE_ENVELOPE, RECORD_AGREEMENT] as const);
+const V2_CHECK_EXPRESSION_SHA256 = Object.freeze([
+  [
+    'balance_sync_financial_agreement_v2_column_binding_check',
+    '020c7a59d085f7b3ceebdc434a29a71172abfb36a85c4e10cf98cc7b2a76ca43',
+  ],
+  [
+    'balance_sync_financial_agreement_v2_envelope_check',
+    'ce3ccb4a34937a960276c59d13bd36b2c325b334adaafb75f8f7f1188a0fbe2c',
+  ],
+  [
+    'balance_sync_financial_agreement_v2_network_check',
+    'e408d79f63011e3e1370023a5d12af0da65a7c079d0cfc2461f728157518c6d4',
+  ],
+  [
+    'balance_sync_financial_agreement_v2_static_state_check',
+    'd92728ecaced60440ac887d5ace48ab8cc5b79c7ec81d645985aee4b3e414344',
+  ],
+] as const);
 
 function identifier(value: string, name: string): string {
   if (!SQL_IDENTIFIER.test(value)) {
@@ -655,6 +673,9 @@ function createVerifierSql(
     [VALIDATE_ENVELOPE, sourceSha256(parts.validateEnvelopeBody)],
     [RECORD_AGREEMENT, sourceSha256(parts.recordAgreementBody)],
   ] as const;
+  const expectedCheckExpressionHashes = V2_CHECK_EXPRESSION_SHA256.map(
+    ([constraintName, hash]) => `WHEN '${constraintName}' THEN '${hash}'`,
+  ).join('\n              ');
 
   return `SELECT (
       prior.valid AND relation_state.valid AND column_state.valid AND type_state.valid
@@ -904,6 +925,25 @@ function createVerifierSql(
           NOT constraint_record.condeferrable
           AND NOT constraint_record.condeferred
         )
+        AND pg_catalog.bool_and(CASE
+          WHEN constraint_record.contype <> 'c' THEN true
+          WHEN constraint_record.conbin IS NULL THEN false
+          ELSE COALESCE(
+            pg_catalog.encode(
+              pg_catalog.sha256(pg_catalog.convert_to(
+                pg_catalog.pg_get_expr(
+                  constraint_record.conbin, constraint_record.conrelid, false
+                ),
+                'UTF8'
+              )),
+              'hex'
+            ) = CASE constraint_record.conname
+              ${expectedCheckExpressionHashes}
+              ELSE NULL
+            END,
+            false
+          )
+        END)
         AND pg_catalog.bool_and(CASE constraint_record.conname
           WHEN '${TABLE}_pkey' THEN constraint_record.contype = 'p'
             AND constraint_record.connoinherit

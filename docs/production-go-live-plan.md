@@ -784,14 +784,20 @@ components during this cutover; no owner-authorized runtime binding exists.
 Neither `0030`, `0031`, `0032`, nor this rollout claims physical commit
 acknowledgement.
 
-The guarded disposable loopback PostgreSQL run on 2026-09-07 passed 10/10
+The guarded disposable loopback PostgreSQL run on 2026-09-07 passed 11/11
 mainnet balance-agreement cases and 6/6 related provider-position cases. It
 proved local V1 rejection with zero rows, empty V1 relation/object preservation
 through the upgrade, and genuine Ethereum and Solana V2 acceptance. This is
 local-only integration evidence, not deployed or production-catalog evidence.
-Exact normalized CHECK-definition hashes and verification against the eventual
-live catalog remain pre-grant blockers; this slice does not claim recursive
-historical-verifier closure.
+Migration `0032` now pins SHA-256 hashes of PostgreSQL 16's non-pretty
+`pg_get_expr(conbin, conrelid, false)` output for exactly four V2 CHECK
+expressions, retains its structural, ACL, and function checks, and fails closed
+on CHECK-expression catalog drift. The local database proof changed and
+restored each CHECK while preserving every earlier marker substring. A
+PostgreSQL engine or deparser upgrade
+requires a reviewed hash rebaseline. Verification against the eventual live
+catalog remains a pre-grant blocker; this slice does not activate the dormant
+capability or claim recursive historical-verifier closure.
 
 This cutover does **not** activate an oracle writer, chain indexer, Aave
 checkpoint writer, balance consumer, provider endpoint, or financial action.

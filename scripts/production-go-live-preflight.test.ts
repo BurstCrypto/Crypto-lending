@@ -5435,6 +5435,26 @@ test('balance-consumer inspection pins immutable V1 input and one-way owner-only
     ],
     [
       'mainnetBalanceAgreementEvidenceV2MigrationSource',
+      '020c7a59d085f7b3ceebdc434a29a71172abfb36a85c4e10cf98cc7b2a76ca43',
+      '120c7a59d085f7b3ceebdc434a29a71172abfb36a85c4e10cf98cc7b2a76ca43',
+    ],
+    [
+      'mainnetBalanceAgreementEvidenceV2MigrationSource',
+      'constraint_record.conbin, constraint_record.conrelid, false',
+      'constraint_record.conbin, constraint_record.conrelid, true',
+    ],
+    [
+      'mainnetBalanceAgreementEvidenceV2MigrationSource',
+      'WHEN constraint_record.conbin IS NULL THEN false',
+      'WHEN constraint_record.conbin IS NULL THEN true',
+    ],
+    [
+      'mainnetBalanceAgreementEvidenceV2MigrationSource',
+      'pg_catalog.pg_get_expr(',
+      'pg_catalog.pg_get_constraintdef(',
+    ],
+    [
+      'mainnetBalanceAgreementEvidenceV2MigrationSource',
       "AND pg_catalog.bool_and(relation.relpersistence = 'p')",
       "AND pg_catalog.bool_and(relation.relpersistence = 'u')",
     ],

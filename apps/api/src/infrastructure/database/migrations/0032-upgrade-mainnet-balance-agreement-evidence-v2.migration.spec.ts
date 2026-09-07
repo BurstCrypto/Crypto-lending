@@ -198,6 +198,46 @@ describe('migration 0032 deployment-aware mainnet balance agreement evidence', (
     );
   });
 
+  it('pins all four V2 CHECK expressions to reviewed PostgreSQL 16 deparser hashes', () => {
+    const checkExpressionHashes = Array.from(
+      verifier.matchAll(
+        /WHEN '(balance_sync_financial_agreement_v2_[a-z_]+_check)' THEN '([0-9a-f]{64})'/gu,
+      ),
+      (match) => [match[1], match[2]],
+    );
+
+    expect(checkExpressionHashes).toEqual([
+      [
+        'balance_sync_financial_agreement_v2_column_binding_check',
+        '020c7a59d085f7b3ceebdc434a29a71172abfb36a85c4e10cf98cc7b2a76ca43',
+      ],
+      [
+        'balance_sync_financial_agreement_v2_envelope_check',
+        'ce3ccb4a34937a960276c59d13bd36b2c325b334adaafb75f8f7f1188a0fbe2c',
+      ],
+      [
+        'balance_sync_financial_agreement_v2_network_check',
+        'e408d79f63011e3e1370023a5d12af0da65a7c079d0cfc2461f728157518c6d4',
+      ],
+      [
+        'balance_sync_financial_agreement_v2_static_state_check',
+        'd92728ecaced60440ac887d5ace48ab8cc5b79c7ec81d645985aee4b3e414344',
+      ],
+    ]);
+    expect(new Set(checkExpressionHashes.map(([, hash]) => hash)).size).toBe(4);
+    expect(
+      verifier.match(
+        /pg_catalog\.pg_get_expr\(\s*constraint_record\.conbin, constraint_record\.conrelid, false\s*\)/gu,
+      ),
+    ).toHaveLength(1);
+    expect(verifier).toContain('constraint_record.conbin, constraint_record.conrelid, false');
+    expect(verifier).toContain('WHEN constraint_record.conbin IS NULL THEN false');
+    expect(verifier).toContain('pg_catalog.convert_to(\n                pg_catalog.pg_get_expr(');
+    expect(verifier).toContain("'UTF8'\n              )),\n              'hex'");
+    expect(verifier).toContain('ELSE COALESCE(');
+    expect(verifier).toContain('ELSE NULL\n            END,\n            false');
+  });
+
   it('rolls back only while V2 is unused and never changes the V1 boundary', () => {
     expect(down).toContain(
       'LOCK TABLE balance_sync_financial_agreement_evidence_v2 IN ACCESS EXCLUSIVE MODE',

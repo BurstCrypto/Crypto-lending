@@ -234,13 +234,21 @@ relation with no RLS, policies, or non-internal rules; exact column order,
 types, nullability, identity/generated/default/collation state; exact PL/pgSQL
 input/output signatures and function-body hashes; and no non-owner table,
 column, row-type, or function ACL. A guarded disposable loopback PostgreSQL run
-on 2026-09-07 passed 10/10 mainnet balance-agreement cases and 6/6 related
+on 2026-09-07 passed 11/11 mainnet balance-agreement cases and 6/6 related
 provider-position cases. The mainnet cases prove V1 rejection leaves zero rows,
 the upgrade preserves the empty V1 relation and objects, and genuine Ethereum
-and Solana V2 envelopes record successfully. This is local-only integration
-evidence. It is not live-provider, deployed, production-catalog, or recursive
-historical-verifier closure, and exact normalized CHECK-definition hashes plus
-verification against the eventual live catalog remain pre-grant blockers.
+and Solana V2 envelopes record successfully. Migration `0032` also pins
+SHA-256 hashes of PostgreSQL 16's non-pretty
+`pg_get_expr(conbin, conrelid, false)` output for exactly four V2 CHECK
+expressions while retaining its structural, ACL, and function checks. Its
+catalog verifier therefore fails closed on CHECK-expression drift. The local
+database proof changed and restored each CHECK while preserving every earlier
+marker substring. These hashes
+require a reviewed rebaseline when the PostgreSQL engine or deparser is
+upgraded. This remains local-only integration evidence, not live-provider,
+deployed, production-catalog, or recursive historical-verifier closure.
+Verification against the eventual live catalog remains a pre-grant blocker and
+does not activate the dormant capability.
 
 The inspected source keeps activation false, sets
 `BALANCE_CONSUMER_MODE=disabled`, and leaves the runtime uncomposed. The task

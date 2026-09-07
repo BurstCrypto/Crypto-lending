@@ -218,14 +218,19 @@ decode('00', 'hex')` separators. The V2 database path
 
 There were no installs, external network/RPC/provider calls, cloud services,
 trials, deployments, pushes, or paid actions in this implementation. On
-2026-09-07, the guarded disposable loopback PostgreSQL run passed 10/10 mainnet
+2026-09-07, the guarded disposable loopback PostgreSQL run passed 11/11 mainnet
 balance-agreement cases and the related provider-position lane passed 6/6. The
 mainnet lane covered V1 rejection with zero rows, upgrade preservation of the
 empty V1 relation and its objects, and genuine Ethereum and Solana V2
-acceptance. This is local-only database evidence, not a live provider,
-blockchain, deployment, or production-catalog result. Exact normalized CHECK-
-definition hashes and verification against the eventual live catalog remain
-pre-grant blockers.
+acceptance. Migration `0032` now pins SHA-256 hashes of PostgreSQL 16's
+non-pretty `pg_get_expr(conbin, conrelid, false)` output for exactly four V2
+CHECK expressions. It retains the structural, ACL, and function checks and
+fails closed when those catalog expressions drift; the database proof changed
+and restored each CHECK while preserving its earlier marker substrings. This is local-only database
+evidence, not a live provider, blockchain, deployment, or production-catalog
+result. A PostgreSQL engine or deparser upgrade requires a reviewed hash
+rebaseline. Verification against the eventual live catalog remains a pre-grant
+blocker and no activation is implied.
 
 ## Local verification
 

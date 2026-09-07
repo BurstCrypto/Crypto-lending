@@ -909,7 +909,7 @@ const REVIEWED_BALANCE_CONSUMER_ARTIFACT_SHA256 = Object.freeze({
   mainnetBalanceAgreementEvidenceV1MigrationSource:
     '9ff329c1ce601cc2b830036239b2f16f34ebe6163aca57e033714d2e8718010f',
   mainnetBalanceAgreementEvidenceV2MigrationSource:
-    '5220d3dad09e5ddaf24825f40913482616c81954e919afe3fb421513f7d9b09d',
+    '3cb514026c1d9a1144d501700c0fa8ec8da919111919c7f697b02e33c4eeeb44',
   migrationIndexSource: '58a83e45c98c5e2d99b5fe982aef0770c11e55cc037341c45d1b60cd4d8edd78',
   releaseManifestSource: '234f2e397055af0884b45a599b7767fe9e24952b7978b769af4a46c73c1653ea',
   productionContainerValidatorSource:
@@ -13399,6 +13399,30 @@ function hasDormantMainnetBalanceAgreementEvidenceV2MigrationContract(
     'corroborating_attestation.approvedManifestFingerprintSha256',
     'corroborating_attestation.observedIdentityFingerprintSha256',
   ] as const;
+  const v2CheckExpressionHashes = Array.from(
+    migration.matchAll(
+      /\[\s*'(balance_sync_financial_agreement_v2_[a-z_]+_check)',\s*'([0-9a-f]{64})',\s*\]/gu,
+    ),
+    (match) => [match[1], match[2]] as const,
+  );
+  const expectedV2CheckExpressionHashes = [
+    [
+      'balance_sync_financial_agreement_v2_column_binding_check',
+      '020c7a59d085f7b3ceebdc434a29a71172abfb36a85c4e10cf98cc7b2a76ca43',
+    ],
+    [
+      'balance_sync_financial_agreement_v2_envelope_check',
+      'ce3ccb4a34937a960276c59d13bd36b2c325b334adaafb75f8f7f1188a0fbe2c',
+    ],
+    [
+      'balance_sync_financial_agreement_v2_network_check',
+      'e408d79f63011e3e1370023a5d12af0da65a7c079d0cfc2461f728157518c6d4',
+    ],
+    [
+      'balance_sync_financial_agreement_v2_static_state_check',
+      'd92728ecaced60440ac887d5ace48ab8cc5b79c7ec81d645985aee4b3e414344',
+    ],
+  ] as const;
 
   return (
     exactExecutableLineCount(v1Migration, "id: '0027',") === 1 &&
@@ -13430,6 +13454,14 @@ function hasDormantMainnetBalanceAgreementEvidenceV2MigrationContract(
     v2JsonStringTypeChecks.filter((check) => check === 'position_entry.amountAtomic').length ===
       2 &&
     v2JsonStringTypeChecks.filter((check) => check === 'checkpoint.kind').length === 2 &&
+    exactExecutableLineCount(migration, 'const V2_CHECK_EXPRESSION_SHA256 = Object.freeze([') ===
+      1 &&
+    v2CheckExpressionHashes.length === expectedV2CheckExpressionHashes.length &&
+    expectedV2CheckExpressionHashes.every(
+      ([name, hash], index) =>
+        v2CheckExpressionHashes[index]?.[0] === name &&
+        v2CheckExpressionHashes[index]?.[1] === hash,
+    ) &&
     exactExecutableLineCount(
       v1Migration,
       "OR pg_catalog.jsonb_typeof(position_entry -> 'amountAtomic') <> 'string'",
@@ -13612,6 +13644,19 @@ function hasDormantMainnetBalanceAgreementEvidenceV2MigrationContract(
     exactExecutableLineCount(verifierSource, 'AND NOT procedure.proretset') === 2 &&
     exactExecutableLineCount(verifierSource, "AND trigger.tgenabled = 'A'") === 1 &&
     exactExecutableLineCount(verifierSource, 'SELECT pg_catalog.count(*) = 6') === 2 &&
+    exactExecutableLineCount(
+      verifierSource,
+      'const expectedCheckExpressionHashes = V2_CHECK_EXPRESSION_SHA256.map(',
+    ) === 1 &&
+    exactExecutableLineCount(verifierSource, 'pg_catalog.pg_get_expr(') === 1 &&
+    verifierSource.includes('constraint_record.conbin, constraint_record.conrelid, false') &&
+    exactExecutableLineCount(verifierSource, 'WHEN constraint_record.conbin IS NULL THEN false') ===
+      1 &&
+    exactExecutableLineCount(verifierSource, 'ELSE COALESCE(') === 1 &&
+    verifierSource.includes('${expectedCheckExpressionHashes}') &&
+    verifierSource.includes(
+      'pg_catalog.sha256(pg_catalog.convert_to(\n                pg_catalog.pg_get_expr(',
+    ) &&
     verifierSource.includes(
       'CROSS JOIN LATERAL pg_catalog.aclexplode(guarded_attribute.attacl) AS acl',
     ) &&
