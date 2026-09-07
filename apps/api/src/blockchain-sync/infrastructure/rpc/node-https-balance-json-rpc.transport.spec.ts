@@ -319,6 +319,7 @@ describe('Node HTTPS balance JSON-RPC transport', () => {
     ['solana', config({ networkId: SOLANA }), 'getGenesisHash'],
     ['solana', config({ networkId: SOLANA }), 'getSlot'],
     ['solana', config({ networkId: SOLANA }), 'getBlock'],
+    ['solana', config({ networkId: SOLANA }), 'getMultipleAccounts'],
     ['solana', config({ networkId: SOLANA }), 'getTokenAccountsByOwner'],
   ] as const)('admits the exact %s mainnet method %s', async (_chain, candidate, method) => {
     installLookup();

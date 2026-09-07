@@ -30,7 +30,13 @@ const ALLOWED_METHODS = Object.freeze({
     'eth_getStorageAt',
     'eth_call',
   ]),
-  [SOLANA_MAINNET]: new Set(['getGenesisHash', 'getSlot', 'getBlock', 'getTokenAccountsByOwner']),
+  [SOLANA_MAINNET]: new Set([
+    'getGenesisHash',
+    'getSlot',
+    'getBlock',
+    'getMultipleAccounts',
+    'getTokenAccountsByOwner',
+  ]),
 });
 
 export type NodeHttpsBalanceRpcNetworkId = typeof ETHEREUM_MAINNET | typeof SOLANA_MAINNET;
