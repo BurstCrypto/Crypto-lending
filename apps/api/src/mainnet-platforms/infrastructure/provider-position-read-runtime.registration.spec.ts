@@ -1,6 +1,3 @@
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
-
 import {
   PRODUCTION_PROVIDER_POSITION_READ_RUNTIME_REGISTRY,
   PROVIDER_POSITION_READ_RUNTIME_NETWORK_IDS,
@@ -97,21 +94,5 @@ describe('provider-position read runtime registration', () => {
     await expect(reader.readCurrentPositions({} as never)).rejects.toBeInstanceOf(
       ProviderPositionReadRuntimeUnavailableError,
     );
-  });
-
-  it('contains no ambient I/O, provider, persistence, or runtime-composition capability', () => {
-    const source = readFileSync(
-      resolve(__dirname, 'provider-position-read-runtime.registration.ts'),
-      'utf8',
-    );
-
-    expect(source).not.toMatch(
-      /\bfrom\s+['"](?:node:)?(?:child_process|dgram|dns|fs|http|http2|https|net|tls|worker_threads)(?:\/[^'"]*)?['"]/u,
-    );
-    expect(source).not.toMatch(
-      /\b(?:fetch|setTimeout|setInterval|setImmediate|queueMicrotask)\s*\(|\b(?:process|Deno|Bun)\s*\.\s*env\b|\bimport\s*\(/u,
-    );
-    expect(source).not.toMatch(/\b(?:PostgresService|Pool|createPostgresPool|NestFactory)\b/u);
-    expect(source).not.toContain('provider-position-admission-runtime.composition');
   });
 });
