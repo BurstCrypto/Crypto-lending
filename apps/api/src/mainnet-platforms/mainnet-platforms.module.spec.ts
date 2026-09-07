@@ -6,6 +6,7 @@ import { MainnetPlatformDirectoryService } from './application/mainnet-platform-
 import { MAINNET_PROVIDER_POSITION_READER } from './application/ports/mainnet-provider-position-reader.port';
 import { MainnetPlatformsController } from './http/mainnet-platforms.controller';
 import { MainnetPlatformsPrivacyInterceptor } from './http/mainnet-platforms-privacy.interceptor';
+import { ProviderPositionReadRuntimeRegistration } from './infrastructure/provider-position-read-runtime.registration';
 import { MainnetPlatformsModule } from './mainnet-platforms.module';
 
 describe('MainnetPlatformsModule', () => {
@@ -22,15 +23,33 @@ describe('MainnetPlatformsModule', () => {
       MODULE_METADATA.PROVIDERS,
       MainnetPlatformsModule,
     ) as unknown[];
+    const exports = Reflect.getMetadata(
+      MODULE_METADATA.EXPORTS,
+      MainnetPlatformsModule,
+    ) as unknown[];
 
     expect(imports).toEqual([AccountsModule, AuthenticationModule]);
     expect(controllers).toEqual([MainnetPlatformsController]);
-    expect(providers).toEqual([
+    expect(providers.slice(0, 3)).toEqual([
       MainnetPlatformDirectoryService,
       MainnetPlatformsPrivacyInterceptor,
+      ProviderPositionReadRuntimeRegistration,
     ]);
-    expect(providers).not.toContainEqual(
-      expect.objectContaining({ provide: MAINNET_PROVIDER_POSITION_READER }),
+    expect(providers[3]).toEqual(
+      expect.objectContaining({
+        provide: MAINNET_PROVIDER_POSITION_READER,
+        inject: [ProviderPositionReadRuntimeRegistration],
+        useFactory: expect.any(Function),
+      }),
     );
+    expect(exports).toEqual([MainnetPlatformDirectoryService, MAINNET_PROVIDER_POSITION_READER]);
+
+    const readerProvider = providers[3] as {
+      useFactory: (
+        registration: ProviderPositionReadRuntimeRegistration,
+      ) => ProviderPositionReadRuntimeRegistration['reader'];
+    };
+    const registration = new ProviderPositionReadRuntimeRegistration();
+    expect(readerProvider.useFactory(registration)).toBe(registration.reader);
   });
 });
