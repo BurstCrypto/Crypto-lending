@@ -33,6 +33,17 @@ export const BALANCE_CONSUMER_DATABASE_TIMEOUT_LIMITS: Readonly<RuntimeDatabaseT
     statementTimeoutMs: 15_000,
   });
 
+/**
+ * Pool acquisition is not synchronously cancellable. Keep the API connection
+ * wait below the server-owned portfolio read deadline so cancellation cannot
+ * inherit the worker's longer acquisition window.
+ */
+export const API_DATABASE_TIMEOUT_LIMITS: Readonly<RuntimeDatabaseTimeoutLimits> = Object.freeze({
+  connectionTimeoutMs: 5_000,
+  lockTimeoutMs: 60_000,
+  statementTimeoutMs: 300_000,
+});
+
 const DEFAULT_RUNTIME_DATABASE_TIMEOUT_LIMITS: Readonly<RuntimeDatabaseTimeoutLimits> =
   Object.freeze({
     connectionTimeoutMs: 60_000,
@@ -815,9 +826,11 @@ function runtimeDatabaseSettings(
   const scopedConfigured = hasAny(env, connectionVariableNames(RUNTIME_DATABASE_VARIABLES));
   const legacyConfigured = hasAny(env, connectionVariableNames(LEGACY_DATABASE_VARIABLES));
   const timeoutLimits =
-    workload === 'balance-consumer'
-      ? BALANCE_CONSUMER_DATABASE_TIMEOUT_LIMITS
-      : DEFAULT_RUNTIME_DATABASE_TIMEOUT_LIMITS;
+    workload === 'api'
+      ? API_DATABASE_TIMEOUT_LIMITS
+      : workload === 'balance-consumer'
+        ? BALANCE_CONSUMER_DATABASE_TIMEOUT_LIMITS
+        : DEFAULT_RUNTIME_DATABASE_TIMEOUT_LIMITS;
 
   if (isProduction(env)) {
     if (configuredEnvironmentVariableNamesWithPrefix(env, 'MIGRATION_DATABASE_').length > 0) {

@@ -4,7 +4,9 @@ import { join } from 'node:path';
 import { rootCertificates } from 'node:tls';
 
 import { BALANCE_SYNC_POLICY } from '../../blockchain-sync/domain/balance-sync';
+import { PORTFOLIO_READ_DEADLINE_MILLISECONDS } from '../../portfolio/application/portfolio.service';
 import {
+  API_DATABASE_TIMEOUT_LIMITS,
   BALANCE_CONSUMER_DATABASE_TIMEOUT_LIMITS,
   BALANCE_CONSUMER_SQS_RECEIPT_REDRIVE_POLICY,
   loadBalanceConsumerInfrastructureConfig,
@@ -447,10 +449,49 @@ describe('loadInfrastructureConfig', () => {
     });
   });
 
+  it('caps API pool acquisition at five seconds without silently clamping it', () => {
+    expect(API_DATABASE_TIMEOUT_LIMITS).toEqual({
+      connectionTimeoutMs: 5_000,
+      lockTimeoutMs: 60_000,
+      statementTimeoutMs: 300_000,
+    });
+    expect(API_DATABASE_TIMEOUT_LIMITS.connectionTimeoutMs).toBeLessThan(
+      PORTFOLIO_READ_DEADLINE_MILLISECONDS,
+    );
+    expect(loadInfrastructureConfig(baseEnvironment()).database.connectionTimeoutMs).toBe(5_000);
+    expect(
+      loadInfrastructureConfig(baseEnvironment({ DATABASE_CONNECTION_TIMEOUT_MS: '5000' })).database
+        .connectionTimeoutMs,
+    ).toBe(5_000);
+    expect(() =>
+      loadInfrastructureConfig(baseEnvironment({ DATABASE_CONNECTION_TIMEOUT_MS: '5001' })),
+    ).toThrow('DATABASE_CONNECTION_TIMEOUT_MS must be an integer between 1 and 5000');
+  });
+
+  it('preserves the worker pool acquisition ceiling independently of the API', () => {
+    const worker = loadInfrastructureConfig(
+      baseEnvironment({
+        APPLICATION_WORKLOAD: 'worker',
+        DATABASE_CONNECTION_TIMEOUT_MS: '60000',
+      }),
+    );
+
+    expect(worker.workload).toBe('worker');
+    expect(worker.database.connectionTimeoutMs).toBe(60_000);
+    expect(() =>
+      loadInfrastructureConfig(
+        baseEnvironment({
+          APPLICATION_WORKLOAD: 'worker',
+          DATABASE_CONNECTION_TIMEOUT_MS: '60001',
+        }),
+      ),
+    ).toThrow('DATABASE_CONNECTION_TIMEOUT_MS must be an integer between 1 and 60000');
+  });
+
   it('rejects PostgreSQL pool lifecycle values outside their operational bounds', () => {
     expect(() =>
-      loadInfrastructureConfig(baseEnvironment({ DATABASE_CONNECTION_TIMEOUT_MS: '60001' })),
-    ).toThrow('DATABASE_CONNECTION_TIMEOUT_MS must be an integer between 1 and 60000');
+      loadInfrastructureConfig(baseEnvironment({ DATABASE_CONNECTION_TIMEOUT_MS: '0' })),
+    ).toThrow('DATABASE_CONNECTION_TIMEOUT_MS must be an integer between 1 and 5000');
     expect(() =>
       loadInfrastructureConfig(baseEnvironment({ DATABASE_IDLE_TIMEOUT_MS: '0' })),
     ).toThrow('DATABASE_IDLE_TIMEOUT_MS must be an integer between 1 and 600000');

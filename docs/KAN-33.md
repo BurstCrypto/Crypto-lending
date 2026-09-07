@@ -49,6 +49,7 @@ CLI:
 APPLICATION_WORKLOAD=api
 DATABASE_RUNTIME_URL=postgresql://crypto_api_login_a:local_api_database_a@localhost:5432/crypto_lending
 DATABASE_RUNTIME_SSL_MODE=disable
+DATABASE_CONNECTION_TIMEOUT_MS=5000
 DATABASE_LOCK_TIMEOUT_MS=5000
 DATABASE_POOL_MAX=10
 DATABASE_STATEMENT_TIMEOUT_MS=15000
@@ -102,6 +103,11 @@ production loaders enforce API/worker slot-prefixed login identities and select
 the matching stable `crypto_api_runtime` or `crypto_worker_runtime` session
 role. The one-off migration loader requires `crypto_migration`; it never accepts
 the `crypto_admin` bootstrap identity.
+
+API pool acquisition is capped at five seconds so it remains below the
+server-owned ten-second portfolio read deadline. A larger API value fails
+startup instead of being clamped. The outbox worker retains its separate
+60-second maximum because it does not serve portfolio HTTP requests.
 
 Production direct `REDIS_URL` values must use `rediss://`, include a non-empty
 password, and carry the environment-bound API ACL username. The managed
