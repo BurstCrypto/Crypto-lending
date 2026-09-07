@@ -485,6 +485,13 @@ const PROVIDER_POSITION_READ_ARTIFACTS = Object.freeze({
     ),
     'utf8',
   ),
+  providerPositionSparkLendEthereumSource: readFileSync(
+    resolve(
+      __dirname,
+      '../apps/api/src/mainnet-platforms/infrastructure/dormant-sparklend-ethereum-provider-position.source.ts',
+    ),
+    'utf8',
+  ),
   providerPositionChainAnchorEvidenceRecorderPortSource: readFileSync(
     resolve(
       __dirname,
@@ -1217,7 +1224,7 @@ function mutateProviderPositionReadArtifact(
 }
 
 test('provider-position read inspection pins the exact dormant critical source slice', () => {
-  assert.equal(Object.keys(PROVIDER_POSITION_READ_ARTIFACTS).length, 41);
+  assert.equal(Object.keys(PROVIDER_POSITION_READ_ARTIFACTS).length, 42);
   const inspected = inspectProviderPositionReadBoundaryArtifacts(PROVIDER_POSITION_READ_ARTIFACTS);
   assert.deepEqual(inspected, EXPECTED_DORMANT_PROVIDER_POSITION_READ_BOUNDARY);
   assert.equal(Object.isFrozen(inspected), true);
@@ -1279,9 +1286,13 @@ test('provider-position read semantic gate contains no disabled-check bypass', (
     'function hasDormantCompoundIIIEthereumProviderPositionSourceContract(',
     kaminoStart,
   );
+  const sparkLendEthereumStart = source.indexOf(
+    'function hasDormantSparkLendEthereumProviderPositionSourceContract(',
+    compoundIIIEthereumStart,
+  );
   const start = source.indexOf(
     'function hasDormantProviderPositionReadBoundaryContract(',
-    compoundIIIEthereumStart,
+    sparkLendEthereumStart,
   );
   const end = source.indexOf('\nfunction ', start + 1);
   assert.ok(
@@ -1295,7 +1306,8 @@ test('provider-position read semantic gate contains no disabled-check bypass', (
       aaveV3EthereumStart > reconciliationLifecycleStart &&
       kaminoStart > aaveV3EthereumStart &&
       compoundIIIEthereumStart > kaminoStart &&
-      start > compoundIIIEthereumStart &&
+      sparkLendEthereumStart > compoundIIIEthereumStart &&
+      start > sparkLendEthereumStart &&
       end > start,
   );
   const semanticGateSource = source
@@ -2375,6 +2387,240 @@ test('provider-position read inspection rejects dormant Compound III Ethereum so
       'mainnetPlatformsControllerSource',
       'constructor(private readonly directory: MainnetPlatformDirectoryService) {}',
       'constructor(private readonly source: DormantCompoundIIIEthereumProviderPositionSource) {}',
+    ],
+  ];
+
+  for (const [key, approved, rejected] of mutations) {
+    assert.deepEqual(
+      inspectProviderPositionReadBoundaryArtifacts(
+        mutateProviderPositionReadArtifact(key, approved, rejected),
+      ),
+      INVALID_PROVIDER_POSITION_READ_BOUNDARY,
+      `${key}: ${approved}`,
+    );
+  }
+});
+
+test('provider-position read inspection rejects dormant SparkLend Ethereum source drift', () => {
+  const mutations: readonly (readonly [
+    keyof ProviderPositionReadBoundaryArtifactSources,
+    string,
+    string,
+  ])[] = [
+    [
+      'providerPositionSparkLendEthereumSource',
+      "import { Buffer } from 'node:buffer';",
+      "import { request } from 'node:https';",
+    ],
+    [
+      'providerPositionSparkLendEthereumSource',
+      'const manifest = parseSparkLendEthereumUSDCManifest(input);',
+      'const manifest = input as SparkLendEthereumUSDCManifest;',
+    ],
+    [
+      'providerPositionSparkLendEthereumSource',
+      'const fingerprint = sparkLendManifestFingerprintSha256(manifest);',
+      'const fingerprint = sparkLendManifestFingerprintSha256(input);',
+    ],
+    [
+      'providerPositionSparkLendEthereumSource',
+      'fingerprint !== requiredFingerprint',
+      'fingerprint === requiredFingerprint',
+    ],
+    [
+      'providerPositionSparkLendEthereumSource',
+      'this.#contextReader.receiver === this.#transcriptReader.receiver ||',
+      'this.#contextReader.receiver !== this.#transcriptReader.receiver ||',
+    ],
+    [
+      'providerPositionSparkLendEthereumSource',
+      'const contextCapability = await this.#contextReader.read(issuedContextRequest);',
+      'const contextCapability = await this.#transcriptReader.read(issuedContextRequest);',
+    ],
+    [
+      'providerPositionSparkLendEthereumSource',
+      'if (reader.verify(capability, request) !== true) {',
+      'if (reader.verify(capability, { ...request }) !== true) {',
+    ],
+    [
+      'providerPositionSparkLendEthereumSource',
+      'durableContext: context.capability,',
+      'durableContext: Object.freeze({}),',
+    ],
+    [
+      'providerPositionSparkLendEthereumSource',
+      'const transcriptCapability = await this.#transcriptReader.read(issuedTranscriptRequest);',
+      'const transcriptCapability = this.#transcriptReader.read(issuedTranscriptRequest);',
+    ],
+    [
+      'providerPositionSparkLendEthereumSource',
+      "const BLOCK_SELECTOR = 'finalized' as const;",
+      "const BLOCK_SELECTOR = 'latest' as const;",
+    ],
+    [
+      'providerPositionSparkLendEthereumSource',
+      "const BLOCK_BINDING = 'EIP1898_BLOCK_HASH_REQUIRE_CANONICAL' as const;",
+      "const BLOCK_BINDING = 'BLOCK_NUMBER_ONLY' as const;",
+    ],
+    [
+      'providerPositionSparkLendEthereumSource',
+      'record.blockHash !== block.hash || record.requireCanonical !== true',
+      'record.blockHash !== block.hash || record.requireCanonical !== false',
+    ],
+    [
+      'providerPositionSparkLendEthereumSource',
+      '!/^0x[0-9a-f]{192}$/u.test(value)',
+      '!/^0x[0-9a-f]+$/u.test(value)',
+    ],
+    [
+      'providerPositionSparkLendEthereumSource',
+      'record.to !== request.reserveTokenRead.to ||',
+      'record.to === request.reserveTokenRead.to ||',
+    ],
+    [
+      'providerPositionSparkLendEthereumSource',
+      'if (tokens.supply !== request.manifest.contracts.spToken) {',
+      'if (tokens.supply === request.manifest.contracts.spToken) {',
+    ],
+    [
+      'providerPositionSparkLendEthereumSource',
+      "record.method !== 'eth_getCode' ||",
+      "record.method !== 'eth_call' ||",
+    ],
+    [
+      'providerPositionSparkLendEthereumSource',
+      '(expectedHash !== undefined && record.resultSha256 !== expectedHash)',
+      '(expectedHash !== undefined && record.resultSha256 === expectedHash)',
+    ],
+    [
+      'providerPositionSparkLendEthereumSource',
+      'record.callData !== IMPLEMENTATION_SELECTOR',
+      'record.callData === IMPLEMENTATION_SELECTOR',
+    ],
+    [
+      'providerPositionSparkLendEthereumSource',
+      'implementationAddress !== request.manifest.contracts.spTokenImplementation',
+      'implementationAddress === request.manifest.contracts.spTokenImplementation',
+    ],
+    [
+      'providerPositionSparkLendEthereumSource',
+      'plainCall(record.poolRead, tokenAddress, POOL_SELECTOR, request.manifest.contracts.pool, block);',
+      'plainCall(record.poolRead, tokenAddress, POOL_SELECTOR, undefined, block);',
+    ],
+    [
+      'providerPositionSparkLendEthereumSource',
+      'return uintCall(record.balanceRead, tokenAddress, request.walletBalanceCallData, block);',
+      "return '0';",
+    ],
+    [
+      'providerPositionSparkLendEthereumSource',
+      "...(tokens.stableDebt === ZERO_ADDRESS ? [] : (['STABLE_BORROW'] as const)),",
+      "...(tokens.stableDebt !== ZERO_ADDRESS ? [] : (['STABLE_BORROW'] as const)),",
+    ],
+    [
+      'providerPositionSparkLendEthereumSource',
+      'if (proofs.length !== roles.length) {',
+      'if (proofs.length < roles.length) {',
+    ],
+    [
+      'providerPositionSparkLendEthereumSource',
+      "const stableDebt = BigInt(balances[2] ?? '0');",
+      'const stableDebt = 0n;',
+    ],
+    [
+      'providerPositionSparkLendEthereumSource',
+      'const borrow = variableDebt + stableDebt;',
+      'const borrow = variableDebt;',
+    ],
+    [
+      'providerPositionSparkLendEthereumSource',
+      "record.status !== 'COMPLETE' ||",
+      "record.status !== 'PARTIAL' ||",
+    ],
+    [
+      'providerPositionSparkLendEthereumSource',
+      "'EXPLICIT_ZERO_BALANCE_FOR_SUPPLY_AND_EVERY_DISCOVERED_DEBT_TOKEN'",
+      "'OMIT_ZERO_BALANCES'",
+    ],
+    [
+      'providerPositionSparkLendEthereumSource',
+      'if (!sameBlock(before, after))',
+      'if (sameBlock(before, after))',
+    ],
+    [
+      'providerPositionSparkLendEthereumSource',
+      'blockNumber === floorNumber && block.hash !== floor.blockHash',
+      'blockNumber === floorNumber && block.hash === floor.blockHash',
+    ],
+    [
+      'providerPositionSparkLendEthereumSource',
+      'assertBoundedImmutableCapability(capability, MAX_TRANSCRIPT_BYTES);',
+      'void capability;',
+    ],
+    [
+      'providerPositionSparkLendEthereumSource',
+      'verifyContext(this.#contextReader, contextCapability, issuedContextRequest);',
+      'void contextCapability;',
+    ],
+    [
+      'providerPositionSparkLendEthereumSource',
+      'verifyTranscript(this.#transcriptReader, transcriptCapability, issuedTranscriptRequest);',
+      'void transcriptCapability;',
+    ],
+    [
+      'providerPositionSparkLendEthereumSource',
+      'request.signal.aborted ||',
+      'request.signal.aborted &&',
+    ],
+    [
+      'providerPositionSparkLendEthereumSource',
+      'const MAX_DEADLINE_MILLISECONDS = 30_000;',
+      'const MAX_DEADLINE_MILLISECONDS = 300_000;',
+    ],
+    [
+      'providerPositionSparkLendEthereumSource',
+      'positions: positions(request, transcript),',
+      'walletAddress: context.walletAddress,\n    positions: positions(request, transcript),',
+    ],
+    [
+      'providerPositionSparkLendEthereumSource',
+      'use: PROVIDER_POSITION_ADMISSION_SOURCE_USE,\n    mayAuthorizeFinancialAction: false,',
+      'use: PROVIDER_POSITION_ADMISSION_SOURCE_USE,\n    mayAuthorizeFinancialAction: true,',
+    ],
+    [
+      'providerPositionSparkLendEthereumSource',
+      "super('SparkLend Ethereum provider-position source is unavailable.');",
+      'super(`SparkLend failed: ${code}`);',
+    ],
+    [
+      'providerPositionRuntimeCompositionSource',
+      'const DEPENDENCY_KEYS = Object.freeze([',
+      'type DormantSparkLendEthereumProviderPositionSource = unknown;\nconst DEPENDENCY_KEYS = Object.freeze([',
+    ],
+    [
+      'providerPositionInfrastructureConfigSource',
+      'export interface InfrastructureConfig {',
+      'type SparkLendEthereumFinalizedPositionTranscriptPort = unknown;\nexport interface InfrastructureConfig {',
+    ],
+    [
+      'mainnetLaunchNetworkPolicySource',
+      'export const MAINNET_LAUNCH_NETWORK_IDS = Object.freeze([',
+      'type DormantSparkLendEthereumProviderPositionSource = unknown;\nexport const MAINNET_LAUNCH_NETWORK_IDS = Object.freeze([',
+    ],
+    [
+      'mainnetPlatformsModuleSource',
+      'providers: [MainnetPlatformDirectoryService, MainnetPlatformsPrivacyInterceptor],',
+      'providers: [MainnetPlatformDirectoryService, DormantSparkLendEthereumProviderPositionSource],',
+    ],
+    [
+      'mainnetPlatformsIndexSource',
+      "export { MainnetPlatformDirectoryService } from './application/mainnet-platform-directory.service';",
+      "export { DormantSparkLendEthereumProviderPositionSource } from './infrastructure/dormant-sparklend-ethereum-provider-position.source';",
+    ],
+    [
+      'mainnetPlatformsControllerSource',
+      'constructor(private readonly directory: MainnetPlatformDirectoryService) {}',
+      'constructor(private readonly source: DormantSparkLendEthereumProviderPositionSource) {}',
     ],
   ];
 
@@ -3995,7 +4241,7 @@ test('provider-position read artifact shape and private brand fail closed', () =
     Object.fromEntries(
       Object.keys(PROVIDER_POSITION_READ_ARTIFACTS).map((key) => [
         key,
-        'x'.repeat(Math.floor((1024 * 1024) / 41) + 1),
+        'x'.repeat(Math.floor((1088 * 1024) / 42) + 1),
       ]),
     ),
     accessor,
