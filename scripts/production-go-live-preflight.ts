@@ -37,7 +37,7 @@ import type {
 export const PRODUCTION_PREFLIGHT_SCHEMA_VERSION = 1 as const;
 export const PRODUCTION_PROVIDER_TARGET = 10 as const;
 const REVIEWED_DATABASE_MASTER_TEMPLATE_SHA256 =
-  '7fa270567d03d78a833e40cc0524c968c61f00fd43df877e5e0dfdd9ea1a07be';
+  '58b040eea3858661d45ab0f1334457c0b937cfb8179bad665aa3bb649171807c';
 const REVIEWED_ACTIVE_SCOPE_PROVIDER_RESEARCH_CAPTURE_SHA256 =
   'db13db3ff78d6dd0641f8f61067e48d8eb45d0eab309491e2bff9a60112a97d2';
 
@@ -831,8 +831,8 @@ const REVIEWED_BALANCE_CONSUMER_ARTIFACT_SHA256 = Object.freeze({
   apiPackageSource: 'c911e7171be6ff64908d1c15fc1d240f51ace8e8b90d6bcad4c605c994439774',
   rootPackageSource: '1a2c762fe9278975a123073be69b7dc332b547e348ecbb71303233da7ebac8fd',
   rootPackageLockSource: 'ac745baf70f2e70b3ba779612f0a3cc2b10692860a47c54c927a1e4805b2e6a6',
-  applicationTemplateSource: '7fa270567d03d78a833e40cc0524c968c61f00fd43df877e5e0dfdd9ea1a07be',
-  applicationValidatorSource: '0b80e3896627857740b18c78a609162e13ebbfd940b483428b654e780b62f112',
+  applicationTemplateSource: '58b040eea3858661d45ab0f1334457c0b937cfb8179bad665aa3bb649171807c',
+  applicationValidatorSource: 'ef7d09ce2118a2f6b4aa0bd4b02651d1306d058be4dcea48affae3ad3f076032',
   workloadTemplateSource: '4c74c98e73635df30570dfe1e726b41cb6f62832f0bfc2e43dcd087d384b78de',
   workloadValidatorSource: '694f28c926fb08f6648d2d399fd31161681247eadacf43042077c4759dcbafba',
   balanceConsumerEnvelopeSource: '3b621023e516cd553c34fbe09e4b0047d1395fab45e105eef7692570d6429045',
@@ -11064,6 +11064,14 @@ export function inspectDatabaseMasterDeploymentTemplate(
   const applicationDataKey =
     resources === null ? null : yamlBlock(resources, 'ApplicationDataKey', 1);
   const database = resources === null ? null : yamlBlock(resources, 'Database', 1);
+  const databaseParameterGroup =
+    resources === null ? null : yamlBlock(resources, 'DatabaseParameterGroup', 1);
+  const databaseParameterGroupProperties =
+    databaseParameterGroup === null ? null : yamlBlock(databaseParameterGroup, 'Properties', 2);
+  const databaseParameters =
+    databaseParameterGroupProperties === null
+      ? null
+      : yamlBlock(databaseParameterGroupProperties, 'Parameters', 3);
   const databaseProperties = database === null ? null : yamlBlock(database, 'Properties', 2);
   const masterUserSecret =
     databaseProperties === null ? null : yamlBlock(databaseProperties, 'MasterUserSecret', 3);
@@ -11073,6 +11081,9 @@ export function inspectDatabaseMasterDeploymentTemplate(
   const inspected =
     resources !== null &&
     applicationDataKey !== null &&
+    databaseParameterGroup !== null &&
+    databaseParameterGroupProperties !== null &&
+    databaseParameters !== null &&
     database !== null &&
     databaseProperties !== null &&
     outputs !== null &&
@@ -11090,6 +11101,16 @@ export function inspectDatabaseMasterDeploymentTemplate(
     );
   const customDatabaseSecretAbsent =
     resources !== null && !/^\s*["']?DatabaseCredentialsSecret["']?\s*:/mu.test(resources);
+  const exactDatabaseParameters =
+    semanticYamlLines(databaseParameters)
+      .map((line) => line.trim())
+      .join('\n') ===
+    [
+      'Parameters:',
+      "log_parameter_max_length: '0'",
+      "log_parameter_max_length_on_error: '0'",
+      "rds.force_ssl: '1'",
+    ].join('\n');
   const masterPasswordAbsent =
     database !== null && !/^\s*["']?MasterUserPassword["']?\s*:/mu.test(database);
   const reviewedSource =
@@ -11102,6 +11123,8 @@ export function inspectDatabaseMasterDeploymentTemplate(
       inspected &&
       reviewedSource &&
       hasExactYamlScalarProperty(applicationDataKey, 'Type', 'AWS::KMS::Key') &&
+      hasExactYamlScalarProperty(databaseParameterGroup, 'Type', 'AWS::RDS::DBParameterGroup') &&
+      exactDatabaseParameters &&
       hasExactYamlScalarProperty(database, 'Type', 'AWS::RDS::DBInstance') &&
       hasExactYamlScalarProperty(databaseProperties, 'MasterUsername', 'crypto_admin') &&
       hasExactYamlScalarProperty(databaseProperties, 'ManageMasterUserPassword', 'true') &&

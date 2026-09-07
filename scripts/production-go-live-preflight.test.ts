@@ -6514,6 +6514,30 @@ test('database master inspection rejects custom, mutable, counterfeit, or ambigu
       mutate('  Type: AWS::KMS::Key', '  Type: AWS::SSM::Parameter', 'key resource'),
     ],
     [
+      'database bind parameter statement logging enabled',
+      mutate(
+        "    log_parameter_max_length: '0'",
+        "    log_parameter_max_length: '64'",
+        'statement bind logging',
+      ),
+    ],
+    [
+      'database bind parameter error logging enabled',
+      mutate(
+        "    log_parameter_max_length_on_error: '0'",
+        "    log_parameter_max_length_on_error: '64'",
+        'error bind logging',
+      ),
+    ],
+    [
+      'database parameter logging boundary extended',
+      mutate(
+        "    rds.force_ssl: '1'",
+        "    rds.force_ssl: '1'\n    log_statement: all",
+        'unreviewed database parameter',
+      ),
+    ],
+    [
       'custom database secret',
       mutate(
         ' Database:',
