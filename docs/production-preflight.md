@@ -102,9 +102,9 @@ requires each source's approved-manifest fingerprint to match the registry and
 requires the two independently observed deployment-identity fingerprints to
 match each other. The manifest and observed-identity fingerprints are distinct,
 domain-separated values. The checked-in registry remains empty and
-`NOT_APPROVED`; no verifier constructor appears in any launch root. These pins
-establish a dormant source contract, not a live deployment identity or provider
-approval.
+`NOT_APPROVED`; no verifier constructor appears outside its owned dormant
+source. These pins establish a dormant source contract, not a live deployment
+identity or provider approval.
 
 Preflight also byte-pins the concrete dormant Ethereum and Solana deployment
 manifests and identity verifiers. It requires the checked-in manifests to remain
@@ -117,6 +117,38 @@ release-bound manifest fingerprint is approved; an approved Solana provider
 demonstrates that `getMultipleAccounts` can satisfy the verifier's exact-slot
 contract; and an independently captured real PYUSD Token-2022 golden fixture,
 exact extension inventory, and reviewed mutable-field window policy exist.
+
+Separately from that 72-artifact byte-pinned contract, the repository loader
+derives a private runtime-absence attestation from every lowercase `.ts` and
+`.tsx` file under `apps/api/src` that is not excluded by the exact pinned build
+exclusions (`*.spec.ts` and `*.e2e-spec.ts`): currently 388 files and 5,864,384
+bytes. The aggregate also binds the exact `nest-cli.json`, `tsconfig.json`, and
+`tsconfig.build.json` build inputs and the resolved
+`src/blockchain/domain/local-evm-development-manifest.json` runtime data input.
+One reviewed SHA-256 binds that whole snapshot; any covered API runtime source,
+configuration, or data change requires an explicit review and fingerprint
+rebaseline. The offline scan is bounded to 512 reviewed sources, 384 KiB per
+source, 8 MiB of source, 1,024 total tree entries, 192 directories, 256 KiB of
+topology, and 32 path segments. It repeatedly enumerates canonical physical
+paths, rejects linked or noncanonical paths, rejects hardlinked covered inputs
+and case-folded duplicate covered-source paths, rejects unsupported script
+extensions, traversal, topology or byte drift, and parses each stable source with
+the pinned local TypeScript parser.
+
+As defense in depth, the six concrete verifier/manifest symbols and module
+basenames are allowed only in the exact four owned manifest/verifier sources.
+Recognizable runtime imports of test-named modules, escaping local module paths,
+computed dynamic `import`/`require` calls, and unreviewed loader aliases
+also fail closed, as does any new local JSON module import until its input is
+explicitly reviewed. The full scan automatically includes entrypoints such as
+`outbox-worker-health.cli.ts`; `.test.ts` and TSX test-name variants are scanned
+because the pinned build config does not exclude them. Only the secure
+repository loader can place the frozen point-in-time attestation in the private
+accepted set; the injected-snapshot test seam is deliberately unbranded, and a
+missing or forged token makes `BALANCE_CONSUMER` local validation fail. Like the
+existing source brands, this cached token is not permanent runtime evidence or
+launch authority; final launch still requires the immutable release/image-bound
+evidence gates.
 
 The same closed artifact set now includes one provider-neutral, source-only
 Node HTTPS transport capsule. Preflight pins its exact SHA-256 and requires its

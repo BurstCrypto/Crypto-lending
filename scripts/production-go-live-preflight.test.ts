@@ -1,7 +1,17 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { generateKeyPairSync, sign } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import {
+  cpSync,
+  linkSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { test } from 'node:test';
 
@@ -11,6 +21,9 @@ import {
   formatProductionPreflightReport,
   inspectAuthenticationDeploymentTemplate,
   inspectBalanceConsumerDeploymentArtifacts,
+  inspectBalanceConsumerRuntimeAbsenceRepositoryForTest,
+  inspectBalanceConsumerRuntimeReviewedRepositoryForTest,
+  inspectBalanceConsumerRuntimeAbsenceSnapshotForTest,
   inspectDatabaseMasterDeploymentTemplate,
   inspectProductionInfrastructureDeploymentArtifacts,
   inspectProviderPositionReadBoundaryArtifacts,
@@ -21,6 +34,7 @@ import {
   productionPreflightCliErrorCode,
   productionPreflightExitCode,
   type BalanceConsumerArtifactSources,
+  type BalanceConsumerRuntimeAbsenceTestLimits,
   type ProviderPositionReadBoundaryArtifactSources,
   type ProductionPreflightBlockerId,
   type ProductionInfrastructureArtifactSources,
@@ -735,6 +749,10 @@ const PROVIDER_POSITION_READ_ARTIFACTS = Object.freeze({
 const VERIFIED_BALANCE_CONSUMER_DEPLOYMENT = inspectBalanceConsumerDeploymentArtifacts(
   BALANCE_CONSUMER_ARTIFACTS,
 );
+const VERIFIED_BALANCE_CONSUMER_RUNTIME_ABSENCE_ATTESTATION =
+  loadRepositoryProductionPreflightInput(
+    resolve(__dirname, '..'),
+  ).balanceConsumerRuntimeAbsenceAttestation;
 const VERIFIED_PROVIDER_POSITION_READ_BOUNDARY = inspectProviderPositionReadBoundaryArtifacts(
   PROVIDER_POSITION_READ_ARTIFACTS,
 );
@@ -916,6 +934,12 @@ function completeInput(directory: unknown): ProductionPreflightInput {
   return {
     productionInfrastructureDeployment: VERIFIED_PRODUCTION_INFRASTRUCTURE_DEPLOYMENT,
     balanceConsumerDeployment: VERIFIED_BALANCE_CONSUMER_DEPLOYMENT,
+    ...(VERIFIED_BALANCE_CONSUMER_RUNTIME_ABSENCE_ATTESTATION === undefined
+      ? {}
+      : {
+          balanceConsumerRuntimeAbsenceAttestation:
+            VERIFIED_BALANCE_CONSUMER_RUNTIME_ABSENCE_ATTESTATION,
+        }),
     providerPositionReadBoundary: VERIFIED_PROVIDER_POSITION_READ_BOUNDARY,
     authentication: {
       inspected: true,
@@ -6310,6 +6334,476 @@ test('balance-consumer inspection brands and freezes only the exact dormant loca
     assert.match(
       formatProductionPreflightReport(report),
       /BALANCE_CONSUMER_DEPLOYED_EVIDENCE_MISSING/u,
+    );
+  }
+});
+
+test('repository loader brands the bounded full API runtime absence attestation', () => {
+  const attestation = VERIFIED_BALANCE_CONSUMER_RUNTIME_ABSENCE_ATTESTATION;
+  assert.notEqual(attestation, undefined);
+  assert.equal(Object.isFrozen(attestation), true);
+  assert.deepEqual(attestation, {
+    inspected: true,
+    sourceFileCount: 388,
+    sourceBytes: 5_864_384,
+    repositorySnapshotSha256: attestation?.repositorySnapshotSha256,
+    concreteDeploymentIdentityRegistration: 'ABSENT',
+  });
+  assert.equal(
+    attestation?.repositorySnapshotSha256,
+    'c8194c555e19f8e00d964d26d32ea6837cabf00a30fa158c4c68627a3dd3a6ce',
+  );
+});
+
+test('runtime absence AST inspection rejects indirect, aliased, test, and dynamic registration paths', () => {
+  const sortedSnapshot = (
+    ...entries: readonly { readonly relativePath: string; readonly source: string }[]
+  ) =>
+    entries.toSorted((left, right) =>
+      Buffer.compare(
+        Buffer.from(left.relativePath, 'utf8'),
+        Buffer.from(right.relativePath, 'utf8'),
+      ),
+    );
+  const benign = sortedSnapshot({
+    relativePath: 'feature/runtime.ts',
+    source:
+      '// ethereum-mainnet-balance-deployment is intentionally mentioned in a comment only.\nexport const ready = true;\n',
+  });
+  assert.equal(inspectBalanceConsumerRuntimeAbsenceSnapshotForTest(benign), true);
+
+  const owned = sortedSnapshot({
+    relativePath:
+      'blockchain-sync/infrastructure/rpc/ethereum-mainnet-balance-deployment-identity.verifier.ts',
+    source:
+      "import { DORMANT_ETHEREUM_MAINNET_BALANCE_DEPLOYMENT_MANIFEST } from './ethereum-mainnet-balance-deployment.manifest';\nexport const createDormantEthereumMainnetBalanceDeploymentIdentityVerifier = () => undefined;\nvoid DORMANT_ETHEREUM_MAINNET_BALANCE_DEPLOYMENT_MANIFEST;\n",
+  });
+  assert.equal(inspectBalanceConsumerRuntimeAbsenceSnapshotForTest(owned), true);
+  const reviewedNativeRequire = sortedSnapshot({
+    relativePath: 'authentication/infrastructure/oidc/jose-runtime.ts',
+    source:
+      "import type * as Jose from 'jose';\nexport function loadJoseRuntime(): typeof Jose {\n  const nativeRequire = process.getBuiltinModule('module').createRequire(__filename);\n  return nativeRequire('jose') as typeof Jose;\n}\n",
+  });
+  assert.equal(inspectBalanceConsumerRuntimeAbsenceSnapshotForTest(reviewedNativeRequire), true);
+  assert.equal(
+    inspectBalanceConsumerRuntimeAbsenceSnapshotForTest(
+      sortedSnapshot({
+        relativePath: 'blockchain/domain/local-evm-development.ts',
+        source: "import manifest from './local-evm-development-manifest.json';\nvoid manifest;\n",
+      }),
+    ),
+    true,
+  );
+
+  const rejected = [
+    sortedSnapshot(
+      { relativePath: 'application.ts', source: "import './feature/runtime';\n" },
+      {
+        relativePath: 'feature/runtime.ts',
+        source:
+          "export { createDormantEthereumMainnetBalanceDeploymentIdentityVerifier } from '../safe';\n",
+      },
+    ),
+    sortedSnapshot({
+      relativePath: 'feature/runtime.ts',
+      source:
+        "import * as identity from '@internal/solana-mainnet-balance-deployment-identity.verifier';\nvoid identity;\n",
+    }),
+    sortedSnapshot({
+      relativePath: 'feature/runtime.ts',
+      source:
+        "export { verifier as start } from '../blockchain-sync/infrastructure/rpc/ethereum-mainnet-balance-deployment-identity.verifier';\n",
+    }),
+    sortedSnapshot({
+      relativePath: 'feature/runtime.ts',
+      source:
+        "void import('../blockchain-sync/infrastructure/rpc/solana-mainnet-balance-deployment-identity.verifier');\n",
+    }),
+    sortedSnapshot({
+      relativePath: 'feature/runtime.ts',
+      source:
+        "void import('../blockchain-sync/infrastructure/rpc/ethereum-mainnet-balance-' + 'deployment-identity.verifier');\n",
+    }),
+    sortedSnapshot({
+      relativePath: 'feature/runtime.ts',
+      source: "const suffix = 'identity.verifier';\nvoid require('./safe-' + suffix);\n",
+    }),
+    sortedSnapshot({
+      relativePath: 'feature/runtime.ts',
+      source: "const load = require;\nvoid load('./safe');\n",
+    }),
+    sortedSnapshot({
+      relativePath: 'feature/runtime.ts',
+      source:
+        "const nativeRequire = process.getBuiltinModule('module').createRequire(__filename);\nconst target = './ethereum-mainnet-balance-' + 'deployment-identity.verifier';\nvoid nativeRequire(target);\n",
+    }),
+    sortedSnapshot({
+      relativePath: 'authentication/infrastructure/oidc/jose-runtime.ts',
+      source:
+        "const nativeRequire = process.getBuiltinModule('module').createRequire(__filename);\nvoid nativeRequire('jose');\nvoid nativeRequire('./ethereum-mainnet-balance-' + 'deployment-identity.verifier');\n",
+    }),
+    sortedSnapshot({
+      relativePath: 'feature/runtime.ts',
+      source:
+        "const target = ['./ethereum-mainnet-balance-', 'deployment-identity.verifier'].join('');\nvoid module['require'](target);\n",
+    }),
+    sortedSnapshot({
+      relativePath: 'feature/runtime.ts',
+      source:
+        "const target = ['./solana-mainnet-balance-', 'deployment-identity.verifier'].join('');\nvoid Reflect.get(module, 'requ' + 'ire')(target);\n",
+    }),
+    sortedSnapshot({
+      relativePath: 'feature/runtime.ts',
+      source:
+        "const load = eval('requ' + 'ire');\nvoid load(['./ethereum-mainnet-balance-', 'deployment-identity.verifier'].join(''));\n",
+    }),
+    sortedSnapshot({
+      relativePath: 'feature/runtime.ts',
+      source: "void globalThis['Func' + 'tion']('return require')();\n",
+    }),
+    sortedSnapshot({
+      relativePath: 'feature/runtime.ts',
+      source: "import './registration.spec';\n",
+    }),
+    sortedSnapshot({
+      relativePath: 'feature/runtime.ts',
+      source: "import '../../../../outside-runtime';\n",
+    }),
+    sortedSnapshot({
+      relativePath: 'feature/runtime.ts',
+      source: "import 'file:///tmp/outside-runtime.ts';\n",
+    }),
+    sortedSnapshot({
+      relativePath: 'feature/runtime.ts',
+      source: "import 'src/../outside-runtime';\n",
+    }),
+    sortedSnapshot({
+      relativePath: 'feature/runtime.ts',
+      source: "import data from './unreviewed-runtime.json';\nvoid data;\n",
+    }),
+    sortedSnapshot({
+      relativePath: 'feature/runtime.ts',
+      source: "import data from 'src/unreviewed-runtime.json';\nvoid data;\n",
+    }),
+    sortedSnapshot({
+      relativePath: 'infrastructure/outbox/outbox-worker-health.cli.ts',
+      source: "import './solana-mainnet-balance-deployment-identity.verifier';\n",
+    }),
+    sortedSnapshot({
+      relativePath: 'feature/runtime.ts',
+      source:
+        'const verifier = registry.createDormantSolanaMainnetBalanceDeploymentIdentityVerifier;\nvoid verifier;\n',
+    }),
+  ];
+  for (const candidate of rejected) {
+    assert.equal(inspectBalanceConsumerRuntimeAbsenceSnapshotForTest(candidate), false);
+  }
+});
+
+test('runtime absence snapshot seam rejects hostile shapes, paths, duplicates, and syntax', () => {
+  const validEntry = Object.freeze({
+    relativePath: 'feature/runtime.ts',
+    source: 'export const ready = true;\n',
+  });
+  const accessor = { relativePath: 'feature/runtime.ts' } as {
+    relativePath: string;
+    readonly source: string;
+  };
+  Object.defineProperty(accessor, 'source', {
+    enumerable: true,
+    get() {
+      throw new Error('untrusted source getter');
+    },
+  });
+  const withSymbol = {
+    ...validEntry,
+    [Symbol('unreviewed')]: true,
+  };
+  const candidates: readonly unknown[] = [
+    [],
+    [accessor],
+    [withSymbol],
+    [{ ...validEntry, relativePath: '../runtime.ts' }],
+    [{ ...validEntry, relativePath: 'C:/runtime.ts' }],
+    [{ ...validEntry, relativePath: 'feature\\runtime.ts' }],
+    [{ ...validEntry, relativePath: 'feature/runtime.TS' }],
+    [{ ...validEntry, source: '\ufeffexport const ready = true;\n' }],
+    [{ ...validEntry, source: 'export const = ;' }],
+    [validEntry, validEntry],
+    [validEntry, { ...validEntry, relativePath: 'FEATURE/RUNTIME.ts' }],
+    [
+      { ...validEntry, relativePath: 'z/runtime.ts' },
+      { ...validEntry, relativePath: 'a/runtime.ts' },
+    ],
+    new Proxy([validEntry], {
+      ownKeys() {
+        throw new Error('untrusted snapshot proxy');
+      },
+    }),
+    [
+      new Proxy(validEntry, {
+        ownKeys() {
+          throw new Error('untrusted entry proxy');
+        },
+      }),
+    ],
+  ];
+  for (const candidate of candidates) {
+    assert.doesNotThrow(() => inspectBalanceConsumerRuntimeAbsenceSnapshotForTest(candidate));
+    assert.equal(inspectBalanceConsumerRuntimeAbsenceSnapshotForTest(candidate), false);
+  }
+});
+
+test('runtime absence snapshot limits accept exact boundaries and reject every overrun', () => {
+  const limits = Object.freeze({
+    maximumFiles: 2,
+    maximumFileBytes: 32,
+    maximumTotalBytes: 48,
+    maximumDepth: 3,
+  } satisfies BalanceConsumerRuntimeAbsenceTestLimits);
+  const sourceWithBytes = (bytes: number): string => 'export {};\n'.padEnd(bytes, ' ');
+  const exact = [
+    { relativePath: 'a/runtime.ts', source: sourceWithBytes(32) },
+    { relativePath: 'b/runtime.ts', source: sourceWithBytes(16) },
+  ];
+  assert.equal(inspectBalanceConsumerRuntimeAbsenceSnapshotForTest(exact, limits), true);
+  assert.equal(
+    inspectBalanceConsumerRuntimeAbsenceSnapshotForTest(
+      [{ relativePath: 'a/runtime.ts', source: sourceWithBytes(33) }],
+      limits,
+    ),
+    false,
+  );
+  assert.equal(
+    inspectBalanceConsumerRuntimeAbsenceSnapshotForTest(
+      [
+        { relativePath: 'a/runtime.ts', source: sourceWithBytes(25) },
+        { relativePath: 'b/runtime.ts', source: sourceWithBytes(24) },
+      ],
+      limits,
+    ),
+    false,
+  );
+  assert.equal(
+    inspectBalanceConsumerRuntimeAbsenceSnapshotForTest(
+      [...exact, { relativePath: 'c/runtime.ts', source: sourceWithBytes(1) }],
+      limits,
+    ),
+    false,
+  );
+  assert.equal(
+    inspectBalanceConsumerRuntimeAbsenceSnapshotForTest(
+      [{ relativePath: 'a/b/c/runtime.ts', source: sourceWithBytes(16) }],
+      limits,
+    ),
+    false,
+  );
+
+  const reviewedFileBoundary = 384 * 1024;
+  assert.equal(
+    inspectBalanceConsumerRuntimeAbsenceSnapshotForTest([
+      { relativePath: 'runtime.ts', source: sourceWithBytes(reviewedFileBoundary) },
+    ]),
+    true,
+  );
+  assert.equal(
+    inspectBalanceConsumerRuntimeAbsenceSnapshotForTest([
+      { relativePath: 'runtime.ts', source: sourceWithBytes(reviewedFileBoundary + 1) },
+    ]),
+    false,
+  );
+  assert.equal(
+    inspectBalanceConsumerRuntimeAbsenceSnapshotForTest([validRuntimeSource()], {
+      maximumFiles: 512,
+      maximumFileBytes: reviewedFileBoundary + 1,
+      maximumTotalBytes: 8 * 1024 * 1024,
+      maximumDepth: 32,
+    }),
+    false,
+  );
+
+  function validRuntimeSource(): { readonly relativePath: string; readonly source: string } {
+    return { relativePath: 'runtime.ts', source: 'export {};\n' };
+  }
+});
+
+test('runtime absence repository seam rejects links, case variants, bounds, and TOCTOU drift', () => {
+  const temporaryRoot = mkdtempSync(resolve(tmpdir(), 'crypto-lending-runtime-absence-'));
+  const makeCase = (name: string): string => {
+    const root = resolve(temporaryRoot, name);
+    mkdirSync(root);
+    writeFileSync(resolve(root, 'runtime.ts'), 'export const ready = true;\n', 'utf8');
+    return root;
+  };
+  try {
+    const baseline = makeCase('baseline');
+    assert.equal(inspectBalanceConsumerRuntimeAbsenceRepositoryForTest(baseline), true);
+
+    const healthCli = makeCase('health-cli');
+    writeFileSync(
+      resolve(healthCli, 'outbox-worker-health.cli.ts'),
+      "import './ethereum-mainnet-balance-deployment-identity.verifier';\n",
+      'utf8',
+    );
+    assert.equal(inspectBalanceConsumerRuntimeAbsenceRepositoryForTest(healthCli), false);
+
+    const hardlink = makeCase('hardlink');
+    linkSync(resolve(hardlink, 'runtime.ts'), resolve(hardlink, 'duplicate.ts'));
+    assert.equal(inspectBalanceConsumerRuntimeAbsenceRepositoryForTest(hardlink), false);
+
+    const uppercaseExtension = makeCase('uppercase-extension');
+    writeFileSync(resolve(uppercaseExtension, 'unreviewed.TS'), 'export {};\n', 'utf8');
+    assert.equal(inspectBalanceConsumerRuntimeAbsenceRepositoryForTest(uppercaseExtension), false);
+
+    for (const extension of ['mts', 'cts', 'js', 'jsx']) {
+      const unreviewedScript = makeCase(`unreviewed-${extension}`);
+      writeFileSync(resolve(unreviewedScript, `unreviewed.${extension}`), 'export {};\n', 'utf8');
+      assert.equal(inspectBalanceConsumerRuntimeAbsenceRepositoryForTest(unreviewedScript), false);
+    }
+
+    const byteOrderMark = makeCase('byte-order-mark');
+    writeFileSync(resolve(byteOrderMark, 'runtime.ts'), '\ufeffexport {};\n', 'utf8');
+    assert.equal(inspectBalanceConsumerRuntimeAbsenceRepositoryForTest(byteOrderMark), false);
+
+    const unreviewedJson = makeCase('unreviewed-json');
+    writeFileSync(resolve(unreviewedJson, 'unreviewed.json'), '{}\n', 'utf8');
+    assert.equal(inspectBalanceConsumerRuntimeAbsenceRepositoryForTest(unreviewedJson), false);
+
+    for (const relativePath of ['hidden.test.ts', 'hidden.spec.tsx']) {
+      const buildIncludedTestName = makeCase(relativePath.replaceAll('.', '-'));
+      writeFileSync(
+        resolve(buildIncludedTestName, relativePath),
+        'void createDormantEthereumMainnetBalanceDeploymentIdentityVerifier;\n',
+        'utf8',
+      );
+      assert.equal(
+        inspectBalanceConsumerRuntimeAbsenceRepositoryForTest(buildIncludedTestName),
+        false,
+      );
+    }
+
+    const linkedDirectory = makeCase('linked-directory');
+    const linkTarget = resolve(linkedDirectory, 'target');
+    mkdirSync(linkTarget);
+    writeFileSync(resolve(linkTarget, 'nested.ts'), 'export {};\n', 'utf8');
+    let linkCreated = false;
+    try {
+      symlinkSync(
+        linkTarget,
+        resolve(linkedDirectory, 'linked'),
+        process.platform === 'win32' ? 'junction' : 'dir',
+      );
+      linkCreated = true;
+    } catch (error) {
+      assert.ok(
+        error instanceof Error &&
+          'code' in error &&
+          ['EPERM', 'EACCES', 'ENOSYS'].includes(String(error.code)),
+      );
+    }
+    if (linkCreated) {
+      assert.equal(inspectBalanceConsumerRuntimeAbsenceRepositoryForTest(linkedDirectory), false);
+    }
+
+    const afterEnumeration = makeCase('after-enumeration');
+    assert.equal(
+      inspectBalanceConsumerRuntimeAbsenceRepositoryForTest(afterEnumeration, {
+        afterInitialEnumeration() {
+          writeFileSync(resolve(afterEnumeration, 'late.ts'), 'export {};\n', 'utf8');
+        },
+      }),
+      false,
+    );
+
+    const duringRead = makeCase('during-read');
+    let mutatedDuringRead = false;
+    assert.equal(
+      inspectBalanceConsumerRuntimeAbsenceRepositoryForTest(duringRead, {
+        afterFirstFileRead(relativePath) {
+          if (mutatedDuringRead) return;
+          mutatedDuringRead = true;
+          writeFileSync(resolve(duringRead, relativePath), 'export const ready = 1;\n', 'utf8');
+        },
+      }),
+      false,
+    );
+
+    const afterSnapshot = makeCase('after-snapshot');
+    assert.equal(
+      inspectBalanceConsumerRuntimeAbsenceRepositoryForTest(afterSnapshot, {
+        afterFirstSnapshot() {
+          writeFileSync(resolve(afterSnapshot, 'runtime.ts'), 'export const ready = 2;\n', 'utf8');
+        },
+      }),
+      false,
+    );
+
+    const oversized = makeCase('oversized');
+    writeFileSync(resolve(oversized, 'runtime.ts'), 'export {};\n'.padEnd(384 * 1024 + 1, ' '));
+    assert.equal(inspectBalanceConsumerRuntimeAbsenceRepositoryForTest(oversized), false);
+
+    const tooManyEntries = makeCase('too-many-entries');
+    for (let index = 0; index < 1_024; index += 1) {
+      writeFileSync(resolve(tooManyEntries, `ignored-${index}.txt`), 'ignored', 'utf8');
+    }
+    assert.equal(inspectBalanceConsumerRuntimeAbsenceRepositoryForTest(tooManyEntries), false);
+
+    const tooManyDirectories = makeCase('too-many-directories');
+    for (let index = 0; index < 192; index += 1) {
+      mkdirSync(resolve(tooManyDirectories, `directory-${index}`));
+    }
+    assert.equal(inspectBalanceConsumerRuntimeAbsenceRepositoryForTest(tooManyDirectories), false);
+
+    const rescan = makeCase('rescan');
+    assert.equal(inspectBalanceConsumerRuntimeAbsenceRepositoryForTest(rescan), true);
+    writeFileSync(
+      resolve(rescan, 'runtime.ts'),
+      "import './ethereum-mainnet-balance-deployment-identity.verifier';\n",
+      'utf8',
+    );
+    assert.equal(inspectBalanceConsumerRuntimeAbsenceRepositoryForTest(rescan), false);
+
+    const copiedApi = resolve(temporaryRoot, 'reviewed-api-copy');
+    mkdirSync(copiedApi);
+    cpSync(resolve(__dirname, '../apps/api/src'), resolve(copiedApi, 'src'), {
+      recursive: true,
+    });
+    for (const relativePath of ['nest-cli.json', 'tsconfig.build.json', 'tsconfig.json']) {
+      cpSync(resolve(__dirname, '../apps/api', relativePath), resolve(copiedApi, relativePath));
+    }
+    assert.equal(inspectBalanceConsumerRuntimeReviewedRepositoryForTest(copiedApi), true);
+    const copiedRuntimeJson = resolve(
+      copiedApi,
+      'src/blockchain/domain/local-evm-development-manifest.json',
+    );
+    writeFileSync(copiedRuntimeJson, `${readFileSync(copiedRuntimeJson, 'utf8')}\n`, 'utf8');
+    assert.equal(inspectBalanceConsumerRuntimeReviewedRepositoryForTest(copiedApi), false);
+  } finally {
+    rmSync(temporaryRoot, { recursive: true, force: true });
+  }
+});
+
+test('balance-consumer check rejects missing and unbranded runtime absence attestations', () => {
+  const complete = completeInput(platformDirectory('LIVE_READ_ONLY'));
+  const { balanceConsumerRuntimeAbsenceAttestation: omitted, ...withoutAttestation } = complete;
+  assert.notEqual(omitted, undefined);
+  const candidates: readonly ProductionPreflightInput[] = [
+    withoutAttestation,
+    {
+      ...complete,
+      balanceConsumerRuntimeAbsenceAttestation: Object.freeze({ ...omitted! }),
+    },
+  ];
+  for (const candidate of candidates) {
+    const report = evaluateProductionPreflight(candidate);
+    assert.deepEqual(
+      report.checks.find(({ id }) => id === 'BALANCE_CONSUMER'),
+      {
+        id: 'BALANCE_CONSUMER',
+        localValidation: 'FAIL',
+        launchReadiness: 'BLOCKED',
+        blockerIds: ['BALANCE_CONSUMER_INSPECTION_FAILED'],
+      },
     );
   }
 });

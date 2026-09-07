@@ -1,8 +1,12 @@
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { lstatSync, opendirSync, readFileSync, realpathSync } from 'node:fs';
+import { isAbsolute, relative, resolve, sep } from 'node:path';
+import { isProxy } from 'node:util/types';
+import ts from 'typescript';
 
 import { MAINNET_PLATFORM_DIRECTORY } from '../apps/api/src/mainnet-platforms/domain/mainnet-platform-directory';
+// @ts-expect-error The audited local stable-file reader is an ESM JavaScript module without declarations.
+import * as secureLocalFile from '../infra/shared/read-secure-local-file.mjs';
 // @ts-expect-error The audited local validator is an ESM JavaScript module without declarations.
 import * as egressPolicy from '../infra/egress/validate-egress-policy.mjs';
 // @ts-expect-error The audited local validator is an ESM JavaScript module without declarations.
@@ -260,6 +264,17 @@ export interface BalanceConsumerDeploymentInput {
 
 const VERIFIED_BALANCE_CONSUMER_DEPLOYMENTS = new WeakSet<BalanceConsumerDeploymentInput>();
 
+export interface BalanceConsumerRuntimeAbsenceAttestation {
+  readonly inspected: true;
+  readonly sourceFileCount: number;
+  readonly sourceBytes: number;
+  readonly repositorySnapshotSha256: string;
+  readonly concreteDeploymentIdentityRegistration: 'ABSENT';
+}
+
+const VERIFIED_BALANCE_CONSUMER_RUNTIME_ABSENCE_ATTESTATIONS =
+  new WeakSet<BalanceConsumerRuntimeAbsenceAttestation>();
+
 export interface ProviderPositionReadBoundaryArtifactSources {
   readonly providerPositionReaderPortSource: string;
   readonly providerPositionTrustedAssemblyPortSource: string;
@@ -351,6 +366,8 @@ export interface ProductionPreflightInput {
   readonly productionInfrastructureDeployment?: ProductionInfrastructureDeploymentInput;
   /** Optional for legacy callers; only the private local-artifact inspector can brand it. */
   readonly balanceConsumerDeployment?: BalanceConsumerDeploymentInput;
+  /** Optional for legacy callers; only the secure repository source loader can brand it. */
+  readonly balanceConsumerRuntimeAbsenceAttestation?: BalanceConsumerRuntimeAbsenceAttestation;
   /** Optional for legacy callers; only the private local-artifact inspector can brand it. */
   readonly providerPositionReadBoundary?: ProviderPositionReadBoundaryInput;
   /** Optional for legacy programmatic callers; absence fails closed during evaluation. */
@@ -1407,8 +1424,11 @@ export function evaluateProductionPreflight(
   const balanceConsumerBlockers: ProductionPreflightBlockerId[] = [];
   let balanceConsumerInspected = false;
   let balanceConsumerDeployment: BalanceConsumerDeploymentInput | undefined;
+  let balanceConsumerRuntimeAbsenceAttestation:
+    BalanceConsumerRuntimeAbsenceAttestation | undefined;
   try {
     balanceConsumerDeployment = input.balanceConsumerDeployment;
+    balanceConsumerRuntimeAbsenceAttestation = input.balanceConsumerRuntimeAbsenceAttestation;
     balanceConsumerInspected =
       balanceConsumerDeployment?.inspected === true &&
       balanceConsumerDeployment.contractValid === true &&
@@ -1418,7 +1438,13 @@ export function evaluateProductionPreflight(
       balanceConsumerDeployment.iamCapability === 'NOT_PROVISIONED' &&
       balanceConsumerDeployment.databaseCapability === 'DORMANT_SOURCE_ONLY' &&
       balanceConsumerDeployment.deploymentEvidence === 'MISSING' &&
-      VERIFIED_BALANCE_CONSUMER_DEPLOYMENTS.has(balanceConsumerDeployment);
+      VERIFIED_BALANCE_CONSUMER_DEPLOYMENTS.has(balanceConsumerDeployment) &&
+      balanceConsumerRuntimeAbsenceAttestation?.inspected === true &&
+      balanceConsumerRuntimeAbsenceAttestation.concreteDeploymentIdentityRegistration ===
+        'ABSENT' &&
+      VERIFIED_BALANCE_CONSUMER_RUNTIME_ABSENCE_ATTESTATIONS.has(
+        balanceConsumerRuntimeAbsenceAttestation,
+      );
   } catch {
     // Initialized fail-closed values are preserved for malformed or hostile inputs.
   }
@@ -8468,6 +8494,1044 @@ function hasDormantProviderPositionReadBoundaryContract(
   );
 }
 
+const MAX_API_RUNTIME_SOURCE_FILES = 512;
+const MAX_API_RUNTIME_SOURCE_FILE_BYTES = 384 * 1024;
+const MAX_API_RUNTIME_SOURCE_TOTAL_BYTES = 8 * 1024 * 1024;
+const MAX_API_RUNTIME_SOURCE_DEPTH = 32;
+const MAX_API_RUNTIME_SOURCE_PATH_BYTES = 1024;
+const MAX_API_RUNTIME_TREE_ENTRIES = 1_024;
+const MAX_API_RUNTIME_TREE_DIRECTORIES = 192;
+const MAX_API_RUNTIME_TREE_TOPOLOGY_BYTES = 256 * 1024;
+const MAX_API_RUNTIME_PINNED_INPUT_BYTES = 4 * 1024;
+const API_RUNTIME_REPOSITORY_SNAPSHOT_DOMAIN =
+  'crypto-lending:reviewed-api-runtime-source-and-build-input-snapshot:v1\0';
+const API_RUNTIME_PINNED_INPUT_PATHS = Object.freeze([
+  'nest-cli.json',
+  'src/blockchain/domain/local-evm-development-manifest.json',
+  'tsconfig.build.json',
+  'tsconfig.json',
+]);
+const REVIEWED_API_RUNTIME_REPOSITORY_SNAPSHOT_SHA256 =
+  'c8194c555e19f8e00d964d26d32ea6837cabf00a30fa158c4c68627a3dd3a6ce';
+const API_RUNTIME_OWNED_DEPLOYMENT_IDENTITY_PATHS = new Set([
+  'blockchain-sync/infrastructure/rpc/ethereum-mainnet-balance-deployment-identity.verifier.ts',
+  'blockchain-sync/infrastructure/rpc/ethereum-mainnet-balance-deployment.manifest.ts',
+  'blockchain-sync/infrastructure/rpc/solana-mainnet-balance-deployment-identity.verifier.ts',
+  'blockchain-sync/infrastructure/rpc/solana-mainnet-balance-deployment.manifest.ts',
+]);
+const API_RUNTIME_CONCRETE_DEPLOYMENT_IDENTITY_SYMBOLS = new Set([
+  'createDormantEthereumMainnetBalanceDeploymentIdentityVerifier',
+  'createDormantSolanaMainnetBalanceDeploymentIdentityVerifier',
+  'DORMANT_ETHEREUM_MAINNET_BALANCE_DEPLOYMENT_MANIFEST',
+  'SOLANA_MAINNET_BALANCE_DEPLOYMENT_MANIFEST_V1',
+]);
+const API_RUNTIME_CONCRETE_DEPLOYMENT_IDENTITY_MODULE_BASENAMES = Object.freeze([
+  'ethereum-mainnet-balance-deployment',
+  'solana-mainnet-balance-deployment',
+]);
+const API_RUNTIME_NON_TEST_TYPESCRIPT_PATH = /\.tsx?$/u;
+const API_RUNTIME_TYPESCRIPT_PATH_CASE_INSENSITIVE = /\.tsx?$/iu;
+const API_RUNTIME_BUILD_EXCLUDED_TYPESCRIPT_PATH = /\.(?:e2e-spec|spec)\.ts$/u;
+const API_RUNTIME_UNREVIEWED_SCRIPT_PATH = /\.(?:[cm]ts|[cm]?jsx?)$/iu;
+const API_RUNTIME_EXCLUDED_TEST_MODULE_BASENAME = /\.(?:e2e-spec|spec|test)(?:\.[cm]?[jt]sx?)?$/iu;
+const API_RUNTIME_REVIEWED_NATIVE_REQUIRE_PATH =
+  'authentication/infrastructure/oidc/jose-runtime.ts' as const;
+const API_RUNTIME_REVIEWED_JSON_MODULE_PATH =
+  'blockchain/domain/local-evm-development-manifest.json' as const;
+
+export interface BalanceConsumerRuntimeAbsenceTestLimits {
+  readonly maximumFiles: number;
+  readonly maximumFileBytes: number;
+  readonly maximumTotalBytes: number;
+  readonly maximumDepth: number;
+}
+
+type ApiRuntimeSourceLimits = BalanceConsumerRuntimeAbsenceTestLimits;
+
+export interface BalanceConsumerRuntimeAbsenceRepositoryTestHooks {
+  readonly afterInitialEnumeration?: () => void;
+  readonly afterFirstFileRead?: (relativePath: string) => void;
+  readonly afterFirstSnapshot?: () => void;
+}
+
+interface ApiRuntimeSourceEntry {
+  readonly relativePath: string;
+  readonly source: string;
+}
+
+interface ApiRuntimeSourceSnapshot {
+  readonly entries: readonly ApiRuntimeSourceEntry[];
+  readonly sourceBytes: number;
+}
+
+interface ReviewedApiRuntimeRepositorySnapshot {
+  readonly source: ApiRuntimeSourceSnapshot;
+  readonly repositorySnapshotSha256: string;
+}
+
+interface ApiRuntimePinnedInputEntry {
+  readonly relativePath: string;
+  readonly bytes: Uint8Array;
+}
+
+interface ApiRuntimePhysicalSourceFile {
+  readonly absolutePath: string;
+  readonly relativePath: string;
+  readonly expectedBytes: number;
+}
+
+interface ApiRuntimeSourceTreeEnumeration {
+  readonly files: readonly ApiRuntimePhysicalSourceFile[];
+  readonly topology: string;
+}
+
+const API_RUNTIME_SOURCE_LIMITS = Object.freeze({
+  maximumFiles: MAX_API_RUNTIME_SOURCE_FILES,
+  maximumFileBytes: MAX_API_RUNTIME_SOURCE_FILE_BYTES,
+  maximumTotalBytes: MAX_API_RUNTIME_SOURCE_TOTAL_BYTES,
+  maximumDepth: MAX_API_RUNTIME_SOURCE_DEPTH,
+} satisfies ApiRuntimeSourceLimits);
+
+type SecureLocalFileReader = (filePath: string, maximumBytes: number) => Uint8Array;
+type SecureLocalFileTestReader = (
+  filePath: string,
+  maximumBytes: number,
+  afterFirstReadForTest: () => void,
+) => Uint8Array;
+
+const readSecureLocalFile = secureLocalFile.readSecureLocalFile as SecureLocalFileReader;
+const readSecureLocalFileForTest =
+  secureLocalFile.readSecureLocalFileForTest as SecureLocalFileTestReader;
+
+function compareUtf8(left: string, right: string): number {
+  return Buffer.compare(Buffer.from(left, 'utf8'), Buffer.from(right, 'utf8'));
+}
+
+function comparablePhysicalPath(value: string): string {
+  let path = resolve(value);
+  if (path.startsWith('\\\\?\\UNC\\')) path = `\\\\${path.slice(8)}`;
+  else if (path.startsWith('\\\\?\\')) path = path.slice(4);
+  path = path.replace(/[\\/]+$/u, '');
+  return process.platform === 'win32' ? path.toLowerCase() : path;
+}
+
+function isContainedPhysicalPath(root: string, target: string): boolean {
+  const fromRoot = relative(root, target);
+  return (
+    fromRoot === '' ||
+    (!isAbsolute(fromRoot) && fromRoot !== '..' && !fromRoot.startsWith(`..${sep}`))
+  );
+}
+
+function stableSourceStatIdentity(status: {
+  readonly dev: bigint;
+  readonly ino: bigint;
+  readonly mode: bigint;
+  readonly nlink: bigint;
+  readonly size: bigint;
+  readonly mtimeNs: bigint;
+  readonly ctimeNs: bigint;
+}): string {
+  return [
+    status.dev,
+    status.ino,
+    status.mode,
+    status.nlink,
+    status.size,
+    status.mtimeNs,
+    status.ctimeNs,
+  ].join(':');
+}
+
+function isCanonicalApiRuntimeSourcePath(value: string, limits: ApiRuntimeSourceLimits): boolean {
+  if (
+    value.length === 0 ||
+    Buffer.byteLength(value, 'utf8') > MAX_API_RUNTIME_SOURCE_PATH_BYTES ||
+    value.includes('\0') ||
+    value.includes('\\') ||
+    value.includes(':') ||
+    value.startsWith('/') ||
+    isAbsolute(value) ||
+    !API_RUNTIME_NON_TEST_TYPESCRIPT_PATH.test(value) ||
+    API_RUNTIME_BUILD_EXCLUDED_TYPESCRIPT_PATH.test(value)
+  ) {
+    return false;
+  }
+  const segments = value.split('/');
+  return (
+    segments.length <= limits.maximumDepth &&
+    segments.every((segment) => segment.length > 0 && segment !== '.' && segment !== '..')
+  );
+}
+
+function boundedStaticStringValue(node: ts.Expression, depth = 0): string | null {
+  if (depth > 32) return null;
+  if (ts.isStringLiteralLike(node)) return node.text;
+  if (
+    ts.isParenthesizedExpression(node) ||
+    ts.isAsExpression(node) ||
+    ts.isTypeAssertionExpression(node) ||
+    ts.isNonNullExpression(node) ||
+    ts.isSatisfiesExpression(node)
+  ) {
+    return boundedStaticStringValue(node.expression, depth + 1);
+  }
+  if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.PlusToken) {
+    const left = boundedStaticStringValue(node.left, depth + 1);
+    const right = boundedStaticStringValue(node.right, depth + 1);
+    if (left === null || right === null || left.length + right.length > 4_096) return null;
+    return `${left}${right}`;
+  }
+  if (ts.isTemplateExpression(node)) {
+    let value = node.head.text;
+    for (const span of node.templateSpans) {
+      const expression = boundedStaticStringValue(span.expression, depth + 1);
+      if (
+        expression === null ||
+        value.length + expression.length + span.literal.text.length > 4_096
+      ) {
+        return null;
+      }
+      value = `${value}${expression}${span.literal.text}`;
+    }
+    return value;
+  }
+  return null;
+}
+
+function isConcreteDeploymentIdentityText(value: string): boolean {
+  const folded = value.toLowerCase();
+  return (
+    API_RUNTIME_CONCRETE_DEPLOYMENT_IDENTITY_SYMBOLS.has(value) ||
+    API_RUNTIME_CONCRETE_DEPLOYMENT_IDENTITY_MODULE_BASENAMES.some((basename) =>
+      folded.includes(basename),
+    )
+  );
+}
+
+function containsConcreteDeploymentIdentityToken(sourceFile: ts.SourceFile): boolean {
+  let found = false;
+  const visit = (node: ts.Node): void => {
+    if (found) return;
+    let text: string | undefined;
+    if (ts.isIdentifier(node) || ts.isStringLiteralLike(node)) {
+      text = node.text;
+    } else if (
+      node.kind === ts.SyntaxKind.TemplateHead ||
+      node.kind === ts.SyntaxKind.TemplateMiddle ||
+      node.kind === ts.SyntaxKind.TemplateTail
+    ) {
+      text = (node as ts.TemplateLiteralToken).text;
+    } else if (ts.isBinaryExpression(node) || ts.isTemplateExpression(node)) {
+      text = boundedStaticStringValue(node) ?? undefined;
+    }
+    if (text !== undefined && isConcreteDeploymentIdentityText(text)) {
+      found = true;
+      return;
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sourceFile);
+  return found;
+}
+
+function isExcludedTestModuleSpecifier(value: string): boolean {
+  const withoutQueryOrFragment = value.split(/[?#]/u, 1)[0] ?? '';
+  const basename = withoutQueryOrFragment.split(/[\\/]/u).at(-1) ?? '';
+  return API_RUNTIME_EXCLUDED_TEST_MODULE_BASENAME.test(basename);
+}
+
+function moduleSpecifierEscapesRuntimeSource(relativePath: string, value: string): boolean {
+  if (
+    value.length === 0 ||
+    value.includes('\0') ||
+    value.includes('\\') ||
+    value.includes('?') ||
+    value.includes('#') ||
+    value.startsWith('/') ||
+    /^[A-Za-z][A-Za-z0-9+.-]*:/u.test(value)
+  ) {
+    return !/^node:[a-z][a-z0-9_./-]*$/u.test(value);
+  }
+  if (value !== '.' && value !== '..' && !value.startsWith('./') && !value.startsWith('../')) {
+    if (!value.startsWith('src/')) return false;
+    const sourcePath = value.slice(4);
+    const segments = sourcePath.split('/');
+    return (
+      sourcePath.length === 0 ||
+      Buffer.byteLength(sourcePath, 'utf8') > MAX_API_RUNTIME_SOURCE_PATH_BYTES ||
+      segments.some((segment) => segment.length === 0 || segment === '.' || segment === '..') ||
+      API_RUNTIME_UNREVIEWED_SCRIPT_PATH.test(sourcePath) ||
+      (/\.json$/iu.test(sourcePath) && sourcePath !== API_RUNTIME_REVIEWED_JSON_MODULE_PATH)
+    );
+  }
+  const resolvedSegments = relativePath.split('/');
+  resolvedSegments.pop();
+  for (const segment of value.split('/')) {
+    if (segment.length === 0) return true;
+    if (segment === '.') continue;
+    if (segment === '..') {
+      if (resolvedSegments.length === 0) return true;
+      resolvedSegments.pop();
+      continue;
+    }
+    resolvedSegments.push(segment);
+  }
+  const resolvedPath = resolvedSegments.join('/');
+  return (
+    resolvedPath.length === 0 ||
+    Buffer.byteLength(resolvedPath, 'utf8') > MAX_API_RUNTIME_SOURCE_PATH_BYTES ||
+    API_RUNTIME_UNREVIEWED_SCRIPT_PATH.test(resolvedPath) ||
+    (/\.json$/iu.test(resolvedPath) && resolvedPath !== API_RUNTIME_REVIEWED_JSON_MODULE_PATH)
+  );
+}
+
+function identifierIsNonValuePropertyName(identifier: ts.Identifier): boolean {
+  const parent = identifier.parent;
+  return (
+    (ts.isPropertyAccessExpression(parent) && parent.name === identifier) ||
+    ((ts.isPropertyAssignment(parent) ||
+      ts.isPropertyDeclaration(parent) ||
+      ts.isPropertySignature(parent) ||
+      ts.isMethodDeclaration(parent) ||
+      ts.isMethodSignature(parent) ||
+      ts.isGetAccessorDeclaration(parent) ||
+      ts.isSetAccessorDeclaration(parent) ||
+      ts.isEnumMember(parent)) &&
+      parent.name === identifier)
+  );
+}
+
+function executableConstructorName(node: ts.Expression): string | null {
+  if (ts.isIdentifier(node)) return node.text;
+  if (ts.isPropertyAccessExpression(node)) return node.name.text;
+  if (ts.isElementAccessExpression(node) && node.argumentExpression !== undefined) {
+    return boundedStaticStringValue(node.argumentExpression);
+  }
+  return null;
+}
+
+interface ReviewedNativeRequireUse {
+  readonly reviewedIdentifiers: ReadonlySet<ts.Identifier>;
+}
+
+function reviewedNativeRequireUse(
+  sourceFile: ts.SourceFile,
+  relativePath: string,
+): ReviewedNativeRequireUse | null {
+  const createRequireIdentifiers: ts.Identifier[] = [];
+  const getBuiltinModuleIdentifiers: ts.Identifier[] = [];
+  const nativeRequireIdentifiers: ts.Identifier[] = [];
+  const collect = (node: ts.Node): void => {
+    if (ts.isIdentifier(node)) {
+      if (node.text === 'createRequire') createRequireIdentifiers.push(node);
+      else if (node.text === 'getBuiltinModule') getBuiltinModuleIdentifiers.push(node);
+      else if (node.text === 'nativeRequire') nativeRequireIdentifiers.push(node);
+    }
+    ts.forEachChild(node, collect);
+  };
+  collect(sourceFile);
+  if (createRequireIdentifiers.length === 0 && getBuiltinModuleIdentifiers.length === 0) {
+    return Object.freeze({ reviewedIdentifiers: new Set<ts.Identifier>() });
+  }
+  if (
+    relativePath !== API_RUNTIME_REVIEWED_NATIVE_REQUIRE_PATH ||
+    createRequireIdentifiers.length !== 1 ||
+    getBuiltinModuleIdentifiers.length !== 1 ||
+    nativeRequireIdentifiers.length !== 2
+  ) {
+    return null;
+  }
+
+  const createRequireIdentifier = createRequireIdentifiers[0]!;
+  const createRequireAccess = createRequireIdentifier.parent;
+  if (
+    !ts.isPropertyAccessExpression(createRequireAccess) ||
+    createRequireAccess.name !== createRequireIdentifier
+  ) {
+    return null;
+  }
+  const createRequireCall = createRequireAccess.parent;
+  const createRequireArgument = ts.isCallExpression(createRequireCall)
+    ? createRequireCall.arguments[0]
+    : undefined;
+  if (
+    !ts.isCallExpression(createRequireCall) ||
+    createRequireCall.expression !== createRequireAccess ||
+    createRequireCall.arguments.length !== 1 ||
+    createRequireArgument === undefined ||
+    !ts.isIdentifier(createRequireArgument) ||
+    createRequireArgument.text !== '__filename'
+  ) {
+    return null;
+  }
+  const declaration = createRequireCall.parent;
+  if (
+    !ts.isVariableDeclaration(declaration) ||
+    declaration.initializer !== createRequireCall ||
+    !ts.isIdentifier(declaration.name) ||
+    declaration.name.text !== 'nativeRequire' ||
+    !ts.isVariableDeclarationList(declaration.parent) ||
+    (declaration.parent.flags & ts.NodeFlags.Const) === 0
+  ) {
+    return null;
+  }
+
+  const getBuiltinModuleCall = createRequireAccess.expression;
+  if (!ts.isCallExpression(getBuiltinModuleCall)) return null;
+  const getBuiltinModuleAccess = getBuiltinModuleCall.expression;
+  const getBuiltinModuleArgument = getBuiltinModuleCall.arguments[0];
+  const getBuiltinModuleIdentifier = getBuiltinModuleIdentifiers[0]!;
+  if (
+    getBuiltinModuleCall.arguments.length !== 1 ||
+    getBuiltinModuleArgument === undefined ||
+    !ts.isStringLiteralLike(getBuiltinModuleArgument) ||
+    getBuiltinModuleArgument.text !== 'module' ||
+    !ts.isPropertyAccessExpression(getBuiltinModuleAccess) ||
+    getBuiltinModuleAccess.name !== getBuiltinModuleIdentifier ||
+    !ts.isIdentifier(getBuiltinModuleAccess.expression) ||
+    getBuiltinModuleAccess.expression.text !== 'process'
+  ) {
+    return null;
+  }
+
+  const declarationIdentifier = declaration.name;
+  const invocationIdentifier = nativeRequireIdentifiers.find(
+    (identifier) => identifier !== declarationIdentifier,
+  );
+  const invocation = invocationIdentifier?.parent;
+  const invocationArgument =
+    invocation !== undefined && ts.isCallExpression(invocation)
+      ? invocation.arguments[0]
+      : undefined;
+  if (
+    invocationIdentifier === undefined ||
+    invocation === undefined ||
+    !ts.isCallExpression(invocation) ||
+    invocation.expression !== invocationIdentifier ||
+    invocation.arguments.length !== 1 ||
+    invocationArgument === undefined ||
+    !ts.isStringLiteralLike(invocationArgument) ||
+    invocationArgument.text !== 'jose'
+  ) {
+    return null;
+  }
+  return Object.freeze({
+    reviewedIdentifiers: new Set([
+      createRequireIdentifier,
+      getBuiltinModuleIdentifier,
+      declarationIdentifier,
+      invocationIdentifier,
+    ]),
+  });
+}
+
+function containsUnsafeRuntimeModuleLoad(sourceFile: ts.SourceFile, relativePath: string): boolean {
+  const nativeRequireUse = reviewedNativeRequireUse(sourceFile, relativePath);
+  if (nativeRequireUse === null) return true;
+  let unsafe = false;
+  const literalModuleIsUnsafe = (node: ts.Expression | undefined): boolean =>
+    node === undefined ||
+    !ts.isStringLiteralLike(node) ||
+    isExcludedTestModuleSpecifier(node.text) ||
+    moduleSpecifierEscapesRuntimeSource(relativePath, node.text) ||
+    node.text === 'module' ||
+    node.text === 'node:module';
+  const visit = (node: ts.Node): void => {
+    if (unsafe) return;
+    if (
+      ts.isIdentifier(node) &&
+      (node.text === 'eval' || (node.text === 'module' && !identifierIsNonValuePropertyName(node)))
+    ) {
+      unsafe = true;
+      return;
+    }
+    if (
+      (ts.isCallExpression(node) || ts.isNewExpression(node)) &&
+      ['eval', 'Function'].includes(executableConstructorName(node.expression) ?? '')
+    ) {
+      unsafe = true;
+      return;
+    }
+    if (
+      ts.isElementAccessExpression(node) &&
+      ts.isIdentifier(node.expression) &&
+      node.expression.text === 'process'
+    ) {
+      unsafe = true;
+      return;
+    }
+    if (
+      ts.isIdentifier(node) &&
+      (node.text === 'createRequire' ||
+        node.text === 'getBuiltinModule' ||
+        (node.text === 'nativeRequire' &&
+          relativePath === API_RUNTIME_REVIEWED_NATIVE_REQUIRE_PATH)) &&
+      !nativeRequireUse.reviewedIdentifiers.has(node)
+    ) {
+      unsafe = true;
+      return;
+    }
+    if (ts.isStringLiteralLike(node) && node.text === 'createRequire') {
+      unsafe = true;
+      return;
+    }
+    if (
+      (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) &&
+      node.moduleSpecifier !== undefined &&
+      literalModuleIsUnsafe(node.moduleSpecifier)
+    ) {
+      unsafe = true;
+      return;
+    }
+    if (
+      ts.isImportEqualsDeclaration(node) &&
+      ts.isExternalModuleReference(node.moduleReference) &&
+      literalModuleIsUnsafe(node.moduleReference.expression)
+    ) {
+      unsafe = true;
+      return;
+    }
+    if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword) {
+      if (node.arguments.length !== 1 || literalModuleIsUnsafe(node.arguments[0])) {
+        unsafe = true;
+        return;
+      }
+    }
+    if (ts.isIdentifier(node) && node.text === 'require') {
+      const parent = node.parent;
+      if (
+        !ts.isCallExpression(parent) ||
+        parent.expression !== node ||
+        parent.arguments.length !== 1 ||
+        literalModuleIsUnsafe(parent.arguments[0])
+      ) {
+        unsafe = true;
+        return;
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sourceFile);
+  return unsafe;
+}
+
+function updateApiRuntimeRepositoryFingerprint(
+  hash: ReturnType<typeof createHash>,
+  relativePath: string,
+  bytes: Uint8Array,
+): void {
+  const pathBytes = Buffer.from(relativePath, 'utf8');
+  const lengths = Buffer.allocUnsafe(8);
+  lengths.writeUInt32BE(pathBytes.byteLength, 0);
+  lengths.writeUInt32BE(bytes.byteLength, 4);
+  hash.update(lengths).update(pathBytes).update(bytes);
+}
+
+function apiRuntimeRepositorySnapshotFingerprint(
+  pinnedInputs: readonly ApiRuntimePinnedInputEntry[],
+  sources: readonly ApiRuntimeSourceEntry[],
+): string {
+  const hash = createHash('sha256').update(API_RUNTIME_REPOSITORY_SNAPSHOT_DOMAIN, 'utf8');
+  for (const entry of pinnedInputs) {
+    updateApiRuntimeRepositoryFingerprint(hash, `build/${entry.relativePath}`, entry.bytes);
+  }
+  for (const entry of sources) {
+    const sourceBytes = Buffer.from(entry.source, 'utf8');
+    updateApiRuntimeRepositoryFingerprint(hash, `source/${entry.relativePath}`, sourceBytes);
+  }
+  return hash.digest('hex');
+}
+
+function snapshotApiRuntimeSourceEntries(
+  value: unknown,
+  limits: ApiRuntimeSourceLimits,
+): ApiRuntimeSourceSnapshot | null {
+  if (typeof value !== 'object' || value === null || isProxy(value) || !Array.isArray(value)) {
+    return null;
+  }
+  const arrayDescriptors = Object.getOwnPropertyDescriptors(value) as unknown as Record<
+    PropertyKey,
+    PropertyDescriptor | undefined
+  >;
+  const lengthDescriptor = arrayDescriptors.length;
+  if (
+    lengthDescriptor === undefined ||
+    !('value' in lengthDescriptor) ||
+    typeof lengthDescriptor.value !== 'number' ||
+    !Number.isSafeInteger(lengthDescriptor.value) ||
+    lengthDescriptor.value < 1 ||
+    lengthDescriptor.value > limits.maximumFiles
+  ) {
+    return null;
+  }
+  const length = lengthDescriptor.value;
+  const ownKeys = Reflect.ownKeys(value);
+  if (
+    ownKeys.length !== length + 1 ||
+    ownKeys.some(
+      (key) =>
+        typeof key !== 'string' ||
+        (key !== 'length' && (!/^(?:0|[1-9][0-9]*)$/u.test(key) || Number(key) >= length)),
+    )
+  ) {
+    return null;
+  }
+
+  const entries: ApiRuntimeSourceEntry[] = [];
+  const caseInsensitivePaths = new Set<string>();
+  let totalBytes = 0;
+  let previousPath: string | undefined;
+  for (let index = 0; index < length; index += 1) {
+    const arrayEntryDescriptor = arrayDescriptors[String(index)];
+    if (arrayEntryDescriptor === undefined || !('value' in arrayEntryDescriptor)) return null;
+    const candidate = arrayEntryDescriptor.value as unknown;
+    if (
+      typeof candidate !== 'object' ||
+      candidate === null ||
+      Array.isArray(candidate) ||
+      isProxy(candidate) ||
+      Object.getOwnPropertySymbols(candidate).length !== 0
+    ) {
+      return null;
+    }
+    const prototype = Object.getPrototypeOf(candidate);
+    if (prototype !== Object.prototype && prototype !== null) return null;
+    const candidateKeys = Reflect.ownKeys(candidate);
+    if (
+      candidateKeys.length !== 2 ||
+      !candidateKeys.includes('relativePath') ||
+      !candidateKeys.includes('source')
+    ) {
+      return null;
+    }
+    const descriptors = Object.getOwnPropertyDescriptors(candidate);
+    const pathDescriptor = descriptors.relativePath;
+    const sourceDescriptor = descriptors.source;
+    if (
+      pathDescriptor === undefined ||
+      sourceDescriptor === undefined ||
+      !('value' in pathDescriptor) ||
+      !('value' in sourceDescriptor) ||
+      typeof pathDescriptor.value !== 'string' ||
+      typeof sourceDescriptor.value !== 'string' ||
+      sourceDescriptor.value.length === 0 ||
+      sourceDescriptor.value.charCodeAt(0) === 0xfeff ||
+      !isCanonicalApiRuntimeSourcePath(pathDescriptor.value, limits)
+    ) {
+      return null;
+    }
+    const relativePath = pathDescriptor.value;
+    const source = sourceDescriptor.value;
+    const foldedPath = relativePath.toLowerCase();
+    if (
+      caseInsensitivePaths.has(foldedPath) ||
+      (previousPath !== undefined && compareUtf8(previousPath, relativePath) >= 0)
+    ) {
+      return null;
+    }
+    caseInsensitivePaths.add(foldedPath);
+    previousPath = relativePath;
+    const bytes = Buffer.byteLength(source, 'utf8');
+    if (bytes < 1 || bytes > limits.maximumFileBytes) return null;
+    totalBytes += bytes;
+    if (totalBytes > limits.maximumTotalBytes) return null;
+
+    const sourceFile = ts.createSourceFile(
+      relativePath,
+      source,
+      ts.ScriptTarget.ESNext,
+      true,
+      relativePath.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
+    );
+    const parseDiagnostics = (
+      sourceFile as ts.SourceFile & { readonly parseDiagnostics: readonly ts.Diagnostic[] }
+    ).parseDiagnostics;
+    if (
+      parseDiagnostics.length !== 0 ||
+      containsUnsafeRuntimeModuleLoad(sourceFile, relativePath) ||
+      (!API_RUNTIME_OWNED_DEPLOYMENT_IDENTITY_PATHS.has(relativePath) &&
+        containsConcreteDeploymentIdentityToken(sourceFile))
+    ) {
+      return null;
+    }
+    entries.push(Object.freeze({ relativePath, source }));
+  }
+
+  const frozenEntries = Object.freeze(entries);
+  return Object.freeze({
+    entries: frozenEntries,
+    sourceBytes: totalBytes,
+  });
+}
+
+function validateRuntimeAbsenceTestLimits(value: unknown): ApiRuntimeSourceLimits | null {
+  if (value === undefined) return API_RUNTIME_SOURCE_LIMITS;
+  if (
+    typeof value !== 'object' ||
+    value === null ||
+    Array.isArray(value) ||
+    isProxy(value) ||
+    Object.getOwnPropertySymbols(value).length !== 0
+  ) {
+    return null;
+  }
+  const prototype = Object.getPrototypeOf(value);
+  if (prototype !== Object.prototype && prototype !== null) return null;
+  const keys = ['maximumFiles', 'maximumFileBytes', 'maximumTotalBytes', 'maximumDepth'] as const;
+  const ownKeys = Reflect.ownKeys(value);
+  if (ownKeys.length !== keys.length || !keys.every((key) => ownKeys.includes(key))) return null;
+  const descriptors = Object.getOwnPropertyDescriptors(value);
+  const maxima = [
+    MAX_API_RUNTIME_SOURCE_FILES,
+    MAX_API_RUNTIME_SOURCE_FILE_BYTES,
+    MAX_API_RUNTIME_SOURCE_TOTAL_BYTES,
+    MAX_API_RUNTIME_SOURCE_DEPTH,
+  ] as const;
+  const reviewed: number[] = [];
+  for (const [index, key] of keys.entries()) {
+    const descriptor = descriptors[key];
+    if (
+      descriptor === undefined ||
+      !('value' in descriptor) ||
+      typeof descriptor.value !== 'number' ||
+      !Number.isSafeInteger(descriptor.value) ||
+      descriptor.value < 1 ||
+      descriptor.value > maxima[index]!
+    ) {
+      return null;
+    }
+    reviewed.push(descriptor.value);
+  }
+  return Object.freeze({
+    maximumFiles: reviewed[0]!,
+    maximumFileBytes: reviewed[1]!,
+    maximumTotalBytes: reviewed[2]!,
+    maximumDepth: reviewed[3]!,
+  });
+}
+
+/** Unbranded test seam: validates injected snapshots but can never confer preflight authority. */
+export function inspectBalanceConsumerRuntimeAbsenceSnapshotForTest(
+  value: unknown,
+  limits?: BalanceConsumerRuntimeAbsenceTestLimits,
+): boolean {
+  try {
+    const reviewedLimits = validateRuntimeAbsenceTestLimits(limits);
+    return (
+      reviewedLimits !== null && snapshotApiRuntimeSourceEntries(value, reviewedLimits) !== null
+    );
+  } catch {
+    return false;
+  }
+}
+
+function hasUtf8ByteOrderMark(bytes: Uint8Array): boolean {
+  return bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf;
+}
+
+function readApiRuntimePinnedInputs(apiRoot: string): readonly ApiRuntimePinnedInputEntry[] {
+  return Object.freeze(
+    API_RUNTIME_PINNED_INPUT_PATHS.map((relativePath) => {
+      const bytes = readSecureLocalFile(
+        resolve(apiRoot, relativePath),
+        MAX_API_RUNTIME_PINNED_INPUT_BYTES,
+      );
+      if (hasUtf8ByteOrderMark(bytes)) {
+        throw new TypeError('API runtime build input has a byte-order mark');
+      }
+      return Object.freeze({ relativePath, bytes });
+    }),
+  );
+}
+
+function sameApiRuntimePinnedInputs(
+  left: readonly ApiRuntimePinnedInputEntry[],
+  right: readonly ApiRuntimePinnedInputEntry[],
+): boolean {
+  return (
+    left.length === right.length &&
+    left.every((entry, index) => {
+      const other = right[index];
+      return (
+        other !== undefined &&
+        entry.relativePath === other.relativePath &&
+        Buffer.from(entry.bytes).equals(other.bytes)
+      );
+    })
+  );
+}
+
+function enumerateApiRuntimeSourceTree(
+  sourceRoot: string,
+  limits: ApiRuntimeSourceLimits,
+): ApiRuntimeSourceTreeEnumeration {
+  const lexicalRoot = resolve(sourceRoot);
+  const rootStatus = lstatSync(lexicalRoot, { bigint: true });
+  const physicalRoot = realpathSync.native(lexicalRoot);
+  if (
+    rootStatus.isSymbolicLink() ||
+    !rootStatus.isDirectory() ||
+    comparablePhysicalPath(physicalRoot) !== comparablePhysicalPath(lexicalRoot)
+  ) {
+    throw new TypeError('API runtime source root is unavailable');
+  }
+
+  const files: ApiRuntimePhysicalSourceFile[] = [];
+  const topology: string[] = [];
+  let directoryCount = 0;
+  let entryCount = 0;
+  let topologyBytes = 0;
+  let totalBytes = 0;
+  const pushTopology = (value: string): void => {
+    topologyBytes += Buffer.byteLength(value, 'utf8') + 1;
+    if (topologyBytes > MAX_API_RUNTIME_TREE_TOPOLOGY_BYTES) {
+      throw new TypeError('API runtime source topology exceeded');
+    }
+    topology.push(value);
+  };
+  const walk = (absoluteDirectory: string, relativeDirectory: string, depth: number): void => {
+    if (depth > limits.maximumDepth) throw new TypeError('API runtime source depth exceeded');
+    directoryCount += 1;
+    if (directoryCount > MAX_API_RUNTIME_TREE_DIRECTORIES) {
+      throw new TypeError('API runtime source directory count exceeded');
+    }
+    const directoryStatus = lstatSync(absoluteDirectory, { bigint: true });
+    const directoryPhysicalPath = realpathSync.native(absoluteDirectory);
+    if (
+      directoryStatus.isSymbolicLink() ||
+      !directoryStatus.isDirectory() ||
+      comparablePhysicalPath(directoryPhysicalPath) !== comparablePhysicalPath(absoluteDirectory) ||
+      !isContainedPhysicalPath(physicalRoot, directoryPhysicalPath)
+    ) {
+      throw new TypeError('API runtime source directory is unsafe');
+    }
+    pushTopology(
+      JSON.stringify(['directory', relativeDirectory, stableSourceStatIdentity(directoryStatus)]),
+    );
+    const names: string[] = [];
+    const directory = opendirSync(absoluteDirectory);
+    try {
+      while (true) {
+        const entry = directory.readSync();
+        if (entry === null) break;
+        entryCount += 1;
+        if (entryCount > MAX_API_RUNTIME_TREE_ENTRIES) {
+          throw new TypeError('API runtime source entry count exceeded');
+        }
+        names.push(entry.name);
+      }
+    } finally {
+      directory.closeSync();
+    }
+    names.sort(compareUtf8);
+    for (const name of names) {
+      const absolutePath = resolve(absoluteDirectory, name);
+      const relativePath = relative(lexicalRoot, absolutePath).split(sep).join('/');
+      if (
+        relativePath.length === 0 ||
+        Buffer.byteLength(relativePath, 'utf8') > MAX_API_RUNTIME_SOURCE_PATH_BYTES ||
+        relativePath.includes('\0') ||
+        relativePath.includes('\\') ||
+        relativePath.includes(':') ||
+        isAbsolute(relativePath) ||
+        relativePath === '..' ||
+        relativePath.startsWith('../') ||
+        !isContainedPhysicalPath(lexicalRoot, absolutePath)
+      ) {
+        throw new TypeError('API runtime source path escaped its root');
+      }
+      const status = lstatSync(absolutePath, { bigint: true });
+      const physicalPath = realpathSync.native(absolutePath);
+      if (
+        status.isSymbolicLink() ||
+        comparablePhysicalPath(physicalPath) !== comparablePhysicalPath(absolutePath) ||
+        !isContainedPhysicalPath(physicalRoot, physicalPath)
+      ) {
+        throw new TypeError('API runtime source path is unsafe');
+      }
+      if (status.isDirectory()) {
+        walk(absolutePath, relativePath, depth + 1);
+        continue;
+      }
+      if (!status.isFile()) throw new TypeError('API runtime source entry is unsupported');
+      pushTopology(JSON.stringify(['file', relativePath, stableSourceStatIdentity(status)]));
+      if (
+        API_RUNTIME_TYPESCRIPT_PATH_CASE_INSENSITIVE.test(relativePath) &&
+        !API_RUNTIME_NON_TEST_TYPESCRIPT_PATH.test(relativePath)
+      ) {
+        throw new TypeError('API runtime TypeScript extension must be lowercase');
+      }
+      if (API_RUNTIME_UNREVIEWED_SCRIPT_PATH.test(relativePath)) {
+        throw new TypeError('API runtime source contains an unreviewed script extension');
+      }
+      if (/\.json$/iu.test(relativePath)) {
+        if (relativePath !== API_RUNTIME_REVIEWED_JSON_MODULE_PATH) {
+          throw new TypeError('API runtime source contains an unreviewed JSON input');
+        }
+        continue;
+      }
+      if (
+        !API_RUNTIME_NON_TEST_TYPESCRIPT_PATH.test(relativePath) ||
+        API_RUNTIME_BUILD_EXCLUDED_TYPESCRIPT_PATH.test(relativePath)
+      ) {
+        continue;
+      }
+      if (!isCanonicalApiRuntimeSourcePath(relativePath, limits) || status.nlink !== 1n) {
+        throw new TypeError('API runtime TypeScript source path is unsafe');
+      }
+      if (status.size < 1n || status.size > BigInt(limits.maximumFileBytes)) {
+        throw new TypeError('API runtime TypeScript source size is invalid');
+      }
+      if (files.length >= limits.maximumFiles) {
+        throw new TypeError('API runtime TypeScript source count exceeded');
+      }
+      totalBytes += Number(status.size);
+      if (totalBytes > limits.maximumTotalBytes) {
+        throw new TypeError('API runtime TypeScript source total exceeded');
+      }
+      files.push(
+        Object.freeze({
+          absolutePath,
+          relativePath,
+          expectedBytes: Number(status.size),
+        }),
+      );
+    }
+  };
+  walk(lexicalRoot, '', 0);
+  files.sort((left, right) => compareUtf8(left.relativePath, right.relativePath));
+  return Object.freeze({ files: Object.freeze(files), topology: topology.join('\n') });
+}
+
+function readApiRuntimeSourceFiles(
+  enumeration: ApiRuntimeSourceTreeEnumeration,
+  limits: ApiRuntimeSourceLimits,
+  afterFirstFileRead?: (relativePath: string) => void,
+): readonly ApiRuntimeSourceEntry[] {
+  const decoder = new TextDecoder('utf-8', { fatal: true });
+  return Object.freeze(
+    enumeration.files.map((file) => {
+      const bytes =
+        afterFirstFileRead === undefined
+          ? readSecureLocalFile(file.absolutePath, limits.maximumFileBytes)
+          : readSecureLocalFileForTest(file.absolutePath, limits.maximumFileBytes, () =>
+              afterFirstFileRead(file.relativePath),
+            );
+      if (bytes.byteLength !== file.expectedBytes) {
+        throw new TypeError('API runtime TypeScript source changed while read');
+      }
+      if (hasUtf8ByteOrderMark(bytes)) {
+        throw new TypeError('API runtime TypeScript source has a byte-order mark');
+      }
+      return Object.freeze({
+        relativePath: file.relativePath,
+        source: decoder.decode(bytes),
+      });
+    }),
+  );
+}
+
+function collectApiRuntimeSourceSnapshot(
+  sourceRoot: string,
+  limits: ApiRuntimeSourceLimits,
+  hooks?: BalanceConsumerRuntimeAbsenceRepositoryTestHooks,
+): ApiRuntimeSourceSnapshot {
+  const initial = enumerateApiRuntimeSourceTree(sourceRoot, limits);
+  hooks?.afterInitialEnumeration?.();
+  const firstEntries = readApiRuntimeSourceFiles(initial, limits, hooks?.afterFirstFileRead);
+  const middle = enumerateApiRuntimeSourceTree(sourceRoot, limits);
+  if (initial.topology !== middle.topology) {
+    throw new TypeError('API runtime source topology changed during inspection');
+  }
+  hooks?.afterFirstSnapshot?.();
+  const secondEntries = readApiRuntimeSourceFiles(middle, limits);
+  const final = enumerateApiRuntimeSourceTree(sourceRoot, limits);
+  if (middle.topology !== final.topology || firstEntries.length !== secondEntries.length) {
+    throw new TypeError('API runtime source snapshot changed during inspection');
+  }
+  for (let index = 0; index < firstEntries.length; index += 1) {
+    const first = firstEntries[index];
+    const second = secondEntries[index];
+    if (
+      first === undefined ||
+      second === undefined ||
+      first.relativePath !== second.relativePath ||
+      first.source !== second.source
+    ) {
+      throw new TypeError('API runtime source bytes changed during inspection');
+    }
+  }
+  const snapshot = snapshotApiRuntimeSourceEntries(firstEntries, limits);
+  if (snapshot === null) throw new TypeError('API runtime source snapshot is invalid');
+  return snapshot;
+}
+
+/** Unbranded filesystem fault seam: it exercises the secure loader but cannot mint authority. */
+export function inspectBalanceConsumerRuntimeAbsenceRepositoryForTest(
+  sourceRoot: string,
+  hooks?: BalanceConsumerRuntimeAbsenceRepositoryTestHooks,
+  limits?: BalanceConsumerRuntimeAbsenceTestLimits,
+): boolean {
+  try {
+    const reviewedLimits = validateRuntimeAbsenceTestLimits(limits);
+    return (
+      reviewedLimits !== null &&
+      collectApiRuntimeSourceSnapshot(sourceRoot, reviewedLimits, hooks).entries.length > 0
+    );
+  } catch {
+    return false;
+  }
+}
+
+function collectReviewedApiRuntimeRepositorySnapshot(
+  apiRoot: string,
+): ReviewedApiRuntimeRepositorySnapshot {
+  const firstPinnedInputs = readApiRuntimePinnedInputs(apiRoot);
+  const source = collectApiRuntimeSourceSnapshot(
+    resolve(apiRoot, 'src'),
+    API_RUNTIME_SOURCE_LIMITS,
+  );
+  const finalPinnedInputs = readApiRuntimePinnedInputs(apiRoot);
+  if (!sameApiRuntimePinnedInputs(firstPinnedInputs, finalPinnedInputs)) {
+    throw new TypeError('API runtime pinned inputs changed during inspection');
+  }
+  const repositorySnapshotSha256 = apiRuntimeRepositorySnapshotFingerprint(
+    firstPinnedInputs,
+    source.entries,
+  );
+  if (repositorySnapshotSha256 !== REVIEWED_API_RUNTIME_REPOSITORY_SNAPSHOT_SHA256) {
+    throw new TypeError('API runtime repository snapshot is not reviewed');
+  }
+  return Object.freeze({ source, repositorySnapshotSha256 });
+}
+
+/** Unbranded test seam: exercises the reviewed aggregate but can never mint authority. */
+export function inspectBalanceConsumerRuntimeReviewedRepositoryForTest(apiRoot: string): boolean {
+  try {
+    collectReviewedApiRuntimeRepositorySnapshot(apiRoot);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function loadBalanceConsumerRuntimeAbsenceAttestation(
+  repositoryRoot: string,
+): BalanceConsumerRuntimeAbsenceAttestation {
+  const apiRoot = resolve(repositoryRoot, 'apps/api');
+  const snapshot = collectReviewedApiRuntimeRepositorySnapshot(apiRoot);
+  const attestation = Object.freeze({
+    inspected: true as const,
+    sourceFileCount: snapshot.source.entries.length,
+    sourceBytes: snapshot.source.sourceBytes,
+    repositorySnapshotSha256: snapshot.repositorySnapshotSha256,
+    concreteDeploymentIdentityRegistration: 'ABSENT' as const,
+  });
+  VERIFIED_BALANCE_CONSUMER_RUNTIME_ABSENCE_ATTESTATIONS.add(attestation);
+  return attestation;
+}
+
 function snapshotBalanceConsumerArtifactSources(
   value: unknown,
 ): BalanceConsumerArtifactSources | null {
@@ -14580,6 +15644,15 @@ export function loadRepositoryProductionPreflightInput(
     // The evaluator reports an inspection failure without exposing local paths or source bytes.
   }
 
+  let balanceConsumerRuntimeAbsenceAttestation:
+    BalanceConsumerRuntimeAbsenceAttestation | undefined;
+  try {
+    balanceConsumerRuntimeAbsenceAttestation =
+      loadBalanceConsumerRuntimeAbsenceAttestation(repositoryRoot);
+  } catch {
+    // The evaluator reports the failed closed-tree inspection without exposing paths or bytes.
+  }
+
   let balanceConsumerDeployment = inspectBalanceConsumerDeploymentArtifacts(null);
   try {
     balanceConsumerDeployment = inspectBalanceConsumerDeploymentArtifacts({
@@ -15298,6 +16371,9 @@ export function loadRepositoryProductionPreflightInput(
     authentication,
     productionInfrastructureDeployment,
     balanceConsumerDeployment,
+    ...(balanceConsumerRuntimeAbsenceAttestation === undefined
+      ? {}
+      : { balanceConsumerRuntimeAbsenceAttestation }),
     providerPositionReadBoundary,
     databaseMasterDeployment,
     rdsMasterLifecycleEvidenceAccepted: false,

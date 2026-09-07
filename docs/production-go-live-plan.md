@@ -471,8 +471,21 @@ production blocker remain open.
 The same offline inspection now pins the exact dormant Ethereum and Solana
 deployment manifests and identity-verifier implementations. Both checked-in
 manifests remain empty and `NOT_APPROVED`, and neither concrete verifier is
-barrel-exported, registered, or composed into a runtime. This closes a local
-source-integrity gap only. Three activation blockers remain machine-readable:
+registered or composed into a runtime. Separately, one reviewed aggregate
+SHA-256 binds the exact API build configuration, the one resolved local JSON
+runtime input, and all 388 current lowercase TypeScript/TSX sources not excluded
+by the pinned `*.spec.ts` / `*.e2e-spec.ts` build exclusions, including the
+outbox-worker health CLI. The secure loader applies canonical-path, link,
+hardlink-on-covered-input, covered-source duplicate, size/count/depth, repeated-
+topology, double-read, and TOCTOU checks before it can mint a private point-in-
+time attestation. Recognizable test-named module imports, unreviewed local JSON
+imports, escaping local module paths, dynamic loaders, or concrete identity
+references outside the four owned verifier/manifest files fail as defense in
+depth. The existing byte-pinned artifact count remains 72. Any covered runtime
+input change requires review and an aggregate-fingerprint rebaseline; this
+cached source attestation is not permanent runtime or launch evidence. This
+closes a local source-integrity gap only. Three activation blockers remain
+machine-readable:
 `BALANCE_CONSUMER_DEPLOYMENT_MANIFEST_FINGERPRINT_APPROVAL_MISSING` requires a
 separately governed, release-bound approval;
 `BALANCE_CONSUMER_SOLANA_EXACT_SLOT_RPC_CAPABILITY_EVIDENCE_MISSING` requires
