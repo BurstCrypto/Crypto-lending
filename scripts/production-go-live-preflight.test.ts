@@ -12,7 +12,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { resolve } from 'node:path';
+import { dirname, resolve } from 'node:path';
 import { test } from 'node:test';
 
 import {
@@ -25,6 +25,8 @@ import {
   inspectBalanceConsumerRuntimeReviewedRepositoryForTest,
   inspectBalanceConsumerRuntimeAbsenceSnapshotForTest,
   inspectDatabaseMasterDeploymentTemplate,
+  inspectProductionInfrastructureContractRepositoryForTest,
+  inspectProductionInfrastructureContractSnapshotForTest,
   inspectProductionInfrastructureDeploymentArtifacts,
   inspectProviderPositionReadBoundaryArtifacts,
   inspectRedisOperatorDeploymentTemplates,
@@ -119,6 +121,26 @@ const PRODUCTION_INFRASTRUCTURE_ARTIFACTS = Object.freeze({
     'utf8',
   ),
 } satisfies ProductionInfrastructureArtifactSources);
+const PRODUCTION_INFRASTRUCTURE_CONTRACT_ARTIFACT_PATHS = Object.freeze({
+  contractTemplateSource: 'infra/aws/production-infrastructure-contract.yaml',
+  applicationDeploymentGuardSource: 'infra/aws/invoke-application-baseline.ps1',
+  billingControlValidatorSource: 'infra/aws/validate-billing-control-record.mjs',
+  egressPolicyValidatorSource: 'infra/egress/validate-egress-policy.mjs',
+  fixedSlotTransitionValidatorSource: 'infra/aws/validate-fixed-slot-credential-transition.mjs',
+  authWalletTransitionValidatorSource:
+    'infra/aws/validate-auth-wallet-secret-version-transition.mjs',
+  redisOperatorTransitionValidatorSource:
+    'infra/aws/validate-redis-operator-secret-version-transition.mjs',
+  deploymentTargetValidatorSource: 'scripts/production-deployment-target.ts',
+});
+const PRODUCTION_INFRASTRUCTURE_CONTRACT_ARTIFACTS = Object.freeze(
+  Object.fromEntries(
+    Object.entries(PRODUCTION_INFRASTRUCTURE_CONTRACT_ARTIFACT_PATHS).map(([key, path]) => [
+      key,
+      readFileSync(resolve(__dirname, '..', ...path.split('/')), 'utf8'),
+    ]),
+  ) as Readonly<Record<keyof typeof PRODUCTION_INFRASTRUCTURE_CONTRACT_ARTIFACT_PATHS, string>>,
+);
 const VERIFIED_PRODUCTION_INFRASTRUCTURE_DEPLOYMENT =
   inspectProductionInfrastructureDeploymentArtifacts(PRODUCTION_INFRASTRUCTURE_ARTIFACTS);
 const BALANCE_CONSUMER_ARTIFACTS = Object.freeze({
@@ -1070,7 +1092,9 @@ test('current repository is a bootstrap blocker audit and exits nonzero for both
   assert.deepEqual(input.productionInfrastructureDeployment, {
     inspected: true,
     syntaxValid: true,
-    environmentContract: 'NON_PRODUCTION_ONLY',
+    environmentContract: 'PRODUCTION_ENABLED',
+    deploymentAuthority: 'MISSING',
+    deployedEvidence: 'MISSING',
   });
   assert.deepEqual(input.balanceConsumerDeployment, EXPECTED_DORMANT_BALANCE_CONSUMER_DEPLOYMENT);
   assert.deepEqual(
@@ -1099,7 +1123,10 @@ test('current repository is a bootstrap blocker audit and exits nonzero for both
       id: 'PRODUCTION_INFRASTRUCTURE',
       localValidation: 'PASS',
       launchReadiness: 'BLOCKED',
-      blockerIds: ['PRODUCTION_INFRASTRUCTURE_DEPLOYMENT_PATH_NOT_ENABLED'],
+      blockerIds: [
+        'PRODUCTION_INFRASTRUCTURE_DEPLOYMENT_AUTHORITY_MISSING',
+        'PRODUCTION_INFRASTRUCTURE_DEPLOYED_EVIDENCE_MISSING',
+      ],
     },
   );
   assert.deepEqual(
@@ -1177,7 +1204,10 @@ test('current repository is a bootstrap blocker audit and exits nonzero for both
   );
   assert.deepEqual(
     cliReport.checks.find(({ id }) => id === 'PRODUCTION_INFRASTRUCTURE')?.blockerIds,
-    ['PRODUCTION_INFRASTRUCTURE_DEPLOYMENT_PATH_NOT_ENABLED'],
+    [
+      'PRODUCTION_INFRASTRUCTURE_DEPLOYMENT_AUTHORITY_MISSING',
+      'PRODUCTION_INFRASTRUCTURE_DEPLOYED_EVIDENCE_MISSING',
+    ],
   );
   assert.deepEqual(
     cliReport.checks.find(({ id }) => id === 'BALANCE_CONSUMER')?.blockerIds,
@@ -4428,6 +4458,8 @@ test('production infrastructure inspection brands only the exact non-production 
     inspected: true,
     syntaxValid: true,
     environmentContract: 'NON_PRODUCTION_ONLY',
+    deploymentAuthority: 'MISSING',
+    deployedEvidence: 'MISSING',
   });
   assert.equal(Object.isFrozen(inspected), true);
 
@@ -4447,6 +4479,146 @@ test('production infrastructure inspection brands only the exact non-production 
       },
     );
     assert.equal(report.selectedTargetReadiness, 'BLOCKED');
+  }
+});
+
+test('production contract accepts the exact inert envelope but retains authority and evidence blockers', () => {
+  assert.equal(
+    inspectProductionInfrastructureContractSnapshotForTest(
+      PRODUCTION_INFRASTRUCTURE_CONTRACT_ARTIFACTS,
+    ),
+    true,
+  );
+
+  const input = loadRepositoryProductionPreflightInput(resolve(__dirname, '..'));
+  assert.deepEqual(input.productionInfrastructureDeployment, {
+    inspected: true,
+    syntaxValid: true,
+    environmentContract: 'PRODUCTION_ENABLED',
+    deploymentAuthority: 'MISSING',
+    deployedEvidence: 'MISSING',
+  });
+  assert.deepEqual(
+    evaluateProductionPreflight(input).checks.find(({ id }) => id === 'PRODUCTION_INFRASTRUCTURE'),
+    {
+      id: 'PRODUCTION_INFRASTRUCTURE',
+      localValidation: 'PASS',
+      launchReadiness: 'BLOCKED',
+      blockerIds: [
+        'PRODUCTION_INFRASTRUCTURE_DEPLOYMENT_AUTHORITY_MISSING',
+        'PRODUCTION_INFRASTRUCTURE_DEPLOYED_EVIDENCE_MISSING',
+      ],
+    },
+  );
+});
+
+test('production contract rejects representative cost, network, credential, recovery, and authority drift', () => {
+  const template = PRODUCTION_INFRASTRUCTURE_CONTRACT_ARTIFACTS.contractTemplateSource;
+  const mutations = [
+    ["DefaultMonthlyCostUsd: '0.00'", "DefaultMonthlyCostUsd: '0.01'"],
+    ["MaximumIncrementalMonthlyCostUsd: '0.00'", "MaximumIncrementalMonthlyCostUsd: '1.00'"],
+    ['BillingControlStatus: NOT_APPROVED', 'BillingControlStatus: APPROVED'],
+    ['- eip155:1', '- eip155:137'],
+    ['- solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp', '- solana:devnet'],
+    ['EgressMode: NO_EXTERNAL_EGRESS', 'EgressMode: ALLOW_LIST'],
+    ['ApprovedDestinations: []', 'ApprovedDestinations: [https://rpc.invalid]'],
+    ['ApiDesiredCount: 0', 'ApiDesiredCount: 1'],
+    ['PublicIngressEnabled: false', 'PublicIngressEnabled: true'],
+    ['VersionSelector: EXACT_SECRETS_MANAGER_VERSION_ID_ONLY', 'VersionSelector: MUTABLE_STAGE'],
+    ['MutableStageSelectors: FORBIDDEN', 'MutableStageSelectors: ALLOWED'],
+    ['AutomaticRollback: ENABLED', 'AutomaticRollback: DISABLED'],
+    ['GlobalKillSwitch: ENGAGED', 'GlobalKillSwitch: DISENGAGED'],
+    ['AuthorityStatus: NOT_APPROVED', 'AuthorityStatus: APPROVED'],
+    ['DeploymentTargetRegistryStatus: EMPTY', 'DeploymentTargetRegistryStatus: POPULATED'],
+    ['ExactReleaseBindingRequired: true', 'ExactReleaseBindingRequired: false'],
+    ['IndependentApprovalRequired: true', 'IndependentApprovalRequired: false'],
+    ['AllowedValues: [DISABLED]', 'AllowedValues: [DISABLED, ENABLED]'],
+    ['Resources: {}', 'Resources: {UnreviewedResource: {Type: AWS::S3::Bucket}}'],
+  ] as const;
+
+  for (const [approved, rejected] of mutations) {
+    assert.ok(template.includes(approved), approved);
+    assert.equal(
+      inspectProductionInfrastructureContractSnapshotForTest({
+        ...PRODUCTION_INFRASTRUCTURE_CONTRACT_ARTIFACTS,
+        contractTemplateSource: template.replace(approved, rejected),
+      }),
+      false,
+      approved,
+    );
+  }
+});
+
+test('production contract snapshot and secure repository seams fail closed without minting a brand', () => {
+  const missing = { ...PRODUCTION_INFRASTRUCTURE_CONTRACT_ARTIFACTS } as Record<string, unknown>;
+  delete missing.contractTemplateSource;
+  const accessor = { ...PRODUCTION_INFRASTRUCTURE_CONTRACT_ARTIFACTS };
+  Object.defineProperty(accessor, 'contractTemplateSource', {
+    enumerable: true,
+    get() {
+      throw new Error('untrusted getter');
+    },
+  });
+  const malformed = [
+    null,
+    missing,
+    { ...PRODUCTION_INFRASTRUCTURE_CONTRACT_ARTIFACTS, unexpected: '' },
+    {
+      ...PRODUCTION_INFRASTRUCTURE_CONTRACT_ARTIFACTS,
+      contractTemplateSource: `\uFEFF${PRODUCTION_INFRASTRUCTURE_CONTRACT_ARTIFACTS.contractTemplateSource}`,
+    },
+    accessor,
+    new Proxy(PRODUCTION_INFRASTRUCTURE_CONTRACT_ARTIFACTS, {
+      ownKeys() {
+        throw new Error('untrusted proxy');
+      },
+    }),
+  ];
+  for (const candidate of malformed) {
+    assert.doesNotThrow(() => inspectProductionInfrastructureContractSnapshotForTest(candidate));
+    assert.equal(inspectProductionInfrastructureContractSnapshotForTest(candidate), false);
+  }
+
+  const temporaryRoot = mkdtempSync(resolve(tmpdir(), 'crypto-lending-production-contract-'));
+  try {
+    for (const relativePath of Object.values(PRODUCTION_INFRASTRUCTURE_CONTRACT_ARTIFACT_PATHS)) {
+      const destination = resolve(temporaryRoot, ...relativePath.split('/'));
+      mkdirSync(dirname(destination), { recursive: true });
+      cpSync(resolve(__dirname, '..', ...relativePath.split('/')), destination);
+    }
+    assert.equal(inspectProductionInfrastructureContractRepositoryForTest(temporaryRoot), true);
+
+    for (const relativePath of Object.values(PRODUCTION_INFRASTRUCTURE_CONTRACT_ARTIFACT_PATHS)) {
+      const artifactPath = resolve(temporaryRoot, ...relativePath.split('/'));
+      const reviewedSource = readFileSync(artifactPath, 'utf8');
+      writeFileSync(artifactPath, `${reviewedSource}\n`, 'utf8');
+      assert.equal(
+        inspectProductionInfrastructureContractRepositoryForTest(temporaryRoot),
+        false,
+        relativePath,
+      );
+      writeFileSync(artifactPath, reviewedSource, 'utf8');
+    }
+    assert.equal(inspectProductionInfrastructureContractRepositoryForTest(temporaryRoot), true);
+
+    const contractPath = resolve(
+      temporaryRoot,
+      ...PRODUCTION_INFRASTRUCTURE_CONTRACT_ARTIFACT_PATHS.contractTemplateSource.split('/'),
+    );
+    rmSync(contractPath);
+    assert.equal(inspectProductionInfrastructureContractRepositoryForTest(temporaryRoot), false);
+    cpSync(
+      resolve(
+        __dirname,
+        '..',
+        ...PRODUCTION_INFRASTRUCTURE_CONTRACT_ARTIFACT_PATHS.contractTemplateSource.split('/'),
+      ),
+      contractPath,
+    );
+    writeFileSync(contractPath, `${readFileSync(contractPath, 'utf8')}# drift\n`, 'utf8');
+    assert.equal(inspectProductionInfrastructureContractRepositoryForTest(temporaryRoot), false);
+  } finally {
+    rmSync(temporaryRoot, { recursive: true, force: true });
   }
 });
 
@@ -4528,7 +4700,13 @@ test('production infrastructure inspection fails closed for drift in every revie
     );
     assert.deepEqual(
       inspected,
-      { inspected: true, syntaxValid: false, environmentContract: 'INVALID' },
+      {
+        inspected: true,
+        syntaxValid: false,
+        environmentContract: 'INVALID',
+        deploymentAuthority: 'INVALID',
+        deployedEvidence: 'INVALID',
+      },
       label,
     );
     assert.equal(Object.isFrozen(inspected), true, label);
@@ -4677,6 +4855,8 @@ test('production infrastructure input shape and brand cannot be forged or bypass
       inspected: false,
       syntaxValid: false,
       environmentContract: 'INVALID',
+      deploymentAuthority: 'INVALID',
+      deployedEvidence: 'INVALID',
     });
   }
 
@@ -4691,6 +4871,8 @@ test('production infrastructure input shape and brand cannot be forged or bypass
         inspected: true,
         syntaxValid: true,
         environmentContract: 'NON_PRODUCTION_ONLY' as const,
+        deploymentAuthority: 'MISSING' as const,
+        deployedEvidence: 'MISSING' as const,
       }),
     },
     {
@@ -4699,6 +4881,8 @@ test('production infrastructure input shape and brand cannot be forged or bypass
         inspected: true,
         syntaxValid: true,
         environmentContract: 'PRODUCTION_ENABLED' as const,
+        deploymentAuthority: 'VERIFIED' as const,
+        deployedEvidence: 'ACCEPTED' as const,
       }),
     },
   ];

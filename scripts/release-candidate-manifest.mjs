@@ -186,6 +186,12 @@ export const RELEASE_COMPONENTS = Object.freeze([
     requiredFiles: Object.freeze(['.']),
   }),
   Object.freeze({
+    name: 'production-infrastructure-contract-cloudformation',
+    path: 'infra/aws/production-infrastructure-contract.yaml',
+    kind: 'file',
+    requiredFiles: Object.freeze(['.']),
+  }),
+  Object.freeze({
     name: 'migration-task-cloudformation',
     path: 'infra/aws/database-migration-task.yaml',
     kind: 'file',

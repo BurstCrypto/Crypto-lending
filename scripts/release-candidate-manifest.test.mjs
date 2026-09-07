@@ -334,6 +334,42 @@ test('binds the dormant balance-consumer envelope exactly and rejects hostile su
   assert.throws(() => validateReleaseManifest(substitutedManifest), /component shape/u);
 });
 
+test('binds the inert production infrastructure contract as an exact release component', () => {
+  const specification = RELEASE_COMPONENTS.find(
+    ({ name }) => name === 'production-infrastructure-contract-cloudformation',
+  );
+  assert.deepEqual(specification, {
+    name: 'production-infrastructure-contract-cloudformation',
+    path: 'infra/aws/production-infrastructure-contract.yaml',
+    kind: 'file',
+    requiredFiles: ['.'],
+  });
+
+  const root = createWorkspace();
+  const contractBytes = [
+    "AWSTemplateFormatVersion: '2010-09-09'",
+    'Parameters:',
+    '  ActivationMode:',
+    '    Default: DISABLED',
+    'Resources: {}',
+    '',
+  ].join('\n');
+  const contractPath = resolve(root, specification.path);
+  writeFileSync(contractPath, contractBytes, 'utf8');
+
+  const manifest = createReleaseManifest(root, SOURCE, BUILDER);
+  const component = manifest.components.find(({ name }) => name === specification.name);
+  assert.equal(component.path, specification.path);
+  assert.equal(component.kind, 'file');
+  assert.equal(component.fileCount, 1);
+  assert.equal(component.files[0].path, '.');
+  assert.equal(component.files[0].sha256, createHash('sha256').update(contractBytes).digest('hex'));
+  assert.doesNotThrow(() => verifyReleaseManifest(root, manifest));
+
+  appendFileSync(contractPath, '# drift\n', 'utf8');
+  assert.throws(() => verifyReleaseManifest(root, manifest), ReleaseManifestError);
+});
+
 test('detects drift in build output and every preflight decision binding', () => {
   const paths = RELEASE_COMPONENTS.map((component) =>
     component.kind === 'file'

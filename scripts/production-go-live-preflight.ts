@@ -65,6 +65,8 @@ export type ProductionPreflightCheckId =
 export type ProductionPreflightBlockerId =
   | 'PRODUCTION_INFRASTRUCTURE_INSPECTION_FAILED'
   | 'PRODUCTION_INFRASTRUCTURE_DEPLOYMENT_PATH_NOT_ENABLED'
+  | 'PRODUCTION_INFRASTRUCTURE_DEPLOYMENT_AUTHORITY_MISSING'
+  | 'PRODUCTION_INFRASTRUCTURE_DEPLOYED_EVIDENCE_MISSING'
   | 'BALANCE_CONSUMER_INSPECTION_FAILED'
   | 'BALANCE_CONSUMER_SOURCE_ACTIVATION_DISABLED'
   | 'BALANCE_CONSUMER_RUNTIME_NOT_COMPOSED'
@@ -167,10 +169,23 @@ export interface ProductionInfrastructureArtifactSources {
   readonly redisOperatorTransitionValidatorSource: string;
 }
 
+interface ProductionInfrastructureContractArtifactSources {
+  readonly contractTemplateSource: string;
+  readonly applicationDeploymentGuardSource: string;
+  readonly billingControlValidatorSource: string;
+  readonly egressPolicyValidatorSource: string;
+  readonly fixedSlotTransitionValidatorSource: string;
+  readonly authWalletTransitionValidatorSource: string;
+  readonly redisOperatorTransitionValidatorSource: string;
+  readonly deploymentTargetValidatorSource: string;
+}
+
 export interface ProductionInfrastructureDeploymentInput {
   readonly inspected: boolean;
   readonly syntaxValid: boolean;
   readonly environmentContract: 'INVALID' | 'NON_PRODUCTION_ONLY' | 'PRODUCTION_ENABLED';
+  readonly deploymentAuthority: 'INVALID' | 'MISSING' | 'VERIFIED';
+  readonly deployedEvidence: 'INVALID' | 'MISSING' | 'ACCEPTED';
 }
 
 const VERIFIED_PRODUCTION_INFRASTRUCTURE_DEPLOYMENTS =
@@ -628,6 +643,39 @@ const PRODUCTION_INFRASTRUCTURE_ARTIFACT_KEYS = Object.freeze([
 ] as const satisfies readonly (keyof ProductionInfrastructureArtifactSources)[]);
 const MAX_PRODUCTION_INFRASTRUCTURE_ARTIFACT_BYTES = 512 * 1024;
 const MAX_PRODUCTION_INFRASTRUCTURE_TOTAL_BYTES = 2 * 1024 * 1024;
+const PRODUCTION_INFRASTRUCTURE_CONTRACT_ARTIFACT_PATHS = Object.freeze({
+  contractTemplateSource: 'infra/aws/production-infrastructure-contract.yaml',
+  applicationDeploymentGuardSource: 'infra/aws/invoke-application-baseline.ps1',
+  billingControlValidatorSource: 'infra/aws/validate-billing-control-record.mjs',
+  egressPolicyValidatorSource: 'infra/egress/validate-egress-policy.mjs',
+  fixedSlotTransitionValidatorSource: 'infra/aws/validate-fixed-slot-credential-transition.mjs',
+  authWalletTransitionValidatorSource:
+    'infra/aws/validate-auth-wallet-secret-version-transition.mjs',
+  redisOperatorTransitionValidatorSource:
+    'infra/aws/validate-redis-operator-secret-version-transition.mjs',
+  deploymentTargetValidatorSource: 'scripts/production-deployment-target.ts',
+} as const satisfies Readonly<
+  Record<keyof ProductionInfrastructureContractArtifactSources, string>
+>);
+const PRODUCTION_INFRASTRUCTURE_CONTRACT_ARTIFACT_SHA256 = Object.freeze({
+  contractTemplateSource: 'df76d9831f9b29b3c3717b3c6cb69a768ac463ba341252870912594bd23df10b',
+  applicationDeploymentGuardSource:
+    '327a5a640fb946a5c07ec0381166112008e6fa8f805c4fca764bcaed4727512b',
+  billingControlValidatorSource: 'ea30979bfeb5166c2c51b33b0fad28e92ba03f8cebad9b475ca9f8c4654006cc',
+  egressPolicyValidatorSource: '1bc7835b1f4d72996278c6e97dcf86cf33ae88a149949f744ad24614fcaa1e87',
+  fixedSlotTransitionValidatorSource:
+    '4a25cd1d921b24e506515ba875dfa7fb059f00065af18934d4b64a6b90ed49d8',
+  authWalletTransitionValidatorSource:
+    '51c07fea3b76bd82619ccd863b39d3a4cc6b57000b8b2e01aa0cd0f2ea196b6f',
+  redisOperatorTransitionValidatorSource:
+    '41f40f195042707204de5da07d4ef288fe134f3d91303262ed3bf73763d5c56b',
+  deploymentTargetValidatorSource:
+    'c0104488e19cca7a393e7d7113664abfdf3059dee2ce5b890a6f0bdc3bd3e2c6',
+} as const satisfies Readonly<
+  Record<keyof ProductionInfrastructureContractArtifactSources, string>
+>);
+const MAX_PRODUCTION_INFRASTRUCTURE_CONTRACT_ARTIFACT_BYTES = 384 * 1024;
+const MAX_PRODUCTION_INFRASTRUCTURE_CONTRACT_TOTAL_BYTES = 1024 * 1024;
 const PROVIDER_POSITION_READ_ARTIFACT_KEYS = Object.freeze([
   'providerPositionReaderPortSource',
   'providerPositionTrustedAssemblyPortSource',
@@ -928,7 +976,7 @@ const REVIEWED_BALANCE_CONSUMER_ARTIFACT_SHA256 = Object.freeze({
   mainnetBalanceAgreementEvidenceV2MigrationSource:
     'c9afef59a9101d568597eb37845d6d2a997edf63f1496d3d04296075fcc61fff',
   migrationIndexSource: '58a83e45c98c5e2d99b5fe982aef0770c11e55cc037341c45d1b60cd4d8edd78',
-  releaseManifestSource: '234f2e397055af0884b45a599b7767fe9e24952b7978b769af4a46c73c1653ea',
+  releaseManifestSource: '08f88e1fe80ffad7efc3202a36a13f71c8b231e0454c8e4372a5d92f6a19d192',
   productionContainerValidatorSource:
     'a9fbc9e638f4a33266e823ff8c07a9b53703e1bc8f1f4f46eab30c7b50a9b0b0',
 } satisfies Readonly<Record<keyof BalanceConsumerArtifactSources, string>>);
@@ -1402,16 +1450,17 @@ export function evaluateProductionPreflight(
   const productionInfrastructureBlockers: ProductionPreflightBlockerId[] = [];
   let productionInfrastructureInspected = false;
   let productionInfrastructureEnabled = false;
+  let productionInfrastructureDeployment: ProductionInfrastructureDeploymentInput | undefined;
   try {
-    const deployment = input.productionInfrastructureDeployment;
+    productionInfrastructureDeployment = input.productionInfrastructureDeployment;
     productionInfrastructureInspected =
-      deployment?.inspected === true &&
-      deployment.syntaxValid === true &&
-      VERIFIED_PRODUCTION_INFRASTRUCTURE_DEPLOYMENTS.has(deployment);
+      productionInfrastructureDeployment?.inspected === true &&
+      productionInfrastructureDeployment.syntaxValid === true &&
+      VERIFIED_PRODUCTION_INFRASTRUCTURE_DEPLOYMENTS.has(productionInfrastructureDeployment);
     productionInfrastructureEnabled =
       productionInfrastructureInspected &&
-      deployment !== undefined &&
-      deployment.environmentContract === 'PRODUCTION_ENABLED';
+      productionInfrastructureDeployment !== undefined &&
+      productionInfrastructureDeployment.environmentContract === 'PRODUCTION_ENABLED';
   } catch {
     // Initialized fail-closed values are preserved for malformed or hostile inputs.
   }
@@ -1419,6 +1468,15 @@ export function evaluateProductionPreflight(
     productionInfrastructureBlockers.push('PRODUCTION_INFRASTRUCTURE_INSPECTION_FAILED');
   } else if (!productionInfrastructureEnabled) {
     productionInfrastructureBlockers.push('PRODUCTION_INFRASTRUCTURE_DEPLOYMENT_PATH_NOT_ENABLED');
+  } else {
+    if (productionInfrastructureDeployment?.deploymentAuthority !== 'VERIFIED') {
+      productionInfrastructureBlockers.push(
+        'PRODUCTION_INFRASTRUCTURE_DEPLOYMENT_AUTHORITY_MISSING',
+      );
+    }
+    if (productionInfrastructureDeployment?.deployedEvidence !== 'ACCEPTED') {
+      productionInfrastructureBlockers.push('PRODUCTION_INFRASTRUCTURE_DEPLOYED_EVIDENCE_MISSING');
+    }
   }
 
   const balanceConsumerBlockers: ProductionPreflightBlockerId[] = [];
@@ -1980,14 +2038,20 @@ function snapshotProductionInfrastructureArtifactSources(
 
 /**
  * Recognizes the exact, deliberately non-production environment matrix. This
- * checkpoint intentionally has no path that can brand production enablement;
- * that requires a separately reviewed production authority and cost contract.
+ * inspector itself cannot brand production enablement; the separate exact
+ * default-zero production contract loader owns that narrower milestone.
  */
 export function inspectProductionInfrastructureDeploymentArtifacts(
   value: unknown,
 ): ProductionInfrastructureDeploymentInput {
   const invalid = (inspected: boolean): ProductionInfrastructureDeploymentInput =>
-    Object.freeze({ inspected, syntaxValid: false, environmentContract: 'INVALID' });
+    Object.freeze({
+      inspected,
+      syntaxValid: false,
+      environmentContract: 'INVALID',
+      deploymentAuthority: 'INVALID',
+      deployedEvidence: 'INVALID',
+    });
   try {
     const sources = snapshotProductionInfrastructureArtifactSources(value);
     if (sources === null) return invalid(false);
@@ -2123,12 +2187,248 @@ export function inspectProductionInfrastructureDeploymentArtifacts(
       inspected: true,
       syntaxValid: true,
       environmentContract: 'NON_PRODUCTION_ONLY',
+      deploymentAuthority: 'MISSING',
+      deployedEvidence: 'MISSING',
     });
     VERIFIED_PRODUCTION_INFRASTRUCTURE_DEPLOYMENTS.add(result);
     return result;
   } catch {
     return invalid(false);
   }
+}
+
+function snapshotProductionInfrastructureContractArtifactSources(
+  value: unknown,
+): ProductionInfrastructureContractArtifactSources | null {
+  if (!isRecord(value) || isProxy(value) || Object.getOwnPropertySymbols(value).length !== 0) {
+    return null;
+  }
+  const prototype = Object.getPrototypeOf(value);
+  if (prototype !== Object.prototype && prototype !== null) return null;
+  const expectedKeys = Object.keys(
+    PRODUCTION_INFRASTRUCTURE_CONTRACT_ARTIFACT_PATHS,
+  ) as (keyof ProductionInfrastructureContractArtifactSources)[];
+  const ownKeys = Reflect.ownKeys(value);
+  if (
+    ownKeys.length !== expectedKeys.length ||
+    !expectedKeys.every((key) => ownKeys.includes(key))
+  ) {
+    return null;
+  }
+  const descriptors = Object.getOwnPropertyDescriptors(value);
+  const snapshot: Partial<Record<keyof ProductionInfrastructureContractArtifactSources, string>> =
+    {};
+  let totalBytes = 0;
+  for (const key of expectedKeys) {
+    const descriptor = descriptors[key];
+    if (
+      descriptor === undefined ||
+      !descriptor.enumerable ||
+      !('value' in descriptor) ||
+      typeof descriptor.value !== 'string' ||
+      descriptor.value.length === 0 ||
+      descriptor.value.startsWith('\uFEFF')
+    ) {
+      return null;
+    }
+    const bytes = Buffer.byteLength(descriptor.value, 'utf8');
+    if (bytes > MAX_PRODUCTION_INFRASTRUCTURE_CONTRACT_ARTIFACT_BYTES) return null;
+    totalBytes += bytes;
+    if (totalBytes > MAX_PRODUCTION_INFRASTRUCTURE_CONTRACT_TOTAL_BYTES) return null;
+    snapshot[key] = descriptor.value;
+  }
+  return snapshot as ProductionInfrastructureContractArtifactSources;
+}
+
+const PRODUCTION_INFRASTRUCTURE_CONTRACT_REQUIRED_LINES = Object.freeze([
+  "AWSTemplateFormatVersion: '2010-09-09'",
+  'SchemaVersion: 1',
+  'ContractStatus: PRODUCTION_PATH_DEFINED',
+  'EnvironmentName: production',
+  'DefaultRuntimeState: INERT',
+  "DefaultMonthlyCostUsd: '0.00'",
+  "MaximumIncrementalMonthlyCostUsd: '0.00'",
+  'BillingControlStatus: NOT_APPROVED',
+  'NonZeroCostPolicy: SOURCE_CHANGE_AND_APPROVED_BILLING_CONTROL_REQUIRED',
+  'BillingControlValidator: infra/aws/validate-billing-control-record.mjs',
+  'NetworkScope: ethereum-solana-mainnet',
+  'EgressMode: NO_EXTERNAL_EGRESS',
+  'ApprovedDestinations: []',
+  'UnlistedDestinationAction: DENY',
+  'EgressPolicyValidator: infra/egress/validate-egress-policy.mjs',
+  'ApiDesiredCount: 0',
+  'WebDesiredCount: 0',
+  'OutboxWorkerDesiredCount: 0',
+  'BalanceConsumerDesiredCount: 0',
+  'MigrationTaskEnabled: false',
+  'PublicIngressEnabled: false',
+  'VersionSelector: EXACT_SECRETS_MANAGER_VERSION_ID_ONLY',
+  'MutableStageSelectors: FORBIDDEN',
+  'DefaultTransition: NO_CHANGE',
+  'FixedSlotValidator: infra/aws/validate-fixed-slot-credential-transition.mjs',
+  'AuthWalletValidator: infra/aws/validate-auth-wallet-secret-version-transition.mjs',
+  'RedisOperatorValidator: infra/aws/validate-redis-operator-secret-version-transition.mjs',
+  'DeploymentCircuitBreaker: ENABLED',
+  'AutomaticRollback: ENABLED',
+  'GlobalKillSwitch: ENGAGED',
+  'ExternalEgressKillSwitch: ENGAGED',
+  'RollbackPlanStatus: NOT_APPROVED',
+  'NonZeroRuntimePolicy: SOURCE_CHANGE_AND_REVIEWED_ROLLBACK_PLAN_REQUIRED',
+  'AuthorityStatus: NOT_APPROVED',
+  'DeploymentTargetRegistryStatus: EMPTY',
+  'ExactReleaseBindingRequired: true',
+  'IndependentApprovalRequired: true',
+  'DeploymentGuard: infra/aws/invoke-application-baseline.ps1',
+  'DeploymentTargetValidator: scripts/production-deployment-target.ts',
+  'Default: DISABLED',
+  'AllowedValues: [DISABLED]',
+  'Resources: {}',
+  'Value: PRODUCTION_PATH_DEFINED',
+  'Value: INERT',
+  'Value: !Ref ActivationMode',
+] as const);
+
+function hasExactProductionInfrastructureContract(
+  sources: ProductionInfrastructureContractArtifactSources,
+): boolean {
+  const template = sources.contractTemplateSource.replace(/\r\n?/gu, '\n');
+  const networkStart = template.indexOf('      AllowedNetworkIds:\n');
+  const networkEnd = template.indexOf('      EgressMode:', networkStart);
+  const networkContract =
+    networkStart >= 0 && networkEnd > networkStart
+      ? trimmedExecutableLines(template.slice(networkStart, networkEnd)).join('\n')
+      : '';
+  const parameters = yamlBlock(template, 'Parameters', 0);
+  const activation = parameters === null ? null : yamlBlock(parameters, 'ActivationMode', 2);
+  const outputs = yamlBlock(template, 'Outputs', 0);
+  const exactOutputNames =
+    outputs !== null &&
+    exactExecutableLineCount(outputs, 'ContractStatus:') === 1 &&
+    exactExecutableLineCount(outputs, 'DefaultRuntimeState:') === 1 &&
+    exactExecutableLineCount(outputs, 'ActivationMode:') === 1;
+  return (
+    PRODUCTION_INFRASTRUCTURE_CONTRACT_REQUIRED_LINES.every(
+      (line) => exactExecutableLineCount(template, line) === 1,
+    ) &&
+    networkContract ===
+      ['AllowedNetworkIds:', '- eip155:1', '- solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp'].join(
+        '\n',
+      ) &&
+    activation !== null &&
+    trimmedExecutableLines(activation).join('\n') ===
+      ['ActivationMode:', 'Type: String', 'Default: DISABLED', 'AllowedValues: [DISABLED]'].join(
+        '\n',
+      ) &&
+    exactOutputNames &&
+    exactExecutableLineCount(template, 'Metadata:') === 1 &&
+    exactExecutableLineCount(template, 'CryptoLendingProductionInfrastructureContract:') === 1 &&
+    exactExecutableLineCount(template, 'Parameters:') === 1 &&
+    exactExecutableLineCount(template, 'Outputs:') === 1 &&
+    !/(?:AWSCURRENT|AWSPREVIOUS|SecretString|https?:\/\/|0\.0\.0\.0\/0|::\/0|Type:\s*AWS::)/u.test(
+      template,
+    ) &&
+    !/(?:Api|Web|OutboxWorker|BalanceConsumer)DesiredCount:\s*[1-9]/u.test(template) &&
+    sources.applicationDeploymentGuardSource.includes(
+      "throw 'EnvironmentName must be at most 31 characters and use the template non-production pattern: dev|test|qa|sandbox|staging with optional lowercase suffix segments.'",
+    ) &&
+    sources.billingControlValidatorSource.includes('validateBillingControlRecord') &&
+    sources.egressPolicyValidatorSource.includes('NO_EXTERNAL_EGRESS') &&
+    sources.fixedSlotTransitionValidatorSource.includes(
+      'export function validateFixedSlotCredentialTransition(',
+    ) &&
+    sources.authWalletTransitionValidatorSource.includes('productionAuthorityValidated') &&
+    sources.redisOperatorTransitionValidatorSource.includes('productionAuthorityValidated') &&
+    sources.deploymentTargetValidatorSource.includes(
+      'export const PRODUCTION_DEPLOYMENT_TARGET_REGISTRY = Object.freeze({',
+    ) &&
+    sources.deploymentTargetValidatorSource.includes('targets: Object.freeze([]),')
+  );
+}
+
+/**
+ * Unbranded test seam for contract semantics. It cannot populate the production
+ * infrastructure brand used by evaluateProductionPreflight.
+ */
+export function inspectProductionInfrastructureContractSnapshotForTest(value: unknown): boolean {
+  try {
+    const sources = snapshotProductionInfrastructureContractArtifactSources(value);
+    return sources !== null && hasExactProductionInfrastructureContract(sources);
+  } catch {
+    return false;
+  }
+}
+
+function decodeProductionInfrastructureContractArtifact(bytes: Uint8Array): string {
+  if (bytes.length >= 3 && bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) {
+    throw new Error('Production infrastructure contract artifacts must be BOM-free');
+  }
+  return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+}
+
+function readProductionInfrastructureContractArtifacts(
+  repositoryRoot: string,
+): ProductionInfrastructureContractArtifactSources {
+  const sources: Partial<Record<keyof ProductionInfrastructureContractArtifactSources, string>> =
+    {};
+  let totalBytes = 0;
+  for (const [key, relativePath] of Object.entries(
+    PRODUCTION_INFRASTRUCTURE_CONTRACT_ARTIFACT_PATHS,
+  ) as [keyof ProductionInfrastructureContractArtifactSources, string][]) {
+    const bytes = readSecureLocalFile(
+      resolve(repositoryRoot, relativePath),
+      MAX_PRODUCTION_INFRASTRUCTURE_CONTRACT_ARTIFACT_BYTES,
+    );
+    totalBytes += bytes.length;
+    if (totalBytes > MAX_PRODUCTION_INFRASTRUCTURE_CONTRACT_TOTAL_BYTES) {
+      throw new Error('Production infrastructure contract artifact set is oversized');
+    }
+    if (
+      createHash('sha256').update(bytes).digest('hex') !==
+      PRODUCTION_INFRASTRUCTURE_CONTRACT_ARTIFACT_SHA256[key]
+    ) {
+      throw new Error('Production infrastructure contract artifact drifted');
+    }
+    sources[key] = decodeProductionInfrastructureContractArtifact(bytes);
+  }
+  const snapshot = snapshotProductionInfrastructureContractArtifactSources(sources);
+  if (snapshot === null || !hasExactProductionInfrastructureContract(snapshot)) {
+    throw new Error('Production infrastructure contract is invalid');
+  }
+  return snapshot;
+}
+
+/** Unbranded filesystem seam: exercises exact secure reads but can never mint authority. */
+export function inspectProductionInfrastructureContractRepositoryForTest(
+  repositoryRoot: string,
+): boolean {
+  try {
+    readProductionInfrastructureContractArtifacts(repositoryRoot);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function loadProductionInfrastructureContract(
+  repositoryRoot: string,
+  nonProductionDeployment: ProductionInfrastructureDeploymentInput,
+): ProductionInfrastructureDeploymentInput {
+  if (
+    !VERIFIED_PRODUCTION_INFRASTRUCTURE_DEPLOYMENTS.has(nonProductionDeployment) ||
+    nonProductionDeployment.environmentContract !== 'NON_PRODUCTION_ONLY'
+  ) {
+    throw new Error('Production infrastructure base contract is invalid');
+  }
+  readProductionInfrastructureContractArtifacts(repositoryRoot);
+  const result: ProductionInfrastructureDeploymentInput = Object.freeze({
+    inspected: true,
+    syntaxValid: true,
+    environmentContract: 'PRODUCTION_ENABLED',
+    deploymentAuthority: 'MISSING',
+    deployedEvidence: 'MISSING',
+  });
+  VERIFIED_PRODUCTION_INFRASTRUCTURE_DEPLOYMENTS.add(result);
+  return result;
 }
 
 function snapshotProviderPositionReadBoundaryArtifactSources(
@@ -15604,51 +15904,59 @@ export function loadRepositoryProductionPreflightInput(
 
   let productionInfrastructureDeployment = inspectProductionInfrastructureDeploymentArtifacts(null);
   try {
-    productionInfrastructureDeployment = inspectProductionInfrastructureDeploymentArtifacts({
-      applicationTemplateSource,
-      workloadTemplateSource,
-      observabilityTemplateSource,
-      migrationTemplateSource: readFileSync(
-        resolve(repositoryRoot, 'infra/aws/database-migration-task.yaml'),
-        'utf8',
-      ),
-      accountGuardrailsTemplateSource: readFileSync(
-        resolve(repositoryRoot, 'infra/aws/account-guardrails.yaml'),
-        'utf8',
-      ),
-      applicationInvokerSource: readFileSync(
-        resolve(repositoryRoot, 'infra/aws/invoke-application-baseline.ps1'),
-        'utf8',
-      ),
-      accountGuardrailsInvokerSource: readFileSync(
-        resolve(repositoryRoot, 'infra/aws/invoke-account-guardrails.ps1'),
-        'utf8',
-      ),
-      applicationValidatorSource: readFileSync(
-        resolve(repositoryRoot, 'infra/aws/validate-application-baseline.mjs'),
-        'utf8',
-      ),
-      fixedSlotTransitionValidatorSource: readFileSync(
-        resolve(repositoryRoot, 'infra/aws/validate-fixed-slot-credential-transition.mjs'),
-        'utf8',
-      ),
-      billingControlValidatorSource: readFileSync(
-        resolve(repositoryRoot, 'infra/aws/validate-billing-control-record.mjs'),
-        'utf8',
-      ),
-      egressPolicyValidatorSource: readFileSync(
-        resolve(repositoryRoot, 'infra/egress/validate-egress-policy.mjs'),
-        'utf8',
-      ),
-      authWalletTransitionValidatorSource: readFileSync(
-        resolve(repositoryRoot, 'infra/aws/validate-auth-wallet-secret-version-transition.mjs'),
-        'utf8',
-      ),
-      redisOperatorTransitionValidatorSource: readFileSync(
-        resolve(repositoryRoot, 'infra/aws/validate-redis-operator-secret-version-transition.mjs'),
-        'utf8',
-      ),
-    });
+    const nonProductionInfrastructureDeployment =
+      inspectProductionInfrastructureDeploymentArtifacts({
+        applicationTemplateSource,
+        workloadTemplateSource,
+        observabilityTemplateSource,
+        migrationTemplateSource: readFileSync(
+          resolve(repositoryRoot, 'infra/aws/database-migration-task.yaml'),
+          'utf8',
+        ),
+        accountGuardrailsTemplateSource: readFileSync(
+          resolve(repositoryRoot, 'infra/aws/account-guardrails.yaml'),
+          'utf8',
+        ),
+        applicationInvokerSource: readFileSync(
+          resolve(repositoryRoot, 'infra/aws/invoke-application-baseline.ps1'),
+          'utf8',
+        ),
+        accountGuardrailsInvokerSource: readFileSync(
+          resolve(repositoryRoot, 'infra/aws/invoke-account-guardrails.ps1'),
+          'utf8',
+        ),
+        applicationValidatorSource: readFileSync(
+          resolve(repositoryRoot, 'infra/aws/validate-application-baseline.mjs'),
+          'utf8',
+        ),
+        fixedSlotTransitionValidatorSource: readFileSync(
+          resolve(repositoryRoot, 'infra/aws/validate-fixed-slot-credential-transition.mjs'),
+          'utf8',
+        ),
+        billingControlValidatorSource: readFileSync(
+          resolve(repositoryRoot, 'infra/aws/validate-billing-control-record.mjs'),
+          'utf8',
+        ),
+        egressPolicyValidatorSource: readFileSync(
+          resolve(repositoryRoot, 'infra/egress/validate-egress-policy.mjs'),
+          'utf8',
+        ),
+        authWalletTransitionValidatorSource: readFileSync(
+          resolve(repositoryRoot, 'infra/aws/validate-auth-wallet-secret-version-transition.mjs'),
+          'utf8',
+        ),
+        redisOperatorTransitionValidatorSource: readFileSync(
+          resolve(
+            repositoryRoot,
+            'infra/aws/validate-redis-operator-secret-version-transition.mjs',
+          ),
+          'utf8',
+        ),
+      });
+    productionInfrastructureDeployment = loadProductionInfrastructureContract(
+      repositoryRoot,
+      nonProductionInfrastructureDeployment,
+    );
   } catch {
     // The evaluator reports an inspection failure without exposing local paths or source bytes.
   }

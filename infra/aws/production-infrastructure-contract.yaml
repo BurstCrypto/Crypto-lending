@@ -1,0 +1,70 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  Default-zero production infrastructure contract. This template defines a reviewed production
+  path but creates no resources, permits no egress, and grants no deployment authority.
+
+Metadata:
+  CryptoLendingProductionInfrastructureContract:
+    SchemaVersion: 1
+    ContractStatus: PRODUCTION_PATH_DEFINED
+    EnvironmentName: production
+    DefaultRuntimeState: INERT
+    CostAndBilling:
+      DefaultMonthlyCostUsd: '0.00'
+      MaximumIncrementalMonthlyCostUsd: '0.00'
+      BillingControlStatus: NOT_APPROVED
+      NonZeroCostPolicy: SOURCE_CHANGE_AND_APPROVED_BILLING_CONTROL_REQUIRED
+      BillingControlValidator: infra/aws/validate-billing-control-record.mjs
+    NetworkBoundary:
+      NetworkScope: ethereum-solana-mainnet
+      AllowedNetworkIds:
+        - eip155:1
+        - solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp
+      EgressMode: NO_EXTERNAL_EGRESS
+      ApprovedDestinations: []
+      UnlistedDestinationAction: DENY
+      EgressPolicyValidator: infra/egress/validate-egress-policy.mjs
+    RuntimeDefaults:
+      ApiDesiredCount: 0
+      WebDesiredCount: 0
+      OutboxWorkerDesiredCount: 0
+      BalanceConsumerDesiredCount: 0
+      MigrationTaskEnabled: false
+      PublicIngressEnabled: false
+    CredentialBoundary:
+      VersionSelector: EXACT_SECRETS_MANAGER_VERSION_ID_ONLY
+      MutableStageSelectors: FORBIDDEN
+      DefaultTransition: NO_CHANGE
+      FixedSlotValidator: infra/aws/validate-fixed-slot-credential-transition.mjs
+      AuthWalletValidator: infra/aws/validate-auth-wallet-secret-version-transition.mjs
+      RedisOperatorValidator: infra/aws/validate-redis-operator-secret-version-transition.mjs
+    RecoveryBoundary:
+      DeploymentCircuitBreaker: ENABLED
+      AutomaticRollback: ENABLED
+      GlobalKillSwitch: ENGAGED
+      ExternalEgressKillSwitch: ENGAGED
+      RollbackPlanStatus: NOT_APPROVED
+      NonZeroRuntimePolicy: SOURCE_CHANGE_AND_REVIEWED_ROLLBACK_PLAN_REQUIRED
+    DeploymentAuthority:
+      AuthorityStatus: NOT_APPROVED
+      DeploymentTargetRegistryStatus: EMPTY
+      ExactReleaseBindingRequired: true
+      IndependentApprovalRequired: true
+      DeploymentGuard: infra/aws/invoke-application-baseline.ps1
+      DeploymentTargetValidator: scripts/production-deployment-target.ts
+
+Parameters:
+  ActivationMode:
+    Type: String
+    Default: DISABLED
+    AllowedValues: [DISABLED]
+
+Resources: {}
+
+Outputs:
+  ContractStatus:
+    Value: PRODUCTION_PATH_DEFINED
+  DefaultRuntimeState:
+    Value: INERT
+  ActivationMode:
+    Value: !Ref ActivationMode

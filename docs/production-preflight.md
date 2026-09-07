@@ -18,18 +18,31 @@ This is currently a `BOOTSTRAP_BLOCKER_AUDIT`, not a launch-certification
 command. With no explicit bundle, its repository loader does not discover or
 ingest controlled production evidence, so both targets remain blocked today.
 
-`PRODUCTION_INFRASTRUCTURE` separately inspects the exact environment-contract
-markers across the KAN-34 application path: the parent, workload,
-observability, migration, and account-guardrail templates; their deployment
-guards; and the application, fixed-slot, billing, egress, auth/wallet, and
-Redis-operator validators. The current reviewed matrix is deliberately
-`NON_PRODUCTION_ONLY`, so its local inspection is `PASS` while launch readiness
-is hard-blocked by
-`PRODUCTION_INFRASTRUCTURE_DEPLOYMENT_PATH_NOT_ENABLED`. Missing, malformed,
-mixed, forged, or superficially widened artifacts instead emit
-`PRODUCTION_INFRASTRUCTURE_INSPECTION_FAILED`. A private in-process brand keeps
-callers from replacing the inspected result with asserted booleans or a
-fabricated `PRODUCTION_ENABLED` value.
+`PRODUCTION_INFRASTRUCTURE` first inspects the exact, unchanged
+`NON_PRODUCTION_ONLY` KAN-34 parent/child/migration/guardrail matrix and then
+securely loads a separate, exact-hash production contract set. That set binds
+the default-zero contract template, its non-production deployment guard, the
+billing, egress, fixed-slot, auth/wallet, and Redis transition validators, and
+the empty production-target registry. The resulting private
+`PRODUCTION_ENABLED` brand means only that this static production path is
+defined and reviewed. It does not mean that resources exist, a deployment was
+authorized, or production was activated.
+
+The contract has `Resources: {}`, admits only `ActivationMode: DISABLED`, fixes
+all desired counts and incremental cost ceilings at zero, permits no external
+egress, limits network identity to Ethereum and Solana mainnet, requires future
+credential transitions to use exact secret VersionIds, and keeps rollback and
+both kill switches as mandatory declared states for any future nonzero path.
+Those metadata declarations are not executable controls. The empty resource map
+is a contract/envelope milestone, not a deployable application stack.
+Consequently local inspection is `PASS`, while launch readiness remains
+hard-blocked by
+`PRODUCTION_INFRASTRUCTURE_DEPLOYMENT_AUTHORITY_MISSING` and
+`PRODUCTION_INFRASTRUCTURE_DEPLOYED_EVIDENCE_MISSING`. Missing, malformed,
+forged, or byte-drifted contract artifacts instead emit
+`PRODUCTION_INFRASTRUCTURE_INSPECTION_FAILED`. The release-candidate manifest
+also binds the exact contract file, so a release cannot silently omit or
+substitute it.
 
 The application-baseline validator also rejects `NODE_OPTIONS` and unreviewed
 automatic-instrumentation names with the `DD_TRACE`, `NEW_RELIC`, `ELASTIC_APM`,
@@ -47,10 +60,11 @@ is not a substitute for the dedicated CloudFormation linters and artifact
 validators. The standalone `sqs-foundation.yaml` is intentionally outside this
 matrix because the KAN-34 parent owns its queues and is mutually exclusive with
 that alternative stack for one environment. The standalone template remains
-covered by its own validator and CI suite. Enabling a production-named path
-requires a separate reviewed cost, billing, egress, rotation, and deployment
-authority design; this checkpoint does not widen any template or authorize a
-deployment.
+covered by its own validator and CI suite. Making the path deployable requires a
+separate reviewed source change that introduces resources and nonzero ceilings,
+plus independently approved billing, egress, credential-transition, rollback,
+deployment-target, release, and live deployment evidence. This checkpoint does
+not widen an existing template or authorize a deployment.
 
 `BALANCE_CONSUMER` separately binds and inspects the exact release-bound
 standalone balance-consumer envelope together with its validator and dormant
@@ -759,11 +773,10 @@ arguments or controlled evidence were rejected. CLI failures are reduced to
 `PUBLIC_LAUNCH_AUTHORITY_DECISION_INVALID`; paths, artifact contents, key
 material, parser details, and signature details are never printed. Structural
 or synthetic technical inputs cannot return exit code `0` without the private,
-current seven-role production decision brand. The checked-in empty registries
-and the deliberately non-production infrastructure contract independently make
-exit code `0` impossible today. Even after independently approved keys,
-evidence, decisions, and a separately reviewed production deployment path
-exist,
+current seven-role production decision brand. The checked-in empty registries,
+missing infrastructure deployment authority, and missing deployed evidence
+independently make exit code `0` impossible today. Even after independently
+approved keys, evidence, decisions, and a deployable production path exist,
 `LOCAL_VALIDATION_IS_NOT_PRODUCTION_APPROVAL` remains in the report.
 
 The audit reads only local repository, non-secret artifacts: selected KAN-34
@@ -849,6 +862,8 @@ Relevant machine-readable launch blocker IDs include:
 
 - `PRODUCTION_INFRASTRUCTURE_INSPECTION_FAILED`
 - `PRODUCTION_INFRASTRUCTURE_DEPLOYMENT_PATH_NOT_ENABLED`
+- `PRODUCTION_INFRASTRUCTURE_DEPLOYMENT_AUTHORITY_MISSING`
+- `PRODUCTION_INFRASTRUCTURE_DEPLOYED_EVIDENCE_MISSING`
 - `BALANCE_CONSUMER_SOURCE_ACTIVATION_DISABLED`
 - `BALANCE_CONSUMER_RUNTIME_NOT_COMPOSED`
 - `BALANCE_CONSUMER_TASK_NOT_PROVISIONED`
