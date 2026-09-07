@@ -681,7 +681,7 @@ const PRODUCTION_INFRASTRUCTURE_CONTRACT_ARTIFACT_SHA256 = Object.freeze({
   deploymentTargetValidatorSource:
     '54fb72f7f71d0faf101978d5c54f397dbc403024b25926523bc8bc4b5c1c0dd9',
   deploymentIntentValidatorSource:
-    '77a2ed1218bb9f814a239524e8daea0d467d8bda92865625482652daf3492035',
+    '140bf328798a76a0da5b30a25620fe5dc9e45d4343ce639f04c390a523420e3b',
   deploymentEnrollmentValidatorSource:
     'e7455fb4f63afb93aba9cb56472792d64cbc924f2738f7b27545ff196efac9ec',
   ed25519PublicKeyValidatorSource:
