@@ -8,11 +8,15 @@ import {
   ACTION_BOUNDARY_INPUT_ERROR,
   ACTION_BOUNDARY_PATH,
   ACTION_BOUNDARY_SPEC_PATH,
+  ACTION_LIFECYCLE_PATH,
+  ACTION_LIFECYCLE_SPEC_PATH,
   EXPECTED_ACTIONS,
   EXPECTED_PROVIDER_CANDIDATES,
   loadDormantMainnetActionBoundarySnapshot,
   REVIEWED_ACTION_BOUNDARY_SHA256,
   REVIEWED_ACTION_BOUNDARY_SPEC_SHA256,
+  REVIEWED_ACTION_LIFECYCLE_SHA256,
+  REVIEWED_ACTION_LIFECYCLE_SPEC_SHA256,
   validateDormantMainnetActionBoundaryFiles,
   validateDormantMainnetActionBoundarySnapshot,
 } from './validate-dormant-mainnet-action-boundary.mjs';
@@ -23,6 +27,8 @@ function snapshot() {
   return {
     boundarySource: baseline.boundarySource,
     specSource: baseline.specSource,
+    lifecycleSource: baseline.lifecycleSource,
+    lifecycleSpecSource: baseline.lifecycleSpecSource,
     runtimeSources: new Map(baseline.runtimeSources),
   };
 }
@@ -49,6 +55,8 @@ test('the exact Ethereum and Solana lending action candidate boundary is dormant
   );
   assert.equal(REVIEWED_ACTION_BOUNDARY_SHA256.length, 64);
   assert.equal(REVIEWED_ACTION_BOUNDARY_SPEC_SHA256.length, 64);
+  assert.equal(REVIEWED_ACTION_LIFECYCLE_SHA256.length, 64);
+  assert.equal(REVIEWED_ACTION_LIFECYCLE_SPEC_SHA256.length, 64);
 });
 
 test('action, provider, protocol, order, and chain drift fail closed', () => {
@@ -133,6 +141,43 @@ test('weak or detached tests fail closed', () => {
   });
 });
 
+test('lifecycle bytes, pure imports, closed authority, and adversarial spec are exact', () => {
+  mutationRejected('lifecycle source drift', (value) => {
+    value.lifecycleSource += '\n// drift';
+  });
+  mutationRejected('lifecycle spec drift', (value) => {
+    value.lifecycleSpecSource += '\n// drift';
+  });
+  mutationRejected('lifecycle I/O import', (value) => {
+    value.lifecycleSource = `import { request } from 'node:https';\n${value.lifecycleSource}`;
+  });
+  mutationRejected('lifecycle dynamic load', (value) => {
+    value.lifecycleSource += "\nvoid import('./wallet-broadcaster');";
+  });
+  mutationRejected('lifecycle execution authority', (value) => {
+    value.lifecycleSource = value.lifecycleSource.replace(
+      'executionAuthority: false as const',
+      'executionAuthority: true as const',
+    );
+  });
+  mutationRejected('lifecycle persistence authority', (value) => {
+    value.lifecycleSource = value.lifecycleSource.replace(
+      'persistenceAuthority: false as const',
+      'persistenceAuthority: true as const',
+    );
+  });
+  mutationRejected('detached lifecycle spec', (value) => {
+    value.lifecycleSpecSource = value.lifecycleSpecSource.replace(
+      './dormant-mainnet-financial-action-lifecycle',
+      './other-lifecycle',
+    );
+  });
+  mutationRejected('weak lifecycle spec', (value) => {
+    value.lifecycleSpecSource =
+      "import './dormant-mainnet-financial-action-lifecycle';\ntest('only one', () => {});";
+  });
+});
+
 test('any runtime reference to the dormant boundary fails closed', () => {
   for (const source of [
     "export * from './domain/dormant-mainnet-financial-action';",
@@ -155,6 +200,21 @@ test('any runtime reference to the dormant boundary fails closed', () => {
       "void import('./domain/dormant-mainnet-' + 'financial-action');",
     );
   });
+  for (const source of [
+    "export * from './domain/dormant-mainnet-financial-action-lifecycle';",
+    'createDormantMainnetFinancialActionLifecycleProtocol();',
+    'providers: [DormantMainnetFinancialActionLifecycleProtocol]',
+  ]) {
+    mutationRejected(source, (value) => {
+      value.runtimeSources.set('apps/api/src/mainnet-actions/lifecycle-runtime.ts', source);
+    });
+  }
+  mutationRejected('split lifecycle dynamic path', (value) => {
+    value.runtimeSources.set(
+      'apps/api/src/mainnet-actions/lifecycle-loader.ts',
+      "void import('./domain/dormant-mainnet-financial-action-' + 'lifecycle');",
+    );
+  });
 });
 
 test('malformed snapshots and runtime inventories fail closed without throwing', () => {
@@ -167,6 +227,9 @@ test('malformed snapshots and runtime inventories fail closed without throwing',
   mutationRejected('boundary in consumers', (value) => {
     value.runtimeSources.set(ACTION_BOUNDARY_PATH, value.boundarySource);
   });
+  mutationRejected('lifecycle in consumers', (value) => {
+    value.runtimeSources.set(ACTION_LIFECYCLE_PATH, value.lifecycleSource);
+  });
 });
 
 test('repository loading rejects missing reviewed artifacts with a value-free error', () => {
@@ -177,6 +240,14 @@ test('repository loading rejects missing reviewed artifacts with a value-free er
       ACTION_BOUNDARY_INPUT_ERROR,
     ]);
     writeFixture(repositoryRoot, ACTION_BOUNDARY_SPEC_PATH, baseline.specSource);
+    assert.deepEqual(validateDormantMainnetActionBoundaryFiles(repositoryRoot), [
+      ACTION_BOUNDARY_INPUT_ERROR,
+    ]);
+    writeFixture(repositoryRoot, ACTION_LIFECYCLE_PATH, baseline.lifecycleSource);
+    assert.deepEqual(validateDormantMainnetActionBoundaryFiles(repositoryRoot), [
+      ACTION_BOUNDARY_INPUT_ERROR,
+    ]);
+    writeFixture(repositoryRoot, ACTION_LIFECYCLE_SPEC_PATH, baseline.lifecycleSpecSource);
     assert.deepEqual(validateDormantMainnetActionBoundaryFiles(repositoryRoot), []);
   } finally {
     rmSync(repositoryRoot, { recursive: true, force: true });

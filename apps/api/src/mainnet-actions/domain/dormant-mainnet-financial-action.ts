@@ -324,7 +324,7 @@ function fail(code: DormantMainnetFinancialActionValidationCode): never {
 
 function exactDataRecord(value: unknown): Record<string, unknown> {
   try {
-    if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    if (typeof value !== 'object' || value === null || isProxy(value) || Array.isArray(value)) {
       return fail('INVALID_INTENT_INPUT');
     }
     const prototype = Object.getPrototypeOf(value);
@@ -456,14 +456,16 @@ function canonicalTime(
 }
 
 function serverTime(value: unknown): number {
-  if (
-    !(value instanceof Date) ||
-    isProxy(value) ||
-    Object.getPrototypeOf(value) !== Date.prototype
-  ) {
-    return fail('INVALID_SERVER_TIME');
-  }
   try {
+    if (
+      typeof value !== 'object' ||
+      value === null ||
+      isProxy(value) ||
+      !(value instanceof Date) ||
+      Object.getPrototypeOf(value) !== Date.prototype
+    ) {
+      return fail('INVALID_SERVER_TIME');
+    }
     const milliseconds = Date.prototype.getTime.call(value) as number;
     if (!Number.isFinite(milliseconds)) return fail('INVALID_SERVER_TIME');
     return milliseconds;

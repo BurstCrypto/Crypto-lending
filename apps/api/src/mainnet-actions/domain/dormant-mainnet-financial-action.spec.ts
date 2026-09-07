@@ -270,6 +270,15 @@ describe('dormant mainnet financial action boundary', () => {
     expectCode(input(), 'INVALID_SERVER_TIME', new Date(Number.NaN));
     expectCode(input(), 'INVALID_SERVER_TIME', '2026-09-06T12:00:00.000Z');
     expectCode(input(), 'INVALID_SERVER_TIME', new Proxy(NOW, {}));
+    let dateProxyTrapInvoked = false;
+    const hostileDateProxy = new Proxy(NOW, {
+      getPrototypeOf: () => {
+        dateProxyTrapInvoked = true;
+        throw new Error('hostile date proxy');
+      },
+    });
+    expectCode(input(), 'INVALID_SERVER_TIME', hostileDateProxy);
+    expect(dateProxyTrapInvoked).toBe(false);
 
     class DateSubclass extends Date {}
     expectCode(input(), 'INVALID_SERVER_TIME', new DateSubclass(NOW));
@@ -305,6 +314,16 @@ describe('dormant mainnet financial action boundary', () => {
     });
     expectCode(accessor, 'INVALID_INTENT_INPUT');
     expect(getterInvoked).toBe(false);
+
+    let proxyTrapInvoked = false;
+    const transparentProxy = new Proxy(input(), {
+      getPrototypeOf: () => {
+        proxyTrapInvoked = true;
+        return Object.prototype;
+      },
+    });
+    expectCode(transparentProxy, 'INVALID_INTENT_INPUT');
+    expect(proxyTrapInvoked).toBe(false);
 
     const hostile = new Proxy(input(), {
       ownKeys: () => {

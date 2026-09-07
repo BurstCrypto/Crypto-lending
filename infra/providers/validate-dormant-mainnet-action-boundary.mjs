@@ -11,6 +11,10 @@ export const ACTION_BOUNDARY_PATH =
   'apps/api/src/mainnet-actions/domain/dormant-mainnet-financial-action.ts';
 export const ACTION_BOUNDARY_SPEC_PATH =
   'apps/api/src/mainnet-actions/domain/dormant-mainnet-financial-action.spec.ts';
+export const ACTION_LIFECYCLE_PATH =
+  'apps/api/src/mainnet-actions/domain/dormant-mainnet-financial-action-lifecycle.ts';
+export const ACTION_LIFECYCLE_SPEC_PATH =
+  'apps/api/src/mainnet-actions/domain/dormant-mainnet-financial-action-lifecycle.spec.ts';
 export const MAX_ACTION_BOUNDARY_FILE_BYTES = 512 * 1024;
 export const MAX_ACTION_BOUNDARY_RUNTIME_FILES = 4_096;
 export const MAX_ACTION_BOUNDARY_RUNTIME_BYTES = 24 * 1024 * 1024;
@@ -18,9 +22,13 @@ export const MAX_ACTION_BOUNDARY_RUNTIME_DIRECTORIES = 4_096;
 export const MAX_ACTION_BOUNDARY_RUNTIME_DEPTH = 64;
 export const MAX_ACTION_BOUNDARY_RUNTIME_ENTRIES = 16_384;
 export const REVIEWED_ACTION_BOUNDARY_SHA256 =
-  '4add78d42c9c729f8d2fe91e91af4c3596640d0a603a9ba116b66e05594f499e';
+  'a6a206a47aae1af0b0587eb43b0576029a5a3541ccbd9e3b58452b29f872878a';
 export const REVIEWED_ACTION_BOUNDARY_SPEC_SHA256 =
-  'fb250e45fbb525b35e1671fc820f00b2c79fa007d344b0f62ee0a10101acbc7a';
+  '73d17b293472e51b8adca3294b19627941e3f43eec9e3e467df569e1a2cb422b';
+export const REVIEWED_ACTION_LIFECYCLE_SHA256 =
+  '87436578870cc361d9bc8c63f9e72a5c28fb37d09c1cbb685d49662288e660db';
+export const REVIEWED_ACTION_LIFECYCLE_SPEC_SHA256 =
+  'ba4f5acc5d10497178c0c3c4ff7a89435f03e33bc2efbc7f6024bf090069cc86';
 export const ACTION_BOUNDARY_INPUT_ERROR =
   'Dormant mainnet action boundary inputs must be stable, single-link regular UTF-8 files at canonical paths inside the repository and within the reviewed size limits.';
 
@@ -40,11 +48,18 @@ export const EXPECTED_PROVIDER_CANDIDATES = Object.freeze([
 
 const API_SOURCE_ROOT = 'apps/api/src';
 const BOUNDARY_IMPORT_STEM = 'dormant-mainnet-financial-action';
+const LIFECYCLE_IMPORT_STEM = 'dormant-mainnet-financial-action-lifecycle';
 const EXPECTED_IMPORTS = Object.freeze([
   'node:util/types',
   '../../blockchain/domain/mainnet-launch-network-policy',
   '../../blockchain/domain/supported-asset-registry',
   '../../wallets/domain/wallet-identity',
+]);
+const EXPECTED_LIFECYCLE_IMPORTS = Object.freeze([
+  'node:crypto',
+  'node:util/types',
+  '../../wallets/domain/wallet-identity',
+  './dormant-mainnet-financial-action',
 ]);
 const REQUIRED_CLOSED_MARKERS = Object.freeze([
   "mode: 'DISABLED' as const",
@@ -74,12 +89,36 @@ const REQUIRED_CLOSED_MARKERS = Object.freeze([
   "broadcastResponsibility: 'USER_WALLET_ONLY' as const",
   "decision: 'DENY' as const",
 ]);
+const REQUIRED_LIFECYCLE_CLOSED_MARKERS = Object.freeze([
+  "operationalMode: 'DORMANT' as const",
+  'mayAuthorizeFinancialAction: false as const',
+  'mayBuildTransaction: false as const',
+  'maySignTransaction: false as const',
+  'mayBroadcastTransaction: false as const',
+  'mayAutomaticallyResubmit: false as const',
+  'mayEscalateNetworkFee: false as const',
+  "signingResponsibility: 'USER_WALLET_ONLY' as const",
+  "broadcastResponsibility: 'USER_WALLET_ONLY' as const",
+  "kind: 'VOLATILE_IN_PROCESS_ONLY' as const",
+  'durable: false as const',
+  'mayClaimReplayProtectionAfterRestart: false as const',
+  'persistenceAuthority: false as const',
+  "use: 'DORMANT_MAINNET_FINANCIAL_ACTION_LIFECYCLE_PROTOCOL_ONLY' as const",
+  "source: 'USER_WALLET_REPORT_ONLY' as const",
+  'cryptographicSignatureVerifiedByThisProtocol: false as const',
+  'signedPayloadMatchesIntentVerifiedByThisProtocol: false as const',
+  'onchainAcceptanceVerifiedByThisProtocol: false as const',
+  "source: 'CALLER_SUPPLIED_READ_ONLY_CHAIN_EVIDENCE' as const",
+  'independentlyReadByThisProtocol: false as const',
+  'executionAuthority: false as const',
+]);
 const UNSAFE_CAPABILITY =
   /\b(?:mayAuthorizeFinancialAction|apiMaySign|apiMayBroadcast|crossChainExecutionAllowed|automaticResendAllowed|automaticFeeEscalationAllowed|durableReplayProtectionAvailable|durableLimitCountersAvailable|providerWriteApprovalAvailable|marketWriteManifestAvailable)\s*:\s*true\b/u;
 const PROHIBITED_BOUNDARY_SOURCE =
   /(?:\bprocess\.env\b|\b(?:fetch|WebSocket|XMLHttpRequest|eval|Function)\s*\(|\b(?:require|import)\s*\(|\bexport\s+(?:\*|\{[^}]*\})\s+from\s*['"]|\b(?:sendRawTransaction|sendTransaction|signTransaction|broadcastTransaction|eth_sendRawTransaction)\b|@(Injectable|Module|Controller)\s*\()/u;
 const RUNTIME_REFERENCE =
-  /(?:dormant-mainnet-financial-action|DormantMainnetFinancialAction|DORMANT_MAINNET_FINANCIAL_ACTION|MAINNET_FINANCIAL_ACTION_PROVIDER_CANDIDATES|assessDormantMainnetFinancialAction|parseDormantMainnetFinancialActionIntent)/u;
+  /(?:dormant-mainnet-financial-action|DormantMainnetFinancialAction|DORMANT_MAINNET_FINANCIAL_ACTION|MAINNET_FINANCIAL_ACTION_PROVIDER_CANDIDATES|assessDormantMainnetFinancialAction|parseDormantMainnetFinancialActionIntent|createDormantMainnetFinancialActionLifecycleProtocol)/u;
+const REVIEWED_DORMANT_SOURCE_PATHS = new Set([ACTION_BOUNDARY_PATH, ACTION_LIFECYCLE_PATH]);
 const REVIEWED_RUNTIME_DYNAMIC_IMPORTS = new Map([
   ['apps/api/src/application-root.ts', Object.freeze(['./local-development-app.module'])],
   [
@@ -152,6 +191,8 @@ export function validateDormantMainnetActionBoundarySnapshot(snapshot) {
     snapshot === null ||
     typeof snapshot.boundarySource !== 'string' ||
     typeof snapshot.specSource !== 'string' ||
+    typeof snapshot.lifecycleSource !== 'string' ||
+    typeof snapshot.lifecycleSpecSource !== 'string' ||
     !(snapshot.runtimeSources instanceof Map)
   ) {
     return ['action boundary snapshot is malformed'];
@@ -159,6 +200,7 @@ export function validateDormantMainnetActionBoundarySnapshot(snapshot) {
 
   const errors = [];
   const source = snapshot.boundarySource;
+  const lifecycleSource = snapshot.lifecycleSource;
   if (
     createHash('sha256').update(source, 'utf8').digest('hex') !== REVIEWED_ACTION_BOUNDARY_SHA256
   ) {
@@ -169,6 +211,18 @@ export function validateDormantMainnetActionBoundarySnapshot(snapshot) {
     REVIEWED_ACTION_BOUNDARY_SPEC_SHA256
   ) {
     errors.push('action boundary spec bytes drifted from the reviewed source');
+  }
+  if (
+    createHash('sha256').update(lifecycleSource, 'utf8').digest('hex') !==
+    REVIEWED_ACTION_LIFECYCLE_SHA256
+  ) {
+    errors.push('action lifecycle bytes drifted from the reviewed source');
+  }
+  if (
+    createHash('sha256').update(snapshot.lifecycleSpecSource, 'utf8').digest('hex') !==
+    REVIEWED_ACTION_LIFECYCLE_SPEC_SHA256
+  ) {
+    errors.push('action lifecycle spec bytes drifted from the reviewed source');
   }
   if (!exactArray(extractActions(source), EXPECTED_ACTIONS)) {
     errors.push('action boundary must contain exactly the four reviewed lending actions');
@@ -210,6 +264,24 @@ export function validateDormantMainnetActionBoundarySnapshot(snapshot) {
       'action boundary contains runtime registration, I/O, dynamic code, or transaction logic',
     );
   }
+  if (!exactArray(extractImports(lifecycleSource), EXPECTED_LIFECYCLE_IMPORTS)) {
+    errors.push('action lifecycle import set drifted from the reviewed pure-domain dependencies');
+  }
+  for (const marker of REQUIRED_LIFECYCLE_CLOSED_MARKERS) {
+    if (!lifecycleSource.includes(marker)) {
+      errors.push(`action lifecycle is missing closed marker: ${marker}`);
+    }
+  }
+  if (UNSAFE_CAPABILITY.test(lifecycleSource)) {
+    errors.push(
+      'action lifecycle enables a prohibited financial, signing, or broadcast capability',
+    );
+  }
+  if (PROHIBITED_BOUNDARY_SOURCE.test(lifecycleSource)) {
+    errors.push(
+      'action lifecycle contains runtime registration, I/O, dynamic code, or transaction logic',
+    );
+  }
   if (
     !snapshot.specSource.includes(`./${BOUNDARY_IMPORT_STEM}`) ||
     countTests(snapshot.specSource) < 15 ||
@@ -218,12 +290,22 @@ export function validateDormantMainnetActionBoundarySnapshot(snapshot) {
   ) {
     errors.push('action boundary spec is not exact, adversarial, and denial-bound');
   }
+  if (
+    !snapshot.lifecycleSpecSource.includes(`./${LIFECYCLE_IMPORT_STEM}`) ||
+    countTests(snapshot.lifecycleSpecSource) < 9 ||
+    !snapshot.lifecycleSpecSource.includes('new Proxy') ||
+    !snapshot.lifecycleSpecSource.includes("operationalMode: 'DORMANT'") ||
+    !snapshot.lifecycleSpecSource.includes('executionAuthority: false') ||
+    !snapshot.lifecycleSpecSource.includes('persistenceAuthority: false')
+  ) {
+    errors.push('action lifecycle spec is not exact, adversarial, and authority-closed');
+  }
 
   for (const [path, runtimeSource] of snapshot.runtimeSources) {
     if (typeof path !== 'string' || typeof runtimeSource !== 'string') {
       errors.push('action boundary runtime source inventory is malformed');
-    } else if (normalizedPath(path) === ACTION_BOUNDARY_PATH) {
-      errors.push('action boundary was incorrectly included in runtime consumers');
+    } else if (REVIEWED_DORMANT_SOURCE_PATHS.has(normalizedPath(path))) {
+      errors.push('reviewed dormant action source was incorrectly included in runtime consumers');
     } else if (hasUnreviewedDynamicLoading(path, runtimeSource)) {
       errors.push(`runtime source contains unreviewed dynamic loading: ${path}`);
     } else if (RUNTIME_REFERENCE.test(runtimeSource)) {
@@ -283,7 +365,7 @@ function runtimeSourcePaths(repositoryRoot) {
           !entry.name.endsWith('.spec.ts')
         ) {
           const path = normalizedPath(relative(repositoryRoot, absolute));
-          if (path !== ACTION_BOUNDARY_PATH) paths.push(path);
+          if (!REVIEWED_DORMANT_SOURCE_PATHS.has(path)) paths.push(path);
           if (paths.length > MAX_ACTION_BOUNDARY_RUNTIME_FILES) {
             throw new Error(ACTION_BOUNDARY_INPUT_ERROR);
           }
@@ -312,6 +394,8 @@ export function loadDormantMainnetActionBoundarySnapshot(repositoryRoot = REPOSI
     return {
       boundarySource: repositoryFile(repositoryRoot, ACTION_BOUNDARY_PATH),
       specSource: repositoryFile(repositoryRoot, ACTION_BOUNDARY_SPEC_PATH),
+      lifecycleSource: repositoryFile(repositoryRoot, ACTION_LIFECYCLE_PATH),
+      lifecycleSpecSource: repositoryFile(repositoryRoot, ACTION_LIFECYCLE_SPEC_PATH),
       runtimeSources,
     };
   } catch {
