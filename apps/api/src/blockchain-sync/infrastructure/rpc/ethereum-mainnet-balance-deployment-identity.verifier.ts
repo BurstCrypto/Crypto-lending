@@ -24,6 +24,7 @@ import {
 import {
   allowedRecord,
   exchangeBalanceRpc,
+  type BalanceJsonRpcRequest,
   type BalanceJsonRpcTransport,
 } from './balance-json-rpc';
 
@@ -547,15 +548,35 @@ function requireActiveExecution(execution: BalanceSyncExecutionContext): void {
 }
 
 function reviewedTransport(value: unknown): BalanceJsonRpcTransport {
-  if (
-    (typeof value !== 'object' && typeof value !== 'function') ||
-    value === null ||
-    isProxy(value) ||
-    typeof (value as BalanceJsonRpcTransport).exchange !== 'function'
-  ) {
+  try {
+    if (typeof value !== 'object' || value === null || isProxy(value)) {
+      throw new TypeError('invalid balance JSON-RPC transport');
+    }
+    const receiver = value;
+    let owner: object | null = receiver;
+    for (let depth = 0; owner !== null && owner !== Object.prototype && depth < 8; depth += 1) {
+      if (isProxy(owner)) throw new TypeError('invalid balance JSON-RPC transport');
+      const descriptor = Object.getOwnPropertyDescriptor(owner, 'exchange');
+      if (descriptor !== undefined) {
+        if (
+          !('value' in descriptor) ||
+          typeof descriptor.value !== 'function' ||
+          isProxy(descriptor.value)
+        ) {
+          throw new TypeError('invalid balance JSON-RPC transport');
+        }
+        const exchange = descriptor.value as BalanceJsonRpcTransport['exchange'];
+        return Object.freeze({
+          exchange: (request: BalanceJsonRpcRequest, signal: AbortSignal): Promise<unknown> =>
+            Reflect.apply(exchange, receiver, [request, signal]) as Promise<unknown>,
+        });
+      }
+      owner = Object.getPrototypeOf(owner) as object | null;
+    }
+  } catch {
     throw new TypeError('invalid balance JSON-RPC transport');
   }
-  return value as BalanceJsonRpcTransport;
+  throw new TypeError('invalid balance JSON-RPC transport');
 }
 
 function exactConfig(value: unknown): Readonly<{

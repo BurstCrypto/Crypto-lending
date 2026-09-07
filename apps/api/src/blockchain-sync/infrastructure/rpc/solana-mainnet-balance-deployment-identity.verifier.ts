@@ -36,6 +36,11 @@ const LEGACY_MINT_BYTES = 82;
 const TOKEN_2022_ACCOUNT_TYPE_OFFSET = 165;
 const TOKEN_2022_MINT_ACCOUNT_TYPE = 1;
 const TOKEN_2022_TLV_OFFSET = 166;
+// Reviewed Token-2022 interface enum values whose account type is Mint. A new
+// extension stays fail-closed until its layout and mutability are reviewed.
+const TOKEN_2022_MINT_EXTENSION_TYPES = new Set([
+  1, 3, 4, 6, 9, 10, 12, 14, 16, 18, 19, 20, 21, 22, 23, 24, 25, 26, 28,
+]);
 const PROGRAM_ACCOUNT_BYTES = 36;
 const PROGRAM_DATA_METADATA_BYTES = 45;
 const MAX_ACCOUNT_BYTES = 2 * 1024 * 1024;
@@ -416,13 +421,22 @@ function validToken2022MintLayout(data: Uint8Array): boolean {
   const types = new Set<number>();
   let offset = TOKEN_2022_TLV_OFFSET;
   while (offset < data.byteLength) {
-    if (data.byteLength - offset < 4) return false;
+    // The official walker permits one trailing realloc byte because a type is
+    // two bytes; it cannot describe an initialized extension.
+    if (data.byteLength - offset < 2) return true;
     const type = uint16(data, offset);
+    // Uninitialized terminates the initialized TLV sequence. Remaining bytes
+    // are still bound by the exact approved configuration fingerprint.
+    if (type === 0) return true;
+    if (data.byteLength - offset < 4) return false;
     const length = uint16(data, offset + 2);
-    if (type === 0 && length === 0) {
-      return data.subarray(offset).every((byte) => byte === 0);
+    if (
+      !TOKEN_2022_MINT_EXTENSION_TYPES.has(type) ||
+      types.has(type) ||
+      offset + 4 + length > data.byteLength
+    ) {
+      return false;
     }
-    if (type === 0 || types.has(type) || offset + 4 + length > data.byteLength) return false;
     types.add(type);
     offset += 4 + length;
   }
@@ -437,9 +451,9 @@ function matchesCOptionPublicKey(
 ): boolean {
   const discriminator = uint32(data, discriminatorOffset);
   if (expected === null) {
-    return (
-      discriminator === 0 && data.subarray(keyOffset, keyOffset + 32).every((byte) => byte === 0)
-    );
+    // SPL Token's canonical unpacker ignores the payload for COption::None;
+    // the full payload remains bound by mintConfigurationSha256.
+    return discriminator === 0;
   }
   return (
     discriminator === 1 && samePublicKeyBytes(data.subarray(keyOffset, keyOffset + 32), expected)

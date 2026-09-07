@@ -234,6 +234,36 @@ function result(request: BalanceJsonRpcRequest, value: unknown): unknown {
   return { jsonrpc: '2.0', id: request.id, result: value };
 }
 
+function manifestWithMintConfiguration(
+  current: Fixture,
+  assetIndex: number,
+  data: Uint8Array,
+): SolanaMainnetBalanceDeploymentManifestV1 {
+  const content: SolanaMainnetBalanceDeploymentManifestContentV1 = {
+    schemaVersion: current.manifest.schemaVersion,
+    environment: current.manifest.environment,
+    networkId: current.manifest.networkId,
+    approvalStatus: 'APPROVED',
+    approvedAt: current.manifest.approvedAt,
+    expiresAt: current.manifest.expiresAt,
+    validFromSlot: current.manifest.validFromSlot,
+    validThroughSlot: current.manifest.validThroughSlot,
+    assets: current.manifest.assets.map((asset, index) =>
+      index === assetIndex
+        ? {
+            ...asset,
+            mintConfigurationSha256: fingerprintSolanaMainnetMintConfigurationV1(data),
+          }
+        : asset,
+    ),
+    programs: current.manifest.programs,
+  };
+  return {
+    ...content,
+    fingerprintSha256: fingerprintSolanaMainnetBalanceDeploymentManifestV1(content),
+  };
+}
+
 function transportFor(
   current: Fixture,
   options: Readonly<{
@@ -339,6 +369,51 @@ describe('dormant Solana mainnet balance deployment identity verifier', () => {
 
     expect(firstClaims?.observedIdentityFingerprintSha256).toBe(
       secondClaims?.observedIdentityFingerprintSha256,
+    );
+  });
+
+  it('accepts SPL COption None with retained payload while binding those exact bytes', async () => {
+    const current = fixture();
+    const usdc = Uint8Array.from(Buffer.from(current.accounts[1]!.data[0], 'base64'));
+    usdc.set(decodeSolanaPublicKey(AUTHORITY), 4);
+    current.accounts[1] = rpcAccount(usdc, LEGACY_TOKEN_PROGRAM, false);
+    const reviewed: Fixture = {
+      ...current,
+      manifest: manifestWithMintConfiguration(current, 1, usdc),
+    };
+
+    const claims = await attest(reviewed, transportFor(reviewed));
+
+    expect(claims?.deploymentIdentityValidated).toBe(true);
+  });
+
+  it('matches the Token-2022 walker allowance for one trailing realloc byte', async () => {
+    const current = fixture();
+    const original = Buffer.from(current.accounts[0]!.data[0], 'base64');
+    const pyusd = Uint8Array.from([...original, 7]);
+    current.accounts[0] = rpcAccount(pyusd, TOKEN_2022_PROGRAM, false);
+    const reviewed: Fixture = {
+      ...current,
+      manifest: manifestWithMintConfiguration(current, 0, pyusd),
+    };
+
+    const claims = await attest(reviewed, transportFor(reviewed));
+
+    expect(claims?.deploymentIdentityValidated).toBe(true);
+  });
+
+  it('rejects Token-2022 account-only or unknown extension types even if a manifest hashes them', async () => {
+    const current = fixture();
+    const original = Buffer.from(current.accounts[0]!.data[0], 'base64');
+    const pyusd = Uint8Array.from([...original, 2, 0, 0, 0]);
+    current.accounts[0] = rpcAccount(pyusd, TOKEN_2022_PROGRAM, false);
+    const reviewed: Fixture = {
+      ...current,
+      manifest: manifestWithMintConfiguration(current, 0, pyusd),
+    };
+
+    await expect(attest(reviewed, transportFor(reviewed))).rejects.toThrow(
+      'mainnet balance deployment identity verification unavailable',
     );
   });
 

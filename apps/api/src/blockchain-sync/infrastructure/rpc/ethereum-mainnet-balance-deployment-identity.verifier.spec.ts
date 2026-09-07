@@ -394,6 +394,38 @@ describe('dormant Ethereum mainnet balance deployment identity verifier', () => 
     expect(transport.requests).toHaveLength(0);
   });
 
+  it('rejects an accessor-backed transport without invoking caller code', () => {
+    const manifest = approvedManifest();
+    const read = jest.fn(() => new TranscriptTransport().exchange);
+    const transport = {} as Record<string, unknown>;
+    Object.defineProperty(transport, 'exchange', { enumerable: true, get: read });
+
+    expect(() => verifier(transport as unknown as BalanceJsonRpcTransport, manifest)).toThrow(
+      'Ethereum mainnet balance deployment identity verifier unavailable',
+    );
+    expect(read).not.toHaveBeenCalled();
+  });
+
+  it('captures the reviewed transport method against later substitution', async () => {
+    const transport = new TranscriptTransport();
+    const capability = verifier(transport);
+    const substituted = jest.fn(async () => {
+      throw new Error('substituted method must not run');
+    });
+    Object.defineProperty(transport, 'exchange', {
+      configurable: true,
+      enumerable: true,
+      value: substituted,
+      writable: true,
+    });
+
+    const value = await attest(capability);
+
+    expect(reviewMainnetBalanceDeploymentIdentityAttestation(value, request())).not.toBeNull();
+    expect(substituted).not.toHaveBeenCalled();
+    expect(transport.requests).toHaveLength(40);
+  });
+
   it('does not auto-detect a legacy proxy as direct runtime code', async () => {
     const manifest = approvedManifest();
     manifest.assets[1]!.epochs[0]!.deployment = {
