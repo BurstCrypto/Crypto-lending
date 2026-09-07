@@ -27,19 +27,26 @@ import {
   type ResolvedProductionDeploymentTarget,
 } from './production-deployment-target.mjs';
 
-export const PRODUCTION_EVIDENCE_BUNDLE_SCHEMA_VERSION = 2 as const;
+export const PRODUCTION_EVIDENCE_BUNDLE_SCHEMA_VERSION = 3 as const;
 export const MAX_PRODUCTION_EVIDENCE_BUNDLE_BYTES = 262_144 as const;
 export const MAX_PRODUCTION_EVIDENCE_BUNDLE_VALIDITY_MILLISECONDS = 24 * 60 * 60 * 1_000;
 export const MAX_PRODUCTION_EVIDENCE_OBSERVATION_LEAD_MILLISECONDS = 60 * 60 * 1_000;
 const MAX_RDS_MASTER_LIFECYCLE_CAPTURE_MILLISECONDS = 24 * 60 * 60 * 1_000;
 
-const SIGNING_DOMAIN = 'crypto-lending:production-controlled-evidence-bundle:v2' as const;
+const SIGNING_DOMAIN = 'crypto-lending:production-controlled-evidence-bundle:v3' as const;
 const SOURCE_REVISION_PATTERN = /^[a-f0-9]{40}$/u;
 const SOURCE_TREE_PATTERN = /^[a-f0-9]{40,64}$/u;
 const SHA256_PATTERN = /^[a-f0-9]{64}$/u;
 const KEY_ID_PATTERN = /^[a-z0-9]+(?:[._-][a-z0-9]+)*$/u;
 const TARGET_ID_PATTERN = /^[a-z0-9]+(?:[._-][a-z0-9]+)*$/u;
 const PROVIDER_ID_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u;
+const PROTOCOL_ID_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u;
+const MACHINE_ID_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u;
+const EVM_ADDRESS_PATTERN = /^0x[a-f0-9]{40}$/u;
+const EVM_MARKET_IDENTITY_PATTERN = /^0x(?:[a-f0-9]{40}|[a-f0-9]{64})$/u;
+const SOLANA_IDENTITY_PATTERN = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/u;
+const POSITIVE_DECIMAL_PATTERN = /^[1-9][0-9]{0,19}$/u;
+const BASE58_ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
 const SAFE_REFERENCE_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:/-]{2,191}$/u;
 const BASE64_PATTERN = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u;
 const ED25519_SPKI_PREFIX = Buffer.from('302a300506032b6570032100', 'hex');
@@ -160,8 +167,91 @@ const READ_EVIDENCE_KEYS = Object.freeze([
   'sourceRevision',
   'directoryConfigurationSha256',
   'providerIds',
-  'adapterBindings',
-  'compositionEvidence',
+  'providerEvidence',
+]);
+const PROVIDER_EVIDENCE_KEYS = Object.freeze([
+  'schemaVersion',
+  'artifactType',
+  'providerId',
+  'protocolId',
+  'networkId',
+  'deployment',
+  'market',
+  'sourcePair',
+  'observation',
+  'adapter',
+  'retainedCapture',
+  'risk',
+  'operations',
+  'independentAcceptance',
+]);
+const PROVIDER_DEPLOYMENT_KEYS = Object.freeze([
+  'identityKind',
+  'deploymentIdentity',
+  'runtimeIdentity',
+  'marketIdentity',
+  'runtimeCodeSetSha256',
+  'identityEvidenceSha256',
+]);
+const PROVIDER_MARKET_KEYS = Object.freeze([
+  'assetSymbols',
+  'assetIdentitySetSha256',
+  'oracleIdentitySetSha256',
+  'pauseAndCapsEvidenceSha256',
+]);
+const PROVIDER_SOURCE_PAIR_KEYS = Object.freeze([
+  'primarySourceId',
+  'primaryOperatorId',
+  'corroboratingSourceId',
+  'corroboratingOperatorId',
+  'sourcePairEvidenceSha256',
+]);
+const PROVIDER_OBSERVATION_KEYS = Object.freeze([
+  'observedAt',
+  'staleAfter',
+  'finalityModel',
+  'candidateAnchor',
+  'finalizedAnchor',
+  'blockIdentitySha256',
+  'freshnessPolicySha256',
+  'finalityEvidenceSha256',
+]);
+const PROVIDER_ADAPTER_KEYS = Object.freeze([
+  'adapterArtifactSha256',
+  'allowedReadMethodsSha256',
+  'runtimeCompositionEvidenceSha256',
+  'readOnlyMethodsOnly',
+  'staleFailure',
+  'divergenceFailure',
+  'incompleteFailure',
+  'regressionFailure',
+  'maySign',
+  'mayBroadcast',
+]);
+const PROVIDER_CAPTURE_KEYS = Object.freeze([
+  'format',
+  'captureSha256',
+  'collectionStartedAt',
+  'collectionCompletedAt',
+]);
+const PROVIDER_RISK_KEYS = Object.freeze([
+  'status',
+  'classification',
+  'decisionSha256',
+  'approvalReferenceId',
+]);
+const PROVIDER_OPERATIONS_KEYS = Object.freeze([
+  'providerKillSwitchExercise',
+  'networkKillSwitchExercise',
+  'monitoringEvidenceSha256',
+  'spendAlarmEvidenceSha256',
+  'outageAndDriftRunbookSha256',
+]);
+const PROVIDER_ACCEPTANCE_KEYS = Object.freeze([
+  'status',
+  'reviewedAt',
+  'decisionSha256',
+  'approvalReferenceId',
 ]);
 const RELEASE_MANIFEST_KEYS = Object.freeze([
   'schemaVersion',
@@ -192,6 +282,45 @@ const AUTHORIZED_BUNDLES = new WeakMap<object, Readonly<{ verifiedAtMilliseconds
 
 export type ProductionEvidenceSignerRole = (typeof PRODUCTION_EVIDENCE_SIGNER_ROLES)[number];
 export type ProductionEvidenceScope = 'READ_ONLY';
+
+/**
+ * Exact active provider scope for this evidence schema. Changing a provider,
+ * protocol, network, or ordering requires a new schema and signing domain.
+ */
+export const PRODUCTION_LIVE_READ_PROVIDER_SCOPE = Object.freeze([
+  Object.freeze({ providerId: 'aave', protocolId: 'aave-v3', networkId: 'eip155:1' }),
+  Object.freeze({ providerId: 'compound', protocolId: 'compound-iii', networkId: 'eip155:1' }),
+  Object.freeze({ providerId: 'euler', protocolId: 'euler-v2', networkId: 'eip155:1' }),
+  Object.freeze({ providerId: 'gearbox', protocolId: 'gearbox-v3', networkId: 'eip155:1' }),
+  Object.freeze({
+    providerId: 'jupiter',
+    protocolId: 'jupiter-lend',
+    networkId: 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp',
+  }),
+  Object.freeze({
+    providerId: 'kamino',
+    protocolId: 'kamino-lend',
+    networkId: 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp',
+  }),
+  Object.freeze({ providerId: 'morpho', protocolId: 'morpho-blue', networkId: 'eip155:1' }),
+  Object.freeze({
+    providerId: 'project-0',
+    protocolId: 'marginfi-v2',
+    networkId: 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp',
+  }),
+  Object.freeze({
+    providerId: 'save',
+    protocolId: 'save-lend',
+    networkId: 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp',
+  }),
+  Object.freeze({ providerId: 'spark', protocolId: 'sparklend', networkId: 'eip155:1' }),
+] as const);
+
+export type ProductionLiveReadProviderScope = (typeof PRODUCTION_LIVE_READ_PROVIDER_SCOPE)[number];
+export type ProductionLiveReadProviderId = ProductionLiveReadProviderScope['providerId'];
+export type ProductionLiveReadProtocolId = ProductionLiveReadProviderScope['protocolId'];
+export type ProductionLiveReadNetworkId = ProductionLiveReadProviderScope['networkId'];
+export type ProductionLiveReadAssetSymbol = 'PYUSD' | 'USDC' | 'USDT';
 
 export interface ProductionEvidenceAuthorityKey {
   readonly keyId: string;
@@ -292,15 +421,90 @@ export interface ProductionRdsMasterLifecycleEvidence {
   }>;
 }
 
-export interface ProductionLiveReadEvidenceIndex {
+export interface ProductionProviderLiveReadEvidence {
   readonly schemaVersion: 1;
+  readonly artifactType: 'PRODUCTION_PROVIDER_LIVE_READ_EVIDENCE';
+  readonly providerId: ProductionLiveReadProviderId;
+  readonly protocolId: ProductionLiveReadProtocolId;
+  readonly networkId: ProductionLiveReadNetworkId;
+  readonly deployment: Readonly<{
+    readonly identityKind: 'EVM_CONTRACT_SET' | 'SOLANA_PROGRAM_SET';
+    readonly deploymentIdentity: string;
+    readonly runtimeIdentity: string;
+    readonly marketIdentity: string;
+    readonly runtimeCodeSetSha256: string;
+    readonly identityEvidenceSha256: string;
+  }>;
+  readonly market: Readonly<{
+    readonly assetSymbols: readonly ProductionLiveReadAssetSymbol[];
+    readonly assetIdentitySetSha256: string;
+    readonly oracleIdentitySetSha256: string;
+    readonly pauseAndCapsEvidenceSha256: string;
+  }>;
+  readonly sourcePair: Readonly<{
+    readonly primarySourceId: string;
+    readonly primaryOperatorId: string;
+    readonly corroboratingSourceId: string;
+    readonly corroboratingOperatorId: string;
+    readonly sourcePairEvidenceSha256: string;
+  }>;
+  readonly observation: Readonly<{
+    readonly observedAt: string;
+    readonly staleAfter: string;
+    readonly finalityModel: 'ETHEREUM_FINALIZED_BLOCK' | 'SOLANA_FINALIZED_ROOT';
+    readonly candidateAnchor: string;
+    readonly finalizedAnchor: string;
+    readonly blockIdentitySha256: string;
+    readonly freshnessPolicySha256: string;
+    readonly finalityEvidenceSha256: string;
+  }>;
+  readonly adapter: Readonly<{
+    readonly adapterArtifactSha256: string;
+    readonly allowedReadMethodsSha256: string;
+    readonly runtimeCompositionEvidenceSha256: string;
+    readonly readOnlyMethodsOnly: 'PASS';
+    readonly staleFailure: 'UNAVAILABLE';
+    readonly divergenceFailure: 'UNAVAILABLE';
+    readonly incompleteFailure: 'UNAVAILABLE';
+    readonly regressionFailure: 'UNAVAILABLE';
+    readonly maySign: false;
+    readonly mayBroadcast: false;
+  }>;
+  readonly retainedCapture: Readonly<{
+    readonly format: 'SANITIZED_CANONICAL_JSON_V1';
+    readonly captureSha256: string;
+    readonly collectionStartedAt: string;
+    readonly collectionCompletedAt: string;
+  }>;
+  readonly risk: Readonly<{
+    readonly status: 'ACCEPTED_FOR_READ_ONLY';
+    readonly classification: 'LOW' | 'MODERATE' | 'HIGH';
+    readonly decisionSha256: string;
+    readonly approvalReferenceId: string;
+  }>;
+  readonly operations: Readonly<{
+    readonly providerKillSwitchExercise: 'PASS';
+    readonly networkKillSwitchExercise: 'PASS';
+    readonly monitoringEvidenceSha256: string;
+    readonly spendAlarmEvidenceSha256: string;
+    readonly outageAndDriftRunbookSha256: string;
+  }>;
+  readonly independentAcceptance: Readonly<{
+    readonly status: 'ACCEPTED';
+    readonly reviewedAt: string;
+    readonly decisionSha256: string;
+    readonly approvalReferenceId: string;
+  }>;
+}
+
+export interface ProductionLiveReadEvidenceIndex {
+  readonly schemaVersion: 2;
   readonly artifactType: 'PRODUCTION_LIVE_READ_EVIDENCE_INDEX';
   readonly status: 'ACCEPTED';
   readonly sourceRevision: string;
   readonly directoryConfigurationSha256: string;
-  readonly providerIds: readonly string[];
-  readonly adapterBindings: 'COMPLETE';
-  readonly compositionEvidence: 'PASS';
+  readonly providerIds: readonly ProductionLiveReadProviderId[];
+  readonly providerEvidence: readonly ProductionProviderLiveReadEvidence[];
 }
 
 export interface ProductionEvidenceBundleContent {
@@ -329,7 +533,7 @@ export interface ProductionEvidenceSignature {
 }
 
 export interface UnsignedProductionEvidenceBundle {
-  readonly schemaVersion: 2;
+  readonly schemaVersion: 3;
   readonly artifactType: 'PRODUCTION_CONTROLLED_EVIDENCE_BUNDLE';
   readonly content: ProductionEvidenceBundleContent;
 }
@@ -447,8 +651,26 @@ function sha256(value: unknown): string {
   return value;
 }
 
+function evidenceSha256(value: unknown): string {
+  const digest = sha256(value);
+  if (/^0{64}$/u.test(digest)) return invalid();
+  return digest;
+}
+
 function safeReference(value: unknown): string {
   if (typeof value !== 'string' || !SAFE_REFERENCE_PATTERN.test(value)) return invalid();
+  return value;
+}
+
+function machineId(value: unknown): string {
+  if (
+    typeof value !== 'string' ||
+    value.length < 3 ||
+    value.length > 96 ||
+    !MACHINE_ID_PATTERN.test(value)
+  ) {
+    return invalid();
+  }
   return value;
 }
 
@@ -539,18 +761,325 @@ function canonicalBase64(value: unknown, expectedBytes?: number): Buffer {
   return bytes;
 }
 
-function providerIds(value: unknown): readonly string[] {
-  if (!Array.isArray(value) || value.length === 0 || value.length > 100) return invalid();
-  const ids: string[] = [];
-  const seen = new Set<string>();
-  for (const id of value) {
-    if (typeof id !== 'string' || id.length > 64 || !PROVIDER_ID_PATTERN.test(id) || seen.has(id)) {
+function providerIds(value: unknown): readonly ProductionLiveReadProviderId[] {
+  if (!Array.isArray(value) || value.length !== PRODUCTION_LIVE_READ_PROVIDER_SCOPE.length) {
+    return invalid();
+  }
+  const ids = value.map((id, index) => {
+    const expected = PRODUCTION_LIVE_READ_PROVIDER_SCOPE[index];
+    if (
+      expected === undefined ||
+      typeof id !== 'string' ||
+      id.length > 64 ||
+      !PROVIDER_ID_PATTERN.test(id) ||
+      id !== expected.providerId
+    ) {
       return invalid();
     }
-    seen.add(id);
-    ids.push(id);
-  }
+    return expected.providerId;
+  });
   return Object.freeze(ids);
+}
+
+function protocolId(
+  value: unknown,
+  expected: ProductionLiveReadProtocolId,
+): ProductionLiveReadProtocolId {
+  if (
+    typeof value !== 'string' ||
+    value.length > 64 ||
+    !PROTOCOL_ID_PATTERN.test(value) ||
+    value !== expected
+  ) {
+    return invalid();
+  }
+  return expected;
+}
+
+function decodeBase58(value: string): Uint8Array | null {
+  if (!SOLANA_IDENTITY_PATTERN.test(value)) return null;
+  const littleEndianBytes = [0];
+  for (const character of value) {
+    let carry = BASE58_ALPHABET.indexOf(character);
+    if (carry < 0) return null;
+    for (let index = 0; index < littleEndianBytes.length; index += 1) {
+      carry += (littleEndianBytes[index] ?? 0) * 58;
+      littleEndianBytes[index] = carry & 0xff;
+      carry >>= 8;
+    }
+    while (carry > 0) {
+      littleEndianBytes.push(carry & 0xff);
+      carry >>= 8;
+    }
+  }
+  let leadingZeroBytes = 0;
+  while (value[leadingZeroBytes] === '1') leadingZeroBytes += 1;
+  const significantLength =
+    littleEndianBytes.length === 1 && littleEndianBytes[0] === 0 ? 0 : littleEndianBytes.length;
+  const decoded = new Uint8Array(leadingZeroBytes + significantLength);
+  for (let index = 0; index < significantLength; index += 1) {
+    decoded[decoded.length - index - 1] = littleEndianBytes[index] ?? 0;
+  }
+  return decoded;
+}
+
+function encodeBase58(value: Uint8Array): string {
+  const littleEndianDigits = [0];
+  for (const byte of value) {
+    let carry = byte;
+    for (let index = 0; index < littleEndianDigits.length; index += 1) {
+      carry += (littleEndianDigits[index] ?? 0) << 8;
+      littleEndianDigits[index] = carry % 58;
+      carry = Math.floor(carry / 58);
+    }
+    while (carry > 0) {
+      littleEndianDigits.push(carry % 58);
+      carry = Math.floor(carry / 58);
+    }
+  }
+  let leadingZeroBytes = 0;
+  while (value[leadingZeroBytes] === 0) leadingZeroBytes += 1;
+  const significantDigits =
+    littleEndianDigits.length === 1 && littleEndianDigits[0] === 0 ? [] : littleEndianDigits;
+  return (
+    '1'.repeat(leadingZeroBytes) +
+    significantDigits
+      .reverse()
+      .map((digit) => BASE58_ALPHABET[digit] ?? '')
+      .join('')
+  );
+}
+
+function chainIdentity(
+  value: unknown,
+  networkId: ProductionLiveReadNetworkId,
+  allowEvmMarketId = false,
+): string {
+  if (typeof value !== 'string') return invalid();
+  if (networkId === 'eip155:1') {
+    const pattern = allowEvmMarketId ? EVM_MARKET_IDENTITY_PATTERN : EVM_ADDRESS_PATTERN;
+    if (!pattern.test(value) || /^0x0+$/u.test(value)) return invalid();
+    return value;
+  }
+  const decoded = decodeBase58(value);
+  if (
+    decoded === null ||
+    decoded.length !== 32 ||
+    encodeBase58(decoded) !== value ||
+    decoded.every((byte) => byte === 0)
+  ) {
+    return invalid();
+  }
+  return value;
+}
+
+function positiveDecimal(value: unknown): string {
+  if (typeof value !== 'string' || !POSITIVE_DECIMAL_PATTERN.test(value)) return invalid();
+  return value;
+}
+
+function assetSymbols(value: unknown): readonly ProductionLiveReadAssetSymbol[] {
+  const allowed = Object.freeze(['PYUSD', 'USDC', 'USDT'] as const);
+  if (!Array.isArray(value) || value.length === 0 || value.length > allowed.length)
+    return invalid();
+  let previousIndex = -1;
+  const symbols = value.map((candidate) => {
+    const index = allowed.findIndex((symbol) => symbol === candidate);
+    if (index <= previousIndex) return invalid();
+    previousIndex = index;
+    return allowed[index] as ProductionLiveReadAssetSymbol;
+  });
+  return Object.freeze(symbols);
+}
+
+function providerEvidence(
+  value: unknown,
+  expected: ProductionLiveReadProviderScope,
+  issuedAtMilliseconds: number,
+  expiresAtMilliseconds: number,
+): ProductionProviderLiveReadEvidence {
+  const parsed = record(value, PROVIDER_EVIDENCE_KEYS);
+  if (
+    parsed.schemaVersion !== 1 ||
+    parsed.artifactType !== 'PRODUCTION_PROVIDER_LIVE_READ_EVIDENCE' ||
+    parsed.providerId !== expected.providerId ||
+    parsed.networkId !== expected.networkId
+  ) {
+    return invalid();
+  }
+
+  const deployment = record(parsed.deployment, PROVIDER_DEPLOYMENT_KEYS);
+  const expectedIdentityKind =
+    expected.networkId === 'eip155:1' ? 'EVM_CONTRACT_SET' : 'SOLANA_PROGRAM_SET';
+  if (deployment.identityKind !== expectedIdentityKind) return invalid();
+
+  const market = record(parsed.market, PROVIDER_MARKET_KEYS);
+  const sourcePair = record(parsed.sourcePair, PROVIDER_SOURCE_PAIR_KEYS);
+  const primarySourceId = machineId(sourcePair.primarySourceId);
+  const primaryOperatorId = machineId(sourcePair.primaryOperatorId);
+  const corroboratingSourceId = machineId(sourcePair.corroboratingSourceId);
+  const corroboratingOperatorId = machineId(sourcePair.corroboratingOperatorId);
+  if (primarySourceId === corroboratingSourceId || primaryOperatorId === corroboratingOperatorId) {
+    return invalid();
+  }
+
+  const observation = record(parsed.observation, PROVIDER_OBSERVATION_KEYS);
+  const observedAt = timestamp(observation.observedAt);
+  const staleAfter = timestamp(observation.staleAfter);
+  const candidateAnchor = positiveDecimal(observation.candidateAnchor);
+  const finalizedAnchor = positiveDecimal(observation.finalizedAnchor);
+  const expectedFinalityModel =
+    expected.networkId === 'eip155:1' ? 'ETHEREUM_FINALIZED_BLOCK' : 'SOLANA_FINALIZED_ROOT';
+  if (
+    observation.finalityModel !== expectedFinalityModel ||
+    observedAt.milliseconds > issuedAtMilliseconds ||
+    issuedAtMilliseconds - observedAt.milliseconds >
+      MAX_PRODUCTION_EVIDENCE_OBSERVATION_LEAD_MILLISECONDS ||
+    staleAfter.milliseconds <= issuedAtMilliseconds ||
+    staleAfter.milliseconds < expiresAtMilliseconds ||
+    staleAfter.milliseconds <= observedAt.milliseconds ||
+    staleAfter.milliseconds - observedAt.milliseconds >
+      MAX_PRODUCTION_EVIDENCE_BUNDLE_VALIDITY_MILLISECONDS ||
+    BigInt(finalizedAnchor) < BigInt(candidateAnchor)
+  ) {
+    return invalid();
+  }
+
+  const adapter = record(parsed.adapter, PROVIDER_ADAPTER_KEYS);
+  if (
+    adapter.readOnlyMethodsOnly !== 'PASS' ||
+    adapter.staleFailure !== 'UNAVAILABLE' ||
+    adapter.divergenceFailure !== 'UNAVAILABLE' ||
+    adapter.incompleteFailure !== 'UNAVAILABLE' ||
+    adapter.regressionFailure !== 'UNAVAILABLE' ||
+    adapter.maySign !== false ||
+    adapter.mayBroadcast !== false
+  ) {
+    return invalid();
+  }
+
+  const retainedCapture = record(parsed.retainedCapture, PROVIDER_CAPTURE_KEYS);
+  const collectionStartedAt = timestamp(retainedCapture.collectionStartedAt);
+  const collectionCompletedAt = timestamp(retainedCapture.collectionCompletedAt);
+  if (
+    retainedCapture.format !== 'SANITIZED_CANONICAL_JSON_V1' ||
+    collectionStartedAt.milliseconds >= collectionCompletedAt.milliseconds ||
+    collectionCompletedAt.text !== observedAt.text ||
+    collectionCompletedAt.milliseconds - collectionStartedAt.milliseconds >
+      MAX_PRODUCTION_EVIDENCE_OBSERVATION_LEAD_MILLISECONDS
+  ) {
+    return invalid();
+  }
+
+  const risk = record(parsed.risk, PROVIDER_RISK_KEYS);
+  if (
+    risk.status !== 'ACCEPTED_FOR_READ_ONLY' ||
+    (risk.classification !== 'LOW' &&
+      risk.classification !== 'MODERATE' &&
+      risk.classification !== 'HIGH')
+  ) {
+    return invalid();
+  }
+  const riskDecisionSha256 = evidenceSha256(risk.decisionSha256);
+  const riskApprovalReferenceId = safeReference(risk.approvalReferenceId);
+
+  const operations = record(parsed.operations, PROVIDER_OPERATIONS_KEYS);
+  if (
+    operations.providerKillSwitchExercise !== 'PASS' ||
+    operations.networkKillSwitchExercise !== 'PASS'
+  ) {
+    return invalid();
+  }
+
+  const independentAcceptance = record(parsed.independentAcceptance, PROVIDER_ACCEPTANCE_KEYS);
+  const reviewedAt = timestamp(independentAcceptance.reviewedAt);
+  const independentDecisionSha256 = evidenceSha256(independentAcceptance.decisionSha256);
+  const independentApprovalReferenceId = safeReference(independentAcceptance.approvalReferenceId);
+  if (
+    independentAcceptance.status !== 'ACCEPTED' ||
+    reviewedAt.milliseconds < observedAt.milliseconds ||
+    reviewedAt.milliseconds > issuedAtMilliseconds ||
+    independentDecisionSha256 === riskDecisionSha256 ||
+    independentApprovalReferenceId === riskApprovalReferenceId
+  ) {
+    return invalid();
+  }
+
+  return deepFreeze({
+    schemaVersion: 1,
+    artifactType: 'PRODUCTION_PROVIDER_LIVE_READ_EVIDENCE',
+    providerId: expected.providerId,
+    protocolId: protocolId(parsed.protocolId, expected.protocolId),
+    networkId: expected.networkId,
+    deployment: {
+      identityKind: expectedIdentityKind,
+      deploymentIdentity: chainIdentity(deployment.deploymentIdentity, expected.networkId),
+      runtimeIdentity: chainIdentity(deployment.runtimeIdentity, expected.networkId),
+      marketIdentity: chainIdentity(deployment.marketIdentity, expected.networkId, true),
+      runtimeCodeSetSha256: evidenceSha256(deployment.runtimeCodeSetSha256),
+      identityEvidenceSha256: evidenceSha256(deployment.identityEvidenceSha256),
+    },
+    market: {
+      assetSymbols: assetSymbols(market.assetSymbols),
+      assetIdentitySetSha256: evidenceSha256(market.assetIdentitySetSha256),
+      oracleIdentitySetSha256: evidenceSha256(market.oracleIdentitySetSha256),
+      pauseAndCapsEvidenceSha256: evidenceSha256(market.pauseAndCapsEvidenceSha256),
+    },
+    sourcePair: {
+      primarySourceId,
+      primaryOperatorId,
+      corroboratingSourceId,
+      corroboratingOperatorId,
+      sourcePairEvidenceSha256: evidenceSha256(sourcePair.sourcePairEvidenceSha256),
+    },
+    observation: {
+      observedAt: observedAt.text,
+      staleAfter: staleAfter.text,
+      finalityModel: expectedFinalityModel,
+      candidateAnchor,
+      finalizedAnchor,
+      blockIdentitySha256: evidenceSha256(observation.blockIdentitySha256),
+      freshnessPolicySha256: evidenceSha256(observation.freshnessPolicySha256),
+      finalityEvidenceSha256: evidenceSha256(observation.finalityEvidenceSha256),
+    },
+    adapter: {
+      adapterArtifactSha256: evidenceSha256(adapter.adapterArtifactSha256),
+      allowedReadMethodsSha256: evidenceSha256(adapter.allowedReadMethodsSha256),
+      runtimeCompositionEvidenceSha256: evidenceSha256(adapter.runtimeCompositionEvidenceSha256),
+      readOnlyMethodsOnly: 'PASS',
+      staleFailure: 'UNAVAILABLE',
+      divergenceFailure: 'UNAVAILABLE',
+      incompleteFailure: 'UNAVAILABLE',
+      regressionFailure: 'UNAVAILABLE',
+      maySign: false,
+      mayBroadcast: false,
+    },
+    retainedCapture: {
+      format: 'SANITIZED_CANONICAL_JSON_V1',
+      captureSha256: evidenceSha256(retainedCapture.captureSha256),
+      collectionStartedAt: collectionStartedAt.text,
+      collectionCompletedAt: collectionCompletedAt.text,
+    },
+    risk: {
+      status: 'ACCEPTED_FOR_READ_ONLY',
+      classification: risk.classification,
+      decisionSha256: riskDecisionSha256,
+      approvalReferenceId: riskApprovalReferenceId,
+    },
+    operations: {
+      providerKillSwitchExercise: 'PASS',
+      networkKillSwitchExercise: 'PASS',
+      monitoringEvidenceSha256: evidenceSha256(operations.monitoringEvidenceSha256),
+      spendAlarmEvidenceSha256: evidenceSha256(operations.spendAlarmEvidenceSha256),
+      outageAndDriftRunbookSha256: evidenceSha256(operations.outageAndDriftRunbookSha256),
+    },
+    independentAcceptance: {
+      status: 'ACCEPTED',
+      reviewedAt: reviewedAt.text,
+      decisionSha256: independentDecisionSha256,
+      approvalReferenceId: independentApprovalReferenceId,
+    },
+  });
 }
 
 function observation(
@@ -812,28 +1341,50 @@ function readEvidenceIndex(
   value: unknown,
   sourceRevision: string,
   directoryConfigurationSha256: string,
+  issuedAtMilliseconds: number,
+  expiresAtMilliseconds: number,
 ): ProductionLiveReadEvidenceIndex {
   const parsed = record(value, READ_EVIDENCE_KEYS);
   if (
-    parsed.schemaVersion !== 1 ||
+    parsed.schemaVersion !== 2 ||
     parsed.artifactType !== 'PRODUCTION_LIVE_READ_EVIDENCE_INDEX' ||
     parsed.status !== 'ACCEPTED' ||
     parsed.sourceRevision !== sourceRevision ||
     parsed.directoryConfigurationSha256 !== directoryConfigurationSha256 ||
-    parsed.adapterBindings !== 'COMPLETE' ||
-    parsed.compositionEvidence !== 'PASS'
+    !Array.isArray(parsed.providerEvidence) ||
+    parsed.providerEvidence.length !== PRODUCTION_LIVE_READ_PROVIDER_SCOPE.length
   ) {
     return invalid();
   }
-  return Object.freeze({
-    schemaVersion: 1,
+
+  const ids = providerIds(parsed.providerIds);
+  const evidence = parsed.providerEvidence.map((candidate, index) => {
+    const expected = PRODUCTION_LIVE_READ_PROVIDER_SCOPE[index];
+    if (expected === undefined || ids[index] !== expected.providerId) return invalid();
+    return providerEvidence(candidate, expected, issuedAtMilliseconds, expiresAtMilliseconds);
+  });
+  if (
+    new Set(evidence.map(({ deployment }) => deployment.deploymentIdentity)).size !==
+      evidence.length ||
+    new Set(evidence.map(({ deployment }) => deployment.runtimeIdentity)).size !==
+      evidence.length ||
+    new Set(evidence.map(({ deployment }) => deployment.marketIdentity)).size !== evidence.length ||
+    new Set(evidence.map(({ retainedCapture }) => retainedCapture.captureSha256)).size !==
+      evidence.length ||
+    new Set(evidence.map(({ independentAcceptance }) => independentAcceptance.decisionSha256))
+      .size !== evidence.length
+  ) {
+    return invalid();
+  }
+
+  return deepFreeze({
+    schemaVersion: 2,
     artifactType: 'PRODUCTION_LIVE_READ_EVIDENCE_INDEX',
     status: 'ACCEPTED',
     sourceRevision,
     directoryConfigurationSha256,
-    providerIds: providerIds(parsed.providerIds),
-    adapterBindings: 'COMPLETE',
-    compositionEvidence: 'PASS',
+    providerIds: ids,
+    providerEvidence: evidence,
   });
 }
 
@@ -894,6 +1445,8 @@ function content(value: unknown): ProductionEvidenceBundleContent {
       parsed.liveReadEvidenceIndex,
       parsed.sourceRevision,
       directoryConfigurationSha256,
+      issuedAt.milliseconds,
+      expiresAt.milliseconds,
     ),
     mainnetWriteEvidenceIndex: null,
   });
@@ -1100,6 +1653,10 @@ function validateContext(
   if (
     issuedAt.milliseconds > evaluatedAt.milliseconds ||
     evaluatedAt.milliseconds >= expiresAt.milliseconds ||
+    validatedContent.liveReadEvidenceIndex.providerEvidence.some(
+      ({ observation: providerObservation }) =>
+        evaluatedAt.milliseconds >= timestamp(providerObservation.staleAfter).milliseconds,
+    ) ||
     (minimumEvaluatedAtMilliseconds !== undefined &&
       evaluatedAt.milliseconds < minimumEvaluatedAtMilliseconds)
   ) {

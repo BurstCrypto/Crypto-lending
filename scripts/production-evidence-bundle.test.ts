@@ -22,6 +22,7 @@ import {
   MAX_PRODUCTION_EVIDENCE_BUNDLE_BYTES,
   parseAndVerifyProductionEvidenceBundleBytes,
   PRODUCTION_EVIDENCE_AUTHORITY_KEY_REGISTRY,
+  PRODUCTION_LIVE_READ_PROVIDER_SCOPE,
   ProductionEvidenceBundleInvalidError,
   productionEvidenceBundleSigningBytes,
   revalidateProductionEvidenceBundleForApplicationWithTestRegistries,
@@ -33,6 +34,8 @@ import {
   type ProductionEvidenceSignature,
   type ProductionEvidenceSignerRole,
   type ProductionLiveReadEvidenceIndex,
+  type ProductionLiveReadProviderScope,
+  type ProductionProviderLiveReadEvidence,
   type ProductionRdsMasterLifecycleEvidence,
   type TestProductionEvidenceBundleVerificationOptions,
   type UnsignedProductionEvidenceBundle,
@@ -69,7 +72,9 @@ const SOURCE_REVISION = 'a'.repeat(40);
 const MANIFEST_SHA256 = '1'.repeat(64);
 const DIRECTORY_SHA256 = 'b'.repeat(64);
 const EVALUATED_AT = '2026-09-04T12:00:00.000Z';
-const PROVIDER_IDS = Object.freeze(Array.from({ length: 10 }, (_, index) => `provider-${index}`));
+const PROVIDER_IDS = Object.freeze(
+  PRODUCTION_LIVE_READ_PROVIDER_SCOPE.map(({ providerId }) => providerId),
+);
 const AWS_ACCOUNT_ID = '123456789012';
 const AWS_REGION = 'us-east-1';
 const APPLICATION_DATA_KEY_ARN = `arn:aws:kms:${AWS_REGION}:${AWS_ACCOUNT_ID}:key/11111111-1111-4111-8111-111111111111`;
@@ -229,15 +234,133 @@ function liveReadEvidenceIndex(
   sourceRevision: string = SOURCE_REVISION,
 ): ProductionLiveReadEvidenceIndex {
   return Object.freeze({
-    schemaVersion: 1,
+    schemaVersion: 2,
     artifactType: 'PRODUCTION_LIVE_READ_EVIDENCE_INDEX',
     status: 'ACCEPTED',
     sourceRevision,
     directoryConfigurationSha256: DIRECTORY_SHA256,
     providerIds: PROVIDER_IDS,
-    adapterBindings: 'COMPLETE',
-    compositionEvidence: 'PASS',
+    providerEvidence: Object.freeze(
+      PRODUCTION_LIVE_READ_PROVIDER_SCOPE.map((scope, index) =>
+        providerLiveReadEvidence(scope, index),
+      ),
+    ),
   });
+}
+
+function digest(seed: number): string {
+  return seed.toString(16).padStart(64, '0');
+}
+
+function base58Identity(seed: number): string {
+  const alphabet = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+  const bytes = new Uint8Array(32);
+  bytes[0] = (seed % 254) + 1;
+  bytes[31] = ((seed * 17) % 254) + 1;
+  const digits = [0];
+  for (const byte of bytes) {
+    let carry = byte;
+    for (let index = 0; index < digits.length; index += 1) {
+      carry += (digits[index] ?? 0) << 8;
+      digits[index] = carry % 58;
+      carry = Math.floor(carry / 58);
+    }
+    while (carry > 0) {
+      digits.push(carry % 58);
+      carry = Math.floor(carry / 58);
+    }
+  }
+  return digits
+    .reverse()
+    .map((digit) => alphabet[digit] ?? '')
+    .join('');
+}
+
+function providerIdentity(scope: ProductionLiveReadProviderScope, seed: number): string {
+  if (scope.networkId === 'eip155:1') return `0x${seed.toString(16).padStart(40, '0')}`;
+  return base58Identity(seed);
+}
+
+function providerLiveReadEvidence(
+  scope: ProductionLiveReadProviderScope,
+  index: number,
+): ProductionProviderLiveReadEvidence {
+  return {
+    schemaVersion: 1,
+    artifactType: 'PRODUCTION_PROVIDER_LIVE_READ_EVIDENCE',
+    providerId: scope.providerId,
+    protocolId: scope.protocolId,
+    networkId: scope.networkId,
+    deployment: {
+      identityKind: scope.networkId === 'eip155:1' ? 'EVM_CONTRACT_SET' : 'SOLANA_PROGRAM_SET',
+      deploymentIdentity: providerIdentity(scope, index + 1),
+      runtimeIdentity: providerIdentity(scope, index + 21),
+      marketIdentity: providerIdentity(scope, index + 41),
+      runtimeCodeSetSha256: digest(index + 51),
+      identityEvidenceSha256: digest(index + 1),
+    },
+    market: {
+      assetSymbols: Object.freeze(['USDC']),
+      assetIdentitySetSha256: digest(index + 21),
+      oracleIdentitySetSha256: digest(index + 41),
+      pauseAndCapsEvidenceSha256: digest(index + 61),
+    },
+    sourcePair: {
+      primarySourceId: `rpc-primary-${index}`,
+      primaryOperatorId: `operator-primary-${index}`,
+      corroboratingSourceId: `rpc-corroborating-${index}`,
+      corroboratingOperatorId: `operator-corroborating-${index}`,
+      sourcePairEvidenceSha256: digest(index + 81),
+    },
+    observation: {
+      observedAt: '2026-09-04T11:23:00.000Z',
+      staleAfter: '2026-09-04T13:30:00.000Z',
+      finalityModel:
+        scope.networkId === 'eip155:1' ? 'ETHEREUM_FINALIZED_BLOCK' : 'SOLANA_FINALIZED_ROOT',
+      candidateAnchor: `${1_000 + index}`,
+      finalizedAnchor: `${1_010 + index}`,
+      blockIdentitySha256: digest(index + 101),
+      freshnessPolicySha256: digest(index + 121),
+      finalityEvidenceSha256: digest(index + 141),
+    },
+    adapter: {
+      adapterArtifactSha256: digest(index + 161),
+      allowedReadMethodsSha256: digest(index + 181),
+      runtimeCompositionEvidenceSha256: digest(index + 201),
+      readOnlyMethodsOnly: 'PASS',
+      staleFailure: 'UNAVAILABLE',
+      divergenceFailure: 'UNAVAILABLE',
+      incompleteFailure: 'UNAVAILABLE',
+      regressionFailure: 'UNAVAILABLE',
+      maySign: false,
+      mayBroadcast: false,
+    },
+    retainedCapture: {
+      format: 'SANITIZED_CANONICAL_JSON_V1',
+      captureSha256: digest(index + 221),
+      collectionStartedAt: '2026-09-04T11:15:00.000Z',
+      collectionCompletedAt: '2026-09-04T11:23:00.000Z',
+    },
+    risk: {
+      status: 'ACCEPTED_FOR_READ_ONLY',
+      classification: 'MODERATE',
+      decisionSha256: digest(index + 241),
+      approvalReferenceId: `risk/provider-${scope.providerId}`,
+    },
+    operations: {
+      providerKillSwitchExercise: 'PASS',
+      networkKillSwitchExercise: 'PASS',
+      monitoringEvidenceSha256: digest(index + 261),
+      spendAlarmEvidenceSha256: digest(index + 281),
+      outageAndDriftRunbookSha256: digest(index + 301),
+    },
+    independentAcceptance: {
+      status: 'ACCEPTED',
+      reviewedAt: '2026-09-04T11:29:00.000Z',
+      decisionSha256: digest(index + 321),
+      approvalReferenceId: `security/provider-${scope.providerId}`,
+    },
+  };
 }
 
 function validRdsMasterLifecycleEvidence(): ProductionRdsMasterLifecycleEvidence {
@@ -343,7 +466,7 @@ function unsignedBundle(
   content: ProductionEvidenceBundleContent = validContent(),
 ): UnsignedProductionEvidenceBundle {
   return Object.freeze({
-    schemaVersion: 2,
+    schemaVersion: 3,
     artifactType: 'PRODUCTION_CONTROLLED_EVIDENCE_BUNDLE',
     content,
   });
@@ -418,6 +541,36 @@ function mutableRecord(value: unknown): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
+function mutableArray(value: unknown): unknown[] {
+  assert.ok(Array.isArray(value));
+  return value;
+}
+
+function providerEvidenceAt(
+  index: Record<string, unknown>,
+  position: number,
+): Record<string, unknown> {
+  const candidate = mutableArray(index.providerEvidence)[position];
+  assert.ok(candidate !== undefined);
+  return mutableRecord(candidate);
+}
+
+function expectInvalidLiveReadMutation(
+  mutate: (index: Record<string, unknown>) => void,
+  label?: string,
+): void {
+  const candidate = structuredClone(validContent()) as unknown as Record<string, unknown>;
+  mutate(mutableRecord(candidate.liveReadEvidenceIndex));
+  assert.throws(
+    () =>
+      productionEvidenceBundleSigningBytes(
+        unsignedBundle(candidate as unknown as ProductionEvidenceBundleContent),
+      ),
+    ProductionEvidenceBundleInvalidError,
+    label,
+  );
+}
+
 function expectInvalidRdsMasterLifecycleMutation(
   mutate: (evidence: Record<string, unknown>) => void,
   options: TestProductionEvidenceBundleVerificationOptions = testOptions(),
@@ -444,7 +597,7 @@ test('dual-role Ed25519 quorum verifies one manifest, target, and read-only payl
   );
 
   assert.equal(verified.signatureValidated, true);
-  assert.equal(verified.schemaVersion, 2);
+  assert.equal(verified.schemaVersion, 3);
   assert.deepEqual(verified.verifiedSignerRoles, [
     'DEPLOYMENT_EVIDENCE_ISSUER',
     'INDEPENDENT_RELEASE_VERIFIER',
@@ -467,7 +620,7 @@ test('dual-role Ed25519 quorum verifies one manifest, target, and read-only payl
   assert.equal(Object.isFrozen(verified.content.rdsMasterLifecycleEvidence.restore), true);
   assert.match(
     productionEvidenceBundleSigningBytes(unsignedBundle()).toString('utf8'),
-    /^crypto-lending:production-controlled-evidence-bundle:v2\n/u,
+    /^crypto-lending:production-controlled-evidence-bundle:v3\n/u,
   );
   assert.match(verified.bundleSha256, /^[a-f0-9]{64}$/u);
   assert.equal(Object.isFrozen(verified), true);
@@ -481,6 +634,492 @@ test('dual-role Ed25519 quorum verifies one manifest, target, and read-only payl
       releaseManifest: options.releaseManifest,
     }),
   );
+});
+
+test('live-read index v2 binds the exact ordered Ethereum and Solana provider inventory', () => {
+  const verified = verifyProductionEvidenceBundleBytesWithTestRegistries(
+    signedBundleBytes(),
+    testOptions(),
+  );
+  const index = verified.content.liveReadEvidenceIndex;
+  assert.equal(index.schemaVersion, 2);
+  assert.deepEqual(index.providerIds, [
+    'aave',
+    'compound',
+    'euler',
+    'gearbox',
+    'jupiter',
+    'kamino',
+    'morpho',
+    'project-0',
+    'save',
+    'spark',
+  ]);
+  assert.deepEqual(
+    index.providerEvidence.map(({ providerId }) => providerId),
+    index.providerIds,
+  );
+  assert.equal(
+    index.providerEvidence.filter(({ networkId }) => networkId === 'eip155:1').length,
+    6,
+  );
+  assert.equal(
+    index.providerEvidence.filter(({ networkId }) => networkId.startsWith('solana:')).length,
+    4,
+  );
+  for (const evidence of index.providerEvidence) {
+    assert.equal(Object.isFrozen(evidence), true);
+    assert.equal(Object.isFrozen(evidence.deployment), true);
+    assert.equal(Object.isFrozen(evidence.market.assetSymbols), true);
+    assert.equal(Object.isFrozen(evidence.sourcePair), true);
+    assert.equal(Object.isFrozen(evidence.observation), true);
+    assert.equal(Object.isFrozen(evidence.adapter), true);
+    assert.equal(Object.isFrozen(evidence.retainedCapture), true);
+    assert.equal(Object.isFrozen(evidence.risk), true);
+    assert.equal(Object.isFrozen(evidence.operations), true);
+    assert.equal(Object.isFrozen(evidence.independentAcceptance), true);
+  }
+
+  const mutations: readonly (readonly [string, (index: Record<string, unknown>) => void])[] = [
+    [
+      'old summary index schema',
+      (candidate) => {
+        candidate.schemaVersion = 1;
+        delete candidate.providerEvidence;
+        candidate.adapterBindings = 'COMPLETE';
+        candidate.compositionEvidence = 'PASS';
+      },
+    ],
+    ['unexpected index field', (candidate) => Object.assign(candidate, { evidenceComplete: true })],
+    ['missing provider id', (candidate) => mutableArray(candidate.providerIds).pop()],
+    ['extra provider id', (candidate) => mutableArray(candidate.providerIds).push('other')],
+    ['provider id order drift', (candidate) => mutableArray(candidate.providerIds).reverse()],
+    ['missing provider evidence', (candidate) => mutableArray(candidate.providerEvidence).pop()],
+    [
+      'provider evidence order drift',
+      (candidate) => mutableArray(candidate.providerEvidence).reverse(),
+    ],
+    [
+      'provider identity mismatch',
+      (candidate) => {
+        providerEvidenceAt(candidate, 0).providerId = 'compound';
+      },
+    ],
+    [
+      'protocol identity mismatch',
+      (candidate) => {
+        providerEvidenceAt(candidate, 0).protocolId = 'compound-iii';
+      },
+    ],
+    [
+      'network identity mismatch',
+      (candidate) => {
+        providerEvidenceAt(candidate, 0).networkId = 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp';
+      },
+    ],
+    [
+      'duplicate deployment identity',
+      (candidate) => {
+        const first = mutableRecord(providerEvidenceAt(candidate, 0).deployment);
+        mutableRecord(providerEvidenceAt(candidate, 1).deployment).deploymentIdentity =
+          first.deploymentIdentity;
+      },
+    ],
+    [
+      'duplicate runtime identity',
+      (candidate) => {
+        const first = mutableRecord(providerEvidenceAt(candidate, 0).deployment);
+        mutableRecord(providerEvidenceAt(candidate, 1).deployment).runtimeIdentity =
+          first.runtimeIdentity;
+      },
+    ],
+    [
+      'duplicate market identity',
+      (candidate) => {
+        const first = mutableRecord(providerEvidenceAt(candidate, 0).deployment);
+        mutableRecord(providerEvidenceAt(candidate, 1).deployment).marketIdentity =
+          first.marketIdentity;
+      },
+    ],
+    [
+      'duplicate retained capture',
+      (candidate) => {
+        const first = mutableRecord(providerEvidenceAt(candidate, 0).retainedCapture);
+        mutableRecord(providerEvidenceAt(candidate, 1).retainedCapture).captureSha256 =
+          first.captureSha256;
+      },
+    ],
+    [
+      'duplicate independent decision',
+      (candidate) => {
+        const first = mutableRecord(providerEvidenceAt(candidate, 0).independentAcceptance);
+        mutableRecord(providerEvidenceAt(candidate, 1).independentAcceptance).decisionSha256 =
+          first.decisionSha256;
+      },
+    ],
+  ];
+  for (const [label, mutate] of mutations) expectInvalidLiveReadMutation(mutate, label);
+});
+
+test('per-provider evidence strictly binds deployment, assets, oracle, caps, and source independence', () => {
+  const mutations: readonly (readonly [string, (index: Record<string, unknown>) => void])[] = [
+    [
+      'unexpected provider field',
+      (index) => {
+        Object.assign(providerEvidenceAt(index, 0), { approval: true });
+      },
+    ],
+    [
+      'wrong Ethereum identity kind',
+      (index) => {
+        mutableRecord(providerEvidenceAt(index, 0).deployment).identityKind = 'SOLANA_PROGRAM_SET';
+      },
+    ],
+    [
+      'zero Ethereum deployment',
+      (index) => {
+        mutableRecord(providerEvidenceAt(index, 0).deployment).deploymentIdentity =
+          `0x${'0'.repeat(40)}`;
+      },
+    ],
+    [
+      'noncanonical Ethereum runtime identity',
+      (index) => {
+        mutableRecord(providerEvidenceAt(index, 0).deployment).runtimeIdentity =
+          `0x${'A'.repeat(40)}`;
+      },
+    ],
+    [
+      'invalid Ethereum market identity',
+      (index) => {
+        mutableRecord(providerEvidenceAt(index, 0).deployment).marketIdentity =
+          `0x${'a'.repeat(39)}`;
+      },
+    ],
+    [
+      'invalid Solana program identity',
+      (index) => {
+        mutableRecord(providerEvidenceAt(index, 4).deployment).deploymentIdentity = '1'.repeat(32);
+      },
+    ],
+    [
+      'non-32-byte Solana runtime identity',
+      (index) => {
+        mutableRecord(providerEvidenceAt(index, 4).deployment).runtimeIdentity =
+          '22222222222222222222222222222222';
+      },
+    ],
+    [
+      'zero identity-evidence digest',
+      (index) => {
+        mutableRecord(providerEvidenceAt(index, 0).deployment).identityEvidenceSha256 = '0'.repeat(
+          64,
+        );
+      },
+    ],
+    [
+      'zero runtime-code-set digest',
+      (index) => {
+        mutableRecord(providerEvidenceAt(index, 0).deployment).runtimeCodeSetSha256 = '0'.repeat(
+          64,
+        );
+      },
+    ],
+    [
+      'empty asset inventory',
+      (index) => {
+        mutableRecord(providerEvidenceAt(index, 0).market).assetSymbols = [];
+      },
+    ],
+    [
+      'duplicate asset inventory',
+      (index) => {
+        mutableRecord(providerEvidenceAt(index, 0).market).assetSymbols = ['USDC', 'USDC'];
+      },
+    ],
+    [
+      'nondeterministic asset ordering',
+      (index) => {
+        mutableRecord(providerEvidenceAt(index, 0).market).assetSymbols = ['USDT', 'USDC'];
+      },
+    ],
+    [
+      'unsupported asset',
+      (index) => {
+        mutableRecord(providerEvidenceAt(index, 0).market).assetSymbols = ['BTC'];
+      },
+    ],
+    [
+      'missing oracle digest',
+      (index) => {
+        mutableRecord(providerEvidenceAt(index, 0).market).oracleIdentitySetSha256 = 'missing';
+      },
+    ],
+    [
+      'missing cap evidence digest',
+      (index) => {
+        mutableRecord(providerEvidenceAt(index, 0).market).pauseAndCapsEvidenceSha256 = '0'.repeat(
+          64,
+        );
+      },
+    ],
+    [
+      'same source identity',
+      (index) => {
+        const pair = mutableRecord(providerEvidenceAt(index, 0).sourcePair);
+        pair.corroboratingSourceId = pair.primarySourceId;
+      },
+    ],
+    [
+      'same source operator',
+      (index) => {
+        const pair = mutableRecord(providerEvidenceAt(index, 0).sourcePair);
+        pair.corroboratingOperatorId = pair.primaryOperatorId;
+      },
+    ],
+    [
+      'source identity case alias',
+      (index) => {
+        mutableRecord(providerEvidenceAt(index, 0).sourcePair).corroboratingSourceId =
+          'RPC-PRIMARY-0';
+      },
+    ],
+    [
+      'operator identity case alias',
+      (index) => {
+        mutableRecord(providerEvidenceAt(index, 0).sourcePair).corroboratingOperatorId =
+          'OPERATOR-PRIMARY-0';
+      },
+    ],
+    [
+      'ambiguous source separator',
+      (index) => {
+        mutableRecord(providerEvidenceAt(index, 0).sourcePair).primarySourceId = 'rpc/primary-0';
+      },
+    ],
+    [
+      'ambiguous operator separator',
+      (index) => {
+        mutableRecord(providerEvidenceAt(index, 0).sourcePair).primaryOperatorId =
+          'operator--primary-0';
+      },
+    ],
+    [
+      'unsafe source reference',
+      (index) => {
+        mutableRecord(providerEvidenceAt(index, 0).sourcePair).primarySourceId = '../secret';
+      },
+    ],
+    [
+      'missing source-pair digest',
+      (index) => {
+        mutableRecord(providerEvidenceAt(index, 0).sourcePair).sourcePairEvidenceSha256 =
+          '0'.repeat(64);
+      },
+    ],
+  ];
+  for (const [label, mutate] of mutations) expectInvalidLiveReadMutation(mutate, label);
+});
+
+test('per-provider observation, adapter, capture, risk, operations, and acceptance fail closed', () => {
+  const mutations: readonly (readonly [string, (index: Record<string, unknown>) => void])[] = [
+    [
+      'wrong chain finality model',
+      (index) => {
+        mutableRecord(providerEvidenceAt(index, 0).observation).finalityModel =
+          'SOLANA_FINALIZED_ROOT';
+      },
+    ],
+    [
+      'observation after bundle issuance',
+      (index) => {
+        mutableRecord(providerEvidenceAt(index, 0).observation).observedAt =
+          '2026-09-04T11:31:00.000Z';
+      },
+    ],
+    [
+      'observation too old when bundle is issued',
+      (index) => {
+        const evidence = providerEvidenceAt(index, 0);
+        mutableRecord(evidence.observation).observedAt = '2026-09-04T10:29:59.999Z';
+        const capture = mutableRecord(evidence.retainedCapture);
+        capture.collectionStartedAt = '2026-09-04T10:20:00.000Z';
+        capture.collectionCompletedAt = '2026-09-04T10:29:59.999Z';
+      },
+    ],
+    [
+      'stale at bundle issuance',
+      (index) => {
+        mutableRecord(providerEvidenceAt(index, 0).observation).staleAfter =
+          '2026-09-04T11:30:00.000Z';
+      },
+    ],
+    [
+      'stale before bundle expiry',
+      (index) => {
+        mutableRecord(providerEvidenceAt(index, 0).observation).staleAfter =
+          '2026-09-04T13:29:59.999Z';
+      },
+    ],
+    [
+      'unbounded freshness interval',
+      (index) => {
+        mutableRecord(providerEvidenceAt(index, 0).observation).staleAfter =
+          '2026-09-05T11:23:00.001Z';
+      },
+    ],
+    [
+      'noncanonical anchor',
+      (index) => {
+        mutableRecord(providerEvidenceAt(index, 0).observation).candidateAnchor = '01';
+      },
+    ],
+    [
+      'finalized anchor behind candidate',
+      (index) => {
+        const observation = mutableRecord(providerEvidenceAt(index, 0).observation);
+        observation.candidateAnchor = '1011';
+        observation.finalizedAnchor = '1010';
+      },
+    ],
+    [
+      'missing finality evidence',
+      (index) => {
+        mutableRecord(providerEvidenceAt(index, 0).observation).finalityEvidenceSha256 = '0'.repeat(
+          64,
+        );
+      },
+    ],
+    [
+      'adapter can sign',
+      (index) => {
+        mutableRecord(providerEvidenceAt(index, 0).adapter).maySign = true;
+      },
+    ],
+    [
+      'adapter can broadcast',
+      (index) => {
+        mutableRecord(providerEvidenceAt(index, 0).adapter).mayBroadcast = true;
+      },
+    ],
+    [
+      'adapter accepts stale data',
+      (index) => {
+        mutableRecord(providerEvidenceAt(index, 0).adapter).staleFailure = 'CURRENT';
+      },
+    ],
+    [
+      'adapter accepts divergence',
+      (index) => {
+        mutableRecord(providerEvidenceAt(index, 0).adapter).divergenceFailure = 'AVAILABLE';
+      },
+    ],
+    [
+      'missing runtime-composition evidence',
+      (index) => {
+        mutableRecord(providerEvidenceAt(index, 0).adapter).runtimeCompositionEvidenceSha256 =
+          '0'.repeat(64);
+      },
+    ],
+    [
+      'unsupported capture format',
+      (index) => {
+        mutableRecord(providerEvidenceAt(index, 0).retainedCapture).format =
+          'RAW_PROVIDER_RESPONSE';
+      },
+    ],
+    [
+      'capture does not end at observation',
+      (index) => {
+        mutableRecord(providerEvidenceAt(index, 0).retainedCapture).collectionCompletedAt =
+          '2026-09-04T11:22:59.999Z';
+      },
+    ],
+    [
+      'risk not accepted for read only',
+      (index) => {
+        mutableRecord(providerEvidenceAt(index, 0).risk).status = 'PENDING';
+      },
+    ],
+    [
+      'invalid risk classification',
+      (index) => {
+        mutableRecord(providerEvidenceAt(index, 0).risk).classification = 'UNKNOWN';
+      },
+    ],
+    [
+      'missing risk decision',
+      (index) => {
+        mutableRecord(providerEvidenceAt(index, 0).risk).decisionSha256 = '0'.repeat(64);
+      },
+    ],
+    [
+      'provider kill switch not exercised',
+      (index) => {
+        mutableRecord(providerEvidenceAt(index, 0).operations).providerKillSwitchExercise =
+          'NOT_RUN';
+      },
+    ],
+    [
+      'network kill switch not exercised',
+      (index) => {
+        mutableRecord(providerEvidenceAt(index, 0).operations).networkKillSwitchExercise = 'FAIL';
+      },
+    ],
+    [
+      'missing monitoring evidence',
+      (index) => {
+        mutableRecord(providerEvidenceAt(index, 0).operations).monitoringEvidenceSha256 =
+          '0'.repeat(64);
+      },
+    ],
+    [
+      'acceptance pending',
+      (index) => {
+        mutableRecord(providerEvidenceAt(index, 0).independentAcceptance).status = 'PENDING';
+      },
+    ],
+    [
+      'acceptance predates observation',
+      (index) => {
+        mutableRecord(providerEvidenceAt(index, 0).independentAcceptance).reviewedAt =
+          '2026-09-04T11:22:59.999Z';
+      },
+    ],
+    [
+      'acceptance follows bundle issuance',
+      (index) => {
+        mutableRecord(providerEvidenceAt(index, 0).independentAcceptance).reviewedAt =
+          '2026-09-04T11:30:00.001Z';
+      },
+    ],
+    [
+      'risk and independent acceptance reuse one decision',
+      (index) => {
+        const evidence = providerEvidenceAt(index, 0);
+        mutableRecord(evidence.independentAcceptance).decisionSha256 = mutableRecord(
+          evidence.risk,
+        ).decisionSha256;
+      },
+    ],
+    [
+      'risk and independent acceptance reuse one reference',
+      (index) => {
+        const evidence = providerEvidenceAt(index, 0);
+        mutableRecord(evidence.independentAcceptance).approvalReferenceId = mutableRecord(
+          evidence.risk,
+        ).approvalReferenceId;
+      },
+    ],
+    [
+      'unsafe acceptance reference',
+      (index) => {
+        mutableRecord(providerEvidenceAt(index, 0).independentAcceptance).approvalReferenceId =
+          '..';
+      },
+    ],
+  ];
+  for (const [label, mutate] of mutations) expectInvalidLiveReadMutation(mutate, label);
 });
 
 test('manifest brand, payload hash, and current source revision are all mandatory', () => {
@@ -1587,14 +2226,14 @@ test('additional scoped signatures are verified but do not replace the technical
   ]);
 });
 
-test('schema v2 rejects v1 bundles and every write-authority assertion', () => {
+test('schema v3 rejects older bundles and every write-authority assertion', () => {
   const base = jsonRecord(signedBundleBytes());
   const oldSchema = structuredClone(base);
-  oldSchema.schemaVersion = 1;
+  oldSchema.schemaVersion = 2;
   expectInvalid(() =>
     productionEvidenceBundleSigningBytes({
       ...unsignedBundle(),
-      schemaVersion: 1,
+      schemaVersion: 2,
     } as unknown as UnsignedProductionEvidenceBundle),
   );
   const writeScope = structuredClone(base);
