@@ -37,9 +37,10 @@ test('CI requires the offline secret, transition, and SQS mutation suites', () =
   assert.match(workflow, /^\s+npm run infra:test:sqs\s*$/m);
   assert.match(workflow, /^\s+npm run infra:test:auth-wallet-transition\s*$/m);
   assert.match(workflow, /^\s+npm run infra:test:redis-operator-transition\s*$/m);
+  assert.match(workflow, /^\s+npm run infra:test:production-deployment-intent\s*$/m);
   assert.match(
     workflow,
-    /^\s+npm run infra:test:auth-wallet-transition\s*\r?\n\s+npm run infra:test:credential-transition\s*\r?\n\s+npm run infra:test:redis-operator-transition\s*$/m,
+    /^\s+npm run infra:test:auth-wallet-transition\s*\r?\n\s+npm run infra:test:credential-transition\s*\r?\n\s+npm run infra:test:redis-operator-transition\s*\r?\n\s+npm run infra:test:production-deployment-intent\s*$/m,
   );
   assert.match(workflow, /^\s+npm run security:test:secrets\s*$/m);
 });

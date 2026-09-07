@@ -192,6 +192,18 @@ export const RELEASE_COMPONENTS = Object.freeze([
     requiredFiles: Object.freeze(['.']),
   }),
   Object.freeze({
+    name: 'production-deployment-intent-validator',
+    path: 'infra/aws/validate-production-deployment-intent.mjs',
+    kind: 'file',
+    requiredFiles: Object.freeze(['.']),
+  }),
+  Object.freeze({
+    name: 'production-deployment-intent-inert-example',
+    path: 'infra/aws/production-deployment-intent.example.json',
+    kind: 'file',
+    requiredFiles: Object.freeze(['.']),
+  }),
+  Object.freeze({
     name: 'migration-task-cloudformation',
     path: 'infra/aws/database-migration-task.yaml',
     kind: 'file',

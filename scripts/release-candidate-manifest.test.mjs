@@ -370,6 +370,46 @@ test('binds the inert production infrastructure contract as an exact release com
   assert.throws(() => verifyReleaseManifest(root, manifest), ReleaseManifestError);
 });
 
+test('binds the production deployment-intent validator and inert example exactly', () => {
+  const specifications = [
+    {
+      name: 'production-deployment-intent-validator',
+      path: 'infra/aws/validate-production-deployment-intent.mjs',
+      kind: 'file',
+      requiredFiles: ['.'],
+    },
+    {
+      name: 'production-deployment-intent-inert-example',
+      path: 'infra/aws/production-deployment-intent.example.json',
+      kind: 'file',
+      requiredFiles: ['.'],
+    },
+  ];
+  for (const specification of specifications) {
+    assert.deepEqual(
+      RELEASE_COMPONENTS.find(({ name }) => name === specification.name),
+      specification,
+    );
+    const root = createWorkspace();
+    const manifest = createReleaseManifest(root, SOURCE, BUILDER);
+    const component = manifest.components.find(({ name }) => name === specification.name);
+    const componentPath = resolve(root, specification.path);
+    const reviewedBytes = readFileSync(componentPath);
+    assert.equal(component.path, specification.path);
+    assert.equal(component.kind, 'file');
+    assert.equal(component.fileCount, 1);
+    assert.equal(component.files[0].path, '.');
+    assert.equal(
+      component.files[0].sha256,
+      createHash('sha256').update(reviewedBytes).digest('hex'),
+    );
+    assert.doesNotThrow(() => verifyReleaseManifest(root, manifest));
+
+    appendFileSync(componentPath, 'drift', 'utf8');
+    assert.throws(() => verifyReleaseManifest(root, manifest), ReleaseManifestError);
+  }
+});
+
 test('detects drift in build output and every preflight decision binding', () => {
   const paths = RELEASE_COMPONENTS.map((component) =>
     component.kind === 'file'

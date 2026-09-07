@@ -44,6 +44,24 @@ forged, or byte-drifted contract artifacts instead emit
 also binds the exact contract file, so a release cannot silently omit or
 substitute it.
 
+A standalone offline deployment-intent validator now defines a closed,
+canonical JSON envelope for `PROVISION_INERT`, `ACTIVATE_READ_ONLY`, `ROLLBACK`,
+`EMERGENCY_KILL`, and `DELETE`. It binds the exact deployment coordinates,
+source revision, release manifest, deployment target, infrastructure inputs,
+current/proposed authority, rollback and kill state, and predecessor chain.
+Operational acceptance would require distinct Ed25519 signatures from reviewed
+deployment-owner and independent-security keys. The checked-in production trust
+registry and deployment-target registry are both empty, the checked-in example
+is unsigned and inert, and the validator has no executor; every result retains
+`executionAllowed: false`. Test-only injected keys can exercise verification but
+cannot mint the private production brand. `EMERGENCY_KILL` and `DELETE` require
+the exact zero-count/no-egress/no-write kill state, while rollback cannot
+increase authority and no operation permits financial writes. Predecessor
+validation is a point-in-time check against caller-supplied expected state; any
+future executor must also consume and advance that chain atomically. The release
+manifest binds both the validator and inert example. This source milestone does
+not clear either production-infrastructure blocker or authorize a cloud call.
+
 The application-baseline validator also rejects `NODE_OPTIONS` and unreviewed
 automatic-instrumentation names with the `DD_TRACE`, `NEW_RELIC`, `ELASTIC_APM`,
 or `OTEL` prefixes from every API, web, and worker task `Environment` or
