@@ -534,6 +534,24 @@ test('binds the reviewed Redis revocation sources, package scripts, and task com
   assertRejected(
     replace(
       source,
+      'redisSessionRevocationCli',
+      'installFatalProcessBoundary(logger);',
+      '// fatal process boundary removed',
+    ),
+    /exact reviewed source/u,
+  );
+  assertRejected(
+    replace(
+      source,
+      'redisSessionRevocationCli',
+      "logger.emit(LOG_EVENTS.workerStopped, 'info', { outcome: 'success' });",
+      'process.stdout.write(JSON.stringify(result));',
+    ),
+    /exact reviewed source/u,
+  );
+  assertRejected(
+    replace(
+      source,
       'apiPackage',
       'node dist/infrastructure/redis/redis-session-revocation.cli.js',
       'node dist/main.js',

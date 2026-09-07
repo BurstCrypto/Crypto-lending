@@ -22,7 +22,7 @@ export const PRODUCTION_CONTAINER_INPUT_ERROR =
   'Production container inputs must be the 18 non-empty, canonical, stable, single-link repository files within their reviewed per-file limits and 393216-byte aggregate limit; text must be strict UTF-8 without a byte-order mark.';
 const SOURCE_URL = 'https://github.com/Trey-Gleason/Crypto-lending';
 const REDIS_SESSION_REVOCATION_CLI_SHA256 =
-  'f222f63fb2d2edc534f941a5ee5980c2b1bf7a64ec1014323cf1215196d7c8b6';
+  'fabc12502a15b2b8771c0f4e133bcec7a9ec3c92da389b8f677c9c10f6fa769b';
 const REDIS_SESSION_REVOCATION_RUNTIME_SHA256 =
   'fd84beff96d167ba3316d9ae476256ed0b32fb2b00717a4e062c36950d73a86b';
 const EXPECTED_DOCKERIGNORE = `**
