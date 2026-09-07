@@ -159,11 +159,13 @@ demonstrates that `getMultipleAccounts` can satisfy the verifier's exact-slot
 contract; and an independently captured real PYUSD Token-2022 golden fixture,
 exact extension inventory, and reviewed mutable-field window policy exist.
 
-Separately from that 72-artifact byte-pinned contract, the repository loader
+Separately from that 73-artifact byte-pinned contract, the repository loader
 derives a private runtime-absence attestation from every lowercase `.ts` and
 `.tsx` file under `apps/api/src` that is not excluded by the exact pinned build
-exclusions (`*.spec.ts` and `*.e2e-spec.ts`): currently 388 files and 5,864,621
-bytes. The aggregate also binds the exact `nest-cli.json`, `tsconfig.json`, and
+exclusions (`*.spec.ts` and `*.e2e-spec.ts`): currently 395 files and 6,265,963
+bytes. Preflight rebaseline `667b112` pins the aggregate SHA-256 as
+`e3c282da6404df5d631b6b110dc52f48111beb1e087b0c56648661b70db737ad`.
+The aggregate also binds the exact `nest-cli.json`, `tsconfig.json`, and
 `tsconfig.build.json` build inputs and the resolved
 `src/blockchain/domain/local-evm-development-manifest.json` runtime data input.
 One reviewed SHA-256 binds that whole snapshot; any covered API runtime source,
@@ -278,9 +280,11 @@ selected block header; null or any position/hash/parent mismatch fails as
 `PROVIDER_UNAVAILABLE`. These are source-integrity checks, not provider or
 mainnet observations.
 
-The 72-artifact balance-consumer slice also byte-pins the exact migration
+The 73-artifact balance-consumer slice also byte-pins the exact migration
 `0005` principal constants inherited through `0028`, immutable migration
-`0027`, migration `0032`, and the migration index. Its semantic inspection
+`0027`, migration `0032`, and the migration index whose reviewed tail now ends
+with `0033`. The dedicated dormant-action validator, rather than balance-
+consumer semantics, owns migration `0033`. Its semantic inspection
 requires a separate permanent append-only
 `balance_sync_financial_agreement_evidence_v2` relation, the exact V2 source-
 attestation and agreement fingerprint domains, all 51 generated coordinator-
@@ -383,12 +387,13 @@ snapshot property; structurally identical clones therefore fail without
 running hostile accessors. That reviewer is deliberately absent from the
 feature barrel, module, controller, and reader surface.
 
-The four provider-target sources are endpoint-free and direct-import-only.
+The six provider-target sources are endpoint-free and direct-import-only.
 They obtain authenticated durable wallet and chain-continuity context before
 accepting bounded finalized transcripts, bind exact provider/protocol/market/
 network/source identities, and retain false financial-action authority and
 explicit `COMPLETE` zero semantics. Their source commits are Aave `1538ec7`,
-Kamino `1e70d80`, Compound `7e10077`, and Spark `d684428`. Their presence does
+Kamino `1e70d80`, Compound `7e10077`, Spark `d684428`, Morpho `5910ebf`, and
+Euler `d478f3b`. Their presence does
 not register a provider, create a source pair, permit egress, add a credential,
 or produce live evidence.
 
@@ -862,9 +867,19 @@ adapter class or import-stem reference elsewhere in the bounded API runtime
 source scan. Artifact reads are capped at 2 MiB each, and the runtime scan is
 capped at 4,096 files and 24 MiB total. Decision validation and dormant-inventory
 validation have distinct blockers, and both must pass for `RPC_INDEXING` local
-validation to pass. The separately validated dormant mainnet action boundary
+validation to pass. Gearbox's pure account-position transcript from `5fcc7ca`
+is separately byte-pinned by inventory commit `040e93a`; the inventory rejects
+runtime references or any attempt to count that unauthenticated, incomplete
+evaluator as source seven. The separately validated dormant mainnet action boundary
 must pass `READ_ONLY_ISOLATION` and `MAINNET_WRITES`; its failure emits
 `MAINNET_ACTION_BOUNDARY_LOCAL_VALIDATION_FAILED`, never an RPC inventory blocker.
+Since `ee9204d` and `a387124`, that validator independently pins migration
+`0033`, its focused specification, and exact migration-index registration. It
+requires owner-only append-only lifecycle state, digest-only private evidence,
+post-bind crash recovery, and no application grant, repository/runtime
+reference, signer, broadcaster, or financial-action authority. Commit
+`a61bb57` adds three isolated test-schema/verifier-control cases against
+disposable PostgreSQL 16 without activating it or seeding lifecycle rows.
 A third independent local result validates the closed,
 reviewed four-provider capture packet for Compound, Euler, Gearbox, and Jupiter,
 including its exact compiled SHA-256 and sidecar. This packet covers the four
@@ -1091,10 +1106,14 @@ committed in `ecff5b9`, `b41cc62`, `91bd9bc`, and `2978367`; the resulting exact
 Registration commit `7617800` adds the separately pinned inert runtime owner and
 module wiring; that 43-artifact slice passed all 81 focused cases. Morpho/Euler
 source commits `5910ebf` and `d478f3b`, inventory commit `a77a57e`, and preflight
-commit `5550fbf` bring the current boundary to 45 artifacts and 85 passing
-focused cases. The reviewed whole-API runtime snapshot now contains 393 files
-and 6,048,616 bytes with SHA-256
-`0d11c90d870eeac4f0c1565f82be3025053a9b510b0516482d51b0d8b5155c20`.
+commit `5550fbf` bring the current provider-position boundary to 45 artifacts and
+85 passing focused cases. A dedicated inventory validator covers Gearbox
+commits `5fcc7ca` and `040e93a`, while the dormant-action validator covers
+`ee9204d` and `a387124`; `a61bb57` supplies separate disposable PostgreSQL
+integration coverage. None enlarges that slice. Preflight rebaseline `667b112`
+pins
+the reviewed whole-API runtime snapshot at 395 files and 6,265,963 bytes with
+SHA-256 `e3c282da6404df5d631b6b110dc52f48111beb1e087b0c56648661b70db737ad`.
 The record-intent migration was also exercised
 in a disposable local PostgreSQL 16 instance: all six focused integration cases
 passed, covering clean up/down/up migration verification, Ethereum and Solana
@@ -1102,6 +1121,14 @@ preparation, one-shot claim and idempotent replay, expired-`NEW` reconciliation,
 invalid dispatch-token rejection, and deferred-constraint rollback of a direct
 late record. This is local database evidence only; it is not production
 PostgreSQL, provider, mainnet, deployment, or external-service evidence.
+
+Migration `0033` separately passed three focused disposable PostgreSQL 16 cases:
+the test-schema migration chain through `0033` plus its isolated-schema verifier,
+rejection of a rolled-back reconciliation index or normalized-check tamper, and
+SQLSTATE `22023` rejection of a null expected revision with zero retained
+history. It does not run the production-principal verifier or seed lifecycle
+rows. This verifies dormant schema controls only; no repository, runtime grant,
+provider binding, or write authority exists.
 
 These checks are also part of the root `lint`, `typecheck`, and `test` scripts
 used by CI.

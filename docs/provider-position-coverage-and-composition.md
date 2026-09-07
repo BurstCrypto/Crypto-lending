@@ -24,6 +24,16 @@ pair, owner-authorized workload/principal/credential, populated evidence,
 production migration execution, runtime activation, deployment, or live proof
 exists.
 
+Gearbox commit `5fcc7ca` adds a pure evaluator for an already decoded,
+caller-asserted exhaustive manager/account transcript that matches the caller-
+supplied approval list; inventory commit `040e93a` byte-pins it and its hostile-
+path specification. It has no endpoint,
+authenticated acquisition, independent source, clock, persistence, runtime, or
+authority and explicitly leaves completeness unestablished. It is therefore an
+incomplete transcript foundation, not a seventh complete provider-position
+source. The six-source count and both 0-of-10 live-evidence counts remain
+unchanged.
+
 ## Exact coverage (version 1)
 
 MainnetProviderPositionCoverageManifestV1 binds one account and one position
@@ -80,7 +90,9 @@ expanded that selected set to 41. Spark preflight commit `2978367` pins source
 commit `d684428` and brought the selected local set to 42 critical artifacts.
 The inert runtime owner then brought the slice to 43. Morpho and Euler source
 commits `5910ebf` and `d478f3b`, inventory commit `a77a57e`, and preflight
-commit `5550fbf` now bring the selected boundary to 45 artifacts. A passing
+commit `5550fbf` now bring the selected boundary to 45 artifacts. The Gearbox
+transcript and migration `0033` remain outside this slice and are guarded by
+their dedicated dormant-inventory and dormant-action validators. A passing
 local source inspection
 does not prove recursive dependency closure, whole-application registration
 absence, populated or deployed evidence, or live behavior. It does pin the
@@ -99,9 +111,11 @@ are Aave `1538ec7` / `ecff5b9`, Kamino `1e70d80` / `b41cc62`, and Compound
 specification, API typecheck, and targeted static/format checks; preflight commit
 `2978367` pins it, and all 68 cases passed for the resulting exact 42-artifact
 historical slice. The later inert-registration boundary passed 81 cases at 43
-artifacts. The current Morpho/Euler boundary passes all 85 focused cases at 45
-artifacts and pins a 393-file, 6,048,616-byte API source snapshot with SHA-256
-`0d11c90d870eeac4f0c1565f82be3025053a9b510b0516482d51b0d8b5155c20`.
+artifacts. The current boundary still passes all 85 focused cases at 45
+artifacts. After Gearbox commits `5fcc7ca` and `040e93a`, dormant lifecycle
+commits `ee9204d`, `a387124`, and `a61bb57`, and preflight rebaseline `667b112`,
+the reviewed whole-API snapshot contains 395 files and 6,265,963 bytes with
+SHA-256 `e3c282da6404df5d631b6b110dc52f48111beb1e087b0c56648661b70db737ad`.
 Six focused PostgreSQL 16 integration cases also passed for the
 migration/recorder/processor path. That is local source and disposable-database
 evidence only, not proof of a production migration, runtime
@@ -162,6 +176,10 @@ Consequently the remaining provider-position blockers are
 `PROVIDER_POSITION_APPROVED_SOURCE_BINDINGS_MISSING`, and
 `PROVIDER_POSITION_DEPLOYED_EVIDENCE_MISSING`, and the live-provider count,
 `liveReadEvidenceBound`, and `transactionEvidenceBound` all remain zero.
+For Gearbox specifically, authenticated transcript acquisition, approved
+dynamic code/topology fingerprints, a second independent source, durable
+wallet/continuity context, risk approval, and deployed conformance evidence all
+remain missing.
 
 Migration `0030` refuses installation over any existing `0029` evidence while
 holding an access-exclusive evidence-table lock. It adds an append-only,

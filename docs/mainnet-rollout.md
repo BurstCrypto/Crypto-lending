@@ -54,6 +54,15 @@ transcript. None supplies an endpoint, credential, approved independent source
 pair, runtime activation, persistence or financial-action authority, or live
 evidence, so these artifacts do not change either zero count.
 
+Gearbox commit `5fcc7ca` adds a pure evaluator for a caller-asserted exhaustive,
+already decoded account-position transcript that matches the caller-supplied
+approval list, and inventory commit `040e93a` pins it and its focused hostile-
+path specification. It owns no transport, database, clock, credential, or
+runtime registration and cannot authenticate its caller, chain, or RPC
+observations. Its completeness remains explicitly unestablished, so it is not a
+seventh complete dormant provider-position source and does not change the six-
+source or 0-of-10 live-evidence counts.
+
 ## Required architecture boundary
 
 Any future financial action must use a new mainnet bounded context with its own
@@ -135,8 +144,13 @@ listeners. Import and construction start no work. At the inert-registration
 milestone, preflight commit `a684735` pinned 43 provider-position artifacts.
 Morpho/Euler inventory commit `a77a57e` and preflight commit `5550fbf` now pin
 the six dormant provider-position sources in a 45-artifact boundary. The
-complete reviewed API source snapshot is 393 files and 6,048,616 bytes with
-SHA-256 `0d11c90d870eeac4f0c1565f82be3025053a9b510b0516482d51b0d8b5155c20`.
+dedicated inventory validator covers Gearbox commits `5fcc7ca` and `040e93a`,
+and the dedicated dormant-action validator covers lifecycle commits `ee9204d`
+and `a387124`; `a61bb57` is separate disposable PostgreSQL integration
+coverage. None is added to that 45-artifact provider slice. Preflight rebaseline
+`667b112` pins the complete reviewed API source snapshot at 395 files and
+6,265,963 bytes with SHA-256
+`e3c282da6404df5d631b6b110dc52f48111beb1e087b0c56648661b70db737ad`.
 All 85 focused cases in `production-go-live-preflight.test.ts` pass for that
 exact slice. The earlier six focused record-intent cases also passed against an
 isolated local PostgreSQL 16 instance.
@@ -178,15 +192,32 @@ only named signer and broadcaster.
 
 The subtree has no route, module, dependency-injection registration, runtime or
 environment configuration, transport, RPC call, transaction construction,
-signing, submission, credential, or persistence adapter. Its only exported
+signing, submission, credential, or persistence repository. Its only exported
 policy is immutable and `DISABLED`: both chain kill switches are `HALT`, every
 provider/market/asset/action/wallet approval list is empty, and the per-
 transaction, per-wallet daily, global daily, total-outstanding, network-fee,
-allowance, unresolved-intent, and wallet-allowlist limits are all zero. Durable
-replay protection and limit counters are unavailable. Consequently every
+allowance, unresolved-intent, and wallet-allowlist limits are all zero. Consequently every
 well-formed candidate is still returned as `DENY` with financial-action
 authority false; syntactic validation is not provider, market, or write
 approval and does not change the zero transaction-enabled-provider count.
+
+Migration `0033` in commit `ee9204d` adds an owner-only, append-only dormant
+database lifecycle for exact Ethereum/Solana `SUPPLY` and `WITHDRAW` intents,
+submission binding, ambiguous broadcast observation, and reconciliation. It
+stores canonical public transaction identity but only digests for private
+signed payload, signature, and evidence material; it permits direct post-crash
+reconciliation from a signed-bound submission and does not strand post-bind
+evidence after wallet revocation, operation drift, or expiry. Commit `a387124`
+adds the dedicated fail-closed source validator, and commit `a61bb57` exercises
+three isolated test-schema/verifier controls against disposable local PostgreSQL
+16 without seeding lifecycle rows.
+
+This closes only the database-schema portion of durable replay and restart
+state. No repository adapter, API/worker composition, runtime grant, scheduled
+reconciler, signer, broadcaster, mainnet provider binding, or write authority
+exists. The migration is registered solely in the cumulative migration index;
+its guarded functions remain unavailable to application principals, and all
+policy limits and approvals remain zero.
 
 ## Additional gates before any real-value write
 
@@ -199,8 +230,9 @@ approval and does not change the zero transaction-enabled-provider count.
   unresolved transaction per wallet, and no automatic resend or fee escalation.
 - Use exact allowances by default. Any unlimited allowance needs a separate
   security decision and explicit user disclosure.
-- Persist idempotent intents and reconciliation state durably; handle ambiguous
-  outcomes and reorgs without resubmitting.
+- Integrate the dormant `0033` persistence substrate through a separately
+  reviewed repository and transactional prepare-before-dispatch runtime; handle
+  ambiguous outcomes and reorgs without resubmitting.
 - Define provisional, safe, finalized, and accepted financial-finality states.
 - Exercise pause, provider divergence, deployment drift, recovery, withdrawal,
   and incident runbooks in a fork or simulation, then obtain independent
@@ -225,6 +257,7 @@ request, transaction submission, broadcast, provider account, cloud
 deployment, or paid resource is created by the local implementation. The
 separate balance-sync queue definition has no activated consumer or chain
 egress and grants no live-read authority. Migration `0031`, recorder V2, the
-dormant reconciliation processor, and its bounded lifecycle add no database
-runtime grant or external egress. The same is true of the deferred Base artifacts
+dormant reconciliation processor, its bounded lifecycle, and owner-only
+migration `0033` add no application database grant, repository/runtime
+composition, or external egress. The same is true of the deferred Base artifacts
 retained in the repository.
