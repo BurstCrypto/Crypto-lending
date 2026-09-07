@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "ticket": "KAN-49",
-  "modelVersion": "2026-09-04",
+  "modelVersion": "2026-09-07",
   "localStatus": "READY_FOR_INDEPENDENT_REVIEW",
   "scope": "Crypto Lending repository application, wallet-validation, smart-lending external evidence, data-plane, operator, and supply-chain boundaries",
   "independentApproval": {
@@ -104,6 +104,9 @@
       "destination": "Injected wallets, mobile wallets, relays, and testnet RPCs",
       "data": ["wallet address", "pairing URI", "proof message", "signature", "chain metadata"],
       "evidence": [
+        "apps/api/src/infrastructure/security/ed25519-public-key.ts",
+        "apps/api/src/public-testnet/public-testnet-execution.service.ts",
+        "apps/api/src/wallets/domain/wallet-ownership-proof.ts",
         "docs/wallets/security-review/threat-model.md",
         "tools/wallet-lab/SECURE_ACCESS.md"
       ]
@@ -195,11 +198,13 @@
       "data": [
         "Git revision and tree identity",
         "release component digests",
-        "prospective production destination, deployment epoch, and deployed-target identity",
+        "prospective production destination, deployment epoch, deployed-target identity, and post-provision target-identity enrollment claim",
         "role-scoped signed technical evidence and public-launch decisions"
       ],
       "evidence": [
+        "infra/shared/validate-ed25519-public-key.mjs",
         "scripts/release-candidate-manifest.mjs",
+        "scripts/production-deployment-enrollment.mjs",
         "scripts/production-deployment-target.mjs",
         "scripts/production-evidence-bundle.ts",
         "scripts/public-launch-authority-decision.ts"
@@ -282,6 +287,8 @@
       "logging": "NEVER_RAW_ADDRESS_PUBLIC_KEY_PAIRING_NONCE_MESSAGE_SIGNATURE_OR_DIGEST",
       "owner": "Wallet and Privacy",
       "evidence": [
+        "apps/api/src/infrastructure/security/ed25519-public-key.ts",
+        "apps/api/src/public-testnet/public-testnet-execution.service.ts",
         "apps/api/src/wallets/domain/wallet-ownership-proof.ts",
         "docs/wallets/security-review/threat-model.md",
         "tools/wallet-lab/src/evidence.ts"
@@ -467,12 +474,13 @@
     },
     {
       "id": "DATA-019",
-      "name": "Release candidate, deployment-destination, deployed-target, technical-evidence, RDS supporting-capture, and public-launch decision records",
+      "name": "Release candidate, deployment-destination, deployed-target, post-provision target-identity enrollment, technical-evidence, RDS supporting-capture, and public-launch decision records",
       "classification": "INTERNAL",
       "cia": { "confidentiality": "MEDIUM", "integrity": "HIGH", "availability": "HIGH" },
       "stores": [
         "Version-controlled empty authority, deployment-destination, and deployed-target registries",
         "Short-lived CI release artifacts",
+        "Separately controlled canonical signed target-identity enrollment claims",
         "Separately controlled canonical signed evidence files",
         "Separately retained canonical sanitized RDS lifecycle capture files"
       ],
@@ -481,7 +489,9 @@
       "owner": "Release, Security, and SRE",
       "evidence": [
         ".github/workflows/ci.yml",
+        "infra/shared/validate-ed25519-public-key.mjs",
         "scripts/release-candidate-manifest.mjs",
+        "scripts/production-deployment-enrollment.mjs",
         "scripts/production-deployment-target.mjs",
         "scripts/production-evidence-bundle.ts",
         "scripts/public-launch-authority-decision.ts"
@@ -744,17 +754,23 @@
     },
     {
       "id": "KEY-017",
-      "name": "Production technical-evidence and public-launch decision signing keys",
+      "name": "Production deployment, transition, technical-evidence, and public-launch authority signing keys",
       "classification": "RESTRICTED",
       "consumers": [
-        "Separately accountable evidence issuers and launch authorities",
-        "Offline production preflight verifier"
+        "Separately accountable deployment, transition, evidence, and launch authorities",
+        "Offline production authority-registry and preflight verifiers"
       ],
-      "injection": "Only role-scoped Ed25519 public verification keys may enter the reviewed source registries; production registries remain empty until a separately reviewed key-enrollment change",
+      "injection": "Only role-scoped Ed25519 public verification keys may enter the reviewed source registries; every parser rejects a key unless its raw point has a canonical nonidentity encoding in the prime-order subgroup before Node cryptographic acceptance, and production registries remain empty until a separately reviewed key-enrollment change",
       "storage": "Private signing keys remain in separately approved external custody and must never enter this repository, CI artifacts, application configuration, logs, or evidence payloads",
-      "rotation": "Short-lived signed decisions plus key validity, status, one-role scope, revocation, replacement, and re-signing of the exact candidate and target; compromise invalidates every affected decision",
+      "rotation": "Short-lived signed records plus key validity, status, one-role scope, revocation, replacement, and re-signing of the exact bound candidate, destination epoch, target, and predecessor state; compromise invalidates every affected record",
       "owner": "Release and Security",
       "evidence": [
+        "infra/aws/validate-auth-wallet-secret-version-transition.mjs",
+        "infra/aws/validate-balance-consumer-metadata-secret-version-transition.mjs",
+        "infra/aws/validate-production-deployment-intent.mjs",
+        "infra/aws/validate-redis-operator-secret-version-transition.mjs",
+        "infra/shared/validate-ed25519-public-key.mjs",
+        "scripts/production-deployment-enrollment.mjs",
         "scripts/production-evidence-bundle.ts",
         "scripts/public-launch-authority-decision.ts",
         "docs/production-preflight.md"
@@ -862,11 +878,18 @@
       "mitigations": [
         "Explicit connector choice, chain-qualified accounts, testnet allowlists, and fail-closed scope validation",
         "Supported assets normalize only through exact environment, network ID, and contract or mint identity",
-        "Provider metadata is never an authentication signal"
+        "Provider metadata is never an authentication signal",
+        "Both Solana signature consumers validate the decoded 32-byte public point as canonical, nonidentity, and in the Ed25519 prime-order subgroup before Node signature verification; identity, torsion, mixed-order, and noncanonical points fail closed"
       ],
       "owner": "Wallet, Blockchain, and Security",
       "status": "MITIGATED_LOCAL",
-      "evidence": ["docs/wallets/security-review/threat-model.md", "docs/KAN-61.md"],
+      "evidence": [
+        "apps/api/src/infrastructure/security/ed25519-public-key.ts",
+        "apps/api/src/public-testnet/public-testnet-execution.service.ts",
+        "apps/api/src/wallets/domain/wallet-ownership-proof.ts",
+        "docs/wallets/security-review/threat-model.md",
+        "docs/KAN-61.md"
+      ],
       "residualRisk": "Real-wallet behavior and trusted connector chain attestation remain unverified.",
       "followUp": "KAN-223 independent wallet review and future connector chain attestation"
     },
@@ -881,13 +904,14 @@
       "response": "MITIGATE",
       "mitigations": [
         "The server issues a short-lived CSPRNG challenge bound to the authenticated account, exact origin and URI, operation, registry network, chain-qualified canonical address, and one-use challenge identifier",
-        "EVM ERC-4361 and ERC-191 or Solana SIWS and Ed25519 verification checks the exact message, nonce, address, network, domain, user binding, and expiry before registration",
+        "EVM ERC-4361 and ERC-191 or Solana SIWS and Ed25519 verification checks the exact message, nonce, address, network, domain, user binding, and expiry before registration; Solana additionally rejects any public point that is noncanonical, the identity, small order, or outside the prime-order subgroup before Node signature verification",
         "Owner-scoped database functions retain keyed challenge digests and an AES-GCM sealed binding record rather than raw nonce, signed message, or signature; row-locked expiry and other terminal updates destroy the sealed record, audit the outcome, consume success once, record replay or rejection outcomes, and enforce one active account owner for each network-qualified address digest",
         "A verified proof establishes registration ownership only: it neither creates an authentication session nor authorizes a financial transaction, and contract-wallet verification fails closed without a separately approved RPC verifier"
       ],
       "owner": "Wallet and Identity",
       "status": "MITIGATED_LOCAL",
       "evidence": [
+        "apps/api/src/infrastructure/security/ed25519-public-key.ts",
         "apps/api/src/infrastructure/database/migrations/0011-create-wallet-ownership-registration.migration.ts",
         "apps/api/src/wallets/domain/wallet-ownership-proof.ts",
         "docs/wallets/security-review/threat-model.md"
@@ -1490,6 +1514,8 @@
       "mitigations": [
         "The prospective destination hash covers the reviewed nonzero deployment epoch, account, Region, stack name, and public origin before generated resource identities exist; its production registry is empty and its injected-registry resolver cannot mint the private production brand",
         "Canonical evidence binds the exact release-candidate manifest digest and schema-v2 deployed-target digest rather than trusting a signer-authored revision label; the v2 target hash covers the exact CloudFormation stack, RDS database/resource/managed-secret/application-key identities, and other closed target identities, while its empty registry remains a fail-closed legacy evidence boundary rather than claiming a source-enrollment path",
+        "A pure offline post-provision target-identity verifier accepts only canonical, short-lived, distinctly two-role-signed CLAIMED_INERT_DEPLOYED claims bound to the prospective destination ID, hash, nonzero epoch and registry hash; provision intent, reservation and result identities; exact source revision and release-manifest digest; and the complete deployed-target identity with account, Region, stack, and public-origin continuity",
+        "The target-identity report labels the inert provision state unverified and requires a future consumer to revalidate freshness and every provision/source/release binding, obtain separately branded live-state evidence, and atomically consume the destination epoch and chain head before granting any execution authority",
         "Technical read-only evidence requires distinct role-scoped issuer and independent-verifier signatures over identical bytes and rejects mainnet-write claims",
         "Public launch decisions require distinct role-scoped legal, regulatory, privacy, operations, independent-security, dependency-risk, and deployment-owner signatures",
         "Short validity windows, trusted application-time revalidation, empty production registries, and fail-closed parsing prevent local self-approval"
@@ -1497,31 +1523,39 @@
       "owner": "Release, Security, and Risk",
       "status": "OPEN_EXTERNAL",
       "evidence": [
+        "infra/shared/validate-ed25519-public-key.mjs",
+        "scripts/production-deployment-enrollment.mjs",
         "scripts/production-deployment-target.mjs",
         "scripts/production-evidence-bundle.ts",
         "scripts/public-launch-authority-decision.ts",
         "scripts/production-go-live-preflight.ts"
       ],
-      "residualRisk": "No prospective production destination, deployed target, or authority key is enrolled; atomic epoch consumption, external decisions, trusted-clock operations, and emergency revocation remain unexercised, and the complete gate has not received independent acceptance.",
-      "followUp": "Enroll each prospective destination epoch and one independently controlled key per role through reviewed changes; design an external independently signed post-deploy target-enrollment protocol that avoids release-digest circularity; atomically consume deployment epochs; exercise expiry and revocation from a trusted release environment; and obtain separately signed decisions for the exact candidate before go-live"
+      "residualRisk": "No prospective production destination, deployed target identity, target-identity enrollment, or authority key is enrolled. The offline enrollment verifier neither observes live state nor proves that CLAIMED_INERT_DEPLOYED is true, and no consumer currently matches the complete provision/source/release bindings or owns a strongly consistent epoch/head reservation, atomic compare-and-swap, fencing, reconciliation, or emergency-kill boundary. External decisions, trusted-clock operations, revocation, and the complete gate remain unexercised and independently unaccepted.",
+      "followUp": "Enroll each prospective destination epoch and one independently controlled key per role through reviewed changes; independently issue and retain the exact post-provision target-identity enrollment; add an externally controlled consumer that revalidates the complete bindings and freshness against separately branded live-state observations; atomically reserve, consume, reconcile, and fence each epoch/head including emergency kill; exercise expiry and revocation from a trusted release environment; and obtain separately signed decisions for the exact candidate before go-live"
     },
     {
       "id": "THR-SECRETS-004",
       "domain": "SECRETS",
       "stride": ["SPOOFING", "REPUDIATION", "ELEVATION_OF_PRIVILEGE"],
-      "scenario": "A release signing key is copied, compromised, shared across roles, retained beyond validity, or used after revocation to manufacture production evidence.",
+      "scenario": "A release signing key is copied, compromised, shared across roles, retained beyond validity, or used after revocation, or a noncanonical, identity, small-order, or mixed-order Ed25519 public key is admitted to manufacture production evidence.",
       "risk": "HIGH",
       "boundaryIds": ["TB-09", "TB-13"],
       "assetIds": ["DATA-015", "DATA-019"],
       "response": "MITIGATE",
       "mitigations": [
         "The repository contains public verification material only and begins with empty production authority registries",
-        "Every key has one exact role and scope, bounded validity, explicit status, canonical Ed25519 encoding, and distinct-key enforcement across required roles",
+        "Every key has one exact role and scope, bounded validity, explicit status, and distinct-key enforcement across required roles; shared pure-offline point decoding rejects noncanonical encodings, the identity, all small-order points, and valid mixed-order points unless the nonidentity point satisfies the Ed25519 prime-subgroup check before Node cryptographic acceptance",
         "Signed artifacts expire and bind the exact release candidate and deployment target; changing a key registry changes the release tree and invalidates prior review"
       ],
       "owner": "Security and Release",
       "status": "OPEN_EXTERNAL",
       "evidence": [
+        "infra/aws/validate-auth-wallet-secret-version-transition.mjs",
+        "infra/aws/validate-balance-consumer-metadata-secret-version-transition.mjs",
+        "infra/aws/validate-production-deployment-intent.mjs",
+        "infra/aws/validate-redis-operator-secret-version-transition.mjs",
+        "infra/shared/validate-ed25519-public-key.mjs",
+        "scripts/production-deployment-enrollment.mjs",
         "scripts/production-evidence-bundle.ts",
         "scripts/public-launch-authority-decision.ts",
         "docs/production-preflight.md"
