@@ -29,6 +29,12 @@ export const ACTION_LIFECYCLE_MIGRATION_PATH =
   'apps/api/src/infrastructure/database/migrations/0033-create-mainnet-financial-action-lifecycle.migration.ts';
 export const ACTION_LIFECYCLE_MIGRATION_SPEC_PATH =
   'apps/api/src/infrastructure/database/migrations/0033-create-mainnet-financial-action-lifecycle.migration.spec.ts';
+export const ACTION_WALLET_IDENTITY_BINDING_MIGRATION_PATH =
+  'apps/api/src/infrastructure/database/migrations/0034-bind-mainnet-financial-action-wallet-identity.migration.ts';
+export const ACTION_WALLET_IDENTITY_BINDING_MIGRATION_SPEC_PATH =
+  'apps/api/src/infrastructure/database/migrations/0034-bind-mainnet-financial-action-wallet-identity.migration.spec.ts';
+export const ACTION_WALLET_IDENTITY_BINDING_MIGRATION_INTEGRATION_SPEC_PATH =
+  'apps/api/test/infrastructure/mainnet-financial-action-wallet-identity-binding.integration-spec.ts';
 export const DATABASE_MIGRATION_INDEX_PATH =
   'apps/api/src/infrastructure/database/migrations/index.ts';
 export const MAX_ACTION_BOUNDARY_FILE_BYTES = 512 * 1024;
@@ -48,17 +54,23 @@ export const REVIEWED_ACTION_LIFECYCLE_SPEC_SHA256 =
 export const REVIEWED_ACTION_LIFECYCLE_DURABLE_PORT_SHA256 =
   '389a0e898f1a411ae4d01c53ce82d72b1672633a071d7f7a7c8d01e1c61e9cd3';
 export const REVIEWED_ACTION_LIFECYCLE_POSTGRES_ADAPTER_SHA256 =
-  '5b4052709e040b16c3f788fc784c3f30cb2bc0129a0f369680eb6d534dd696df';
+  '6cc68db5865afc2fd5e79939dfc195b5b7ac41d653156af451cbb92187c5e6e4';
 export const REVIEWED_ACTION_LIFECYCLE_POSTGRES_ADAPTER_SPEC_SHA256 =
-  'f9c976efdeee588087a54a72e30d132e5dbd81345197c7fde8d84bf801702906';
+  '557230d0ebd066d18cf67273b20e600aab9b73929ec7d2c50e846cde3a435b70';
 export const REVIEWED_ACTION_LIFECYCLE_POSTGRES_ADAPTER_INTEGRATION_SPEC_SHA256 =
-  'a71f07935cbc5354d5654f7b1f51ac528f2012d6914840daf26acb5f3b6c40c9';
+  '2d91c396aad02abb9c35bc997f994bd96682da2eac367fc146ef2316c11bef2c';
 export const REVIEWED_ACTION_LIFECYCLE_MIGRATION_SHA256 =
   'c3840f3b3cd7de0e7dbf159c335fbe0784e55e81c936defdf618c9b0092ffa27';
 export const REVIEWED_ACTION_LIFECYCLE_MIGRATION_SPEC_SHA256 =
-  '7015c5fc30584e868cbdc2df3a376479521d1972f516134d4e95c595a4b7816e';
+  'a45f5e3cb86e4c118d0f3579013a2c3d3a6f34f19a9de8d1900bdf8cf1b0ec03';
+export const REVIEWED_ACTION_WALLET_IDENTITY_BINDING_MIGRATION_SHA256 =
+  '11fd11a882e81f417d0efdfbbb7da3c8bed0171ed9aec420068772e8c56a75a7';
+export const REVIEWED_ACTION_WALLET_IDENTITY_BINDING_MIGRATION_SPEC_SHA256 =
+  '5cd10d6162cfa5af54f2941176dc9dd3dba3d7dd1a5a85276e1603f890b4fd71';
+export const REVIEWED_ACTION_WALLET_IDENTITY_BINDING_MIGRATION_INTEGRATION_SPEC_SHA256 =
+  '7aa0e97a3563468bd1c520a80876ee0f7c12939f13b3a8021d9e6bb44b49d31b';
 export const REVIEWED_DATABASE_MIGRATION_INDEX_SHA256 =
-  '6ec4f52c67e555070782c3b0a87950ff887e1f513cd92567534ee9dd9393a78b';
+  'd62add472520e4101623d0e0fcefe600ec0bd028e3c5dc8b5e28c9feb64c66fb';
 export const ACTION_BOUNDARY_INPUT_ERROR =
   'Dormant mainnet action boundary inputs must be stable, single-link regular UTF-8 files at canonical paths inside the repository and within the reviewed size limits.';
 
@@ -98,12 +110,14 @@ const EXPECTED_POSTGRES_ADAPTER_IMPORTS = Object.freeze([
   'node:util/types',
   '../../infrastructure/database/postgres.service',
   '../../blockchain/domain/supported-asset-registry',
+  '../../wallets/infrastructure/crypto/wallet-registration-crypto',
   '../domain/dormant-mainnet-financial-action',
   '../application/ports/dormant-mainnet-financial-action-lifecycle-durable.port',
 ]);
 const EXPECTED_POSTGRES_ADAPTER_SPEC_IMPORTS = Object.freeze([
   '../../blockchain/domain/supported-asset-registry',
   '../../infrastructure/database/postgres.service',
+  '../../wallets/infrastructure/crypto/wallet-registration-crypto',
   '../domain/dormant-mainnet-financial-action',
   '../application/ports/dormant-mainnet-financial-action-lifecycle-durable.port',
   './postgres-dormant-mainnet-financial-action-lifecycle-durable.adapter',
@@ -119,6 +133,28 @@ const EXPECTED_POSTGRES_ADAPTER_INTEGRATION_SPEC_IMPORTS = Object.freeze([
   '../../src/mainnet-actions/domain/dormant-mainnet-financial-action',
   '../../src/mainnet-actions/application/ports/dormant-mainnet-financial-action-lifecycle-durable.port',
   '../../src/mainnet-actions/infrastructure/postgres-dormant-mainnet-financial-action-lifecycle-durable.adapter',
+  '../../src/wallets/infrastructure/crypto/wallet-registration-crypto',
+]);
+const EXPECTED_WALLET_IDENTITY_BINDING_MIGRATION_IMPORTS = Object.freeze([
+  'node:crypto',
+  './0028-suspend-generic-worker-balance-authority.migration',
+  './0033-create-mainnet-financial-action-lifecycle.migration',
+  './migration',
+]);
+const EXPECTED_WALLET_IDENTITY_BINDING_MIGRATION_SPEC_IMPORTS = Object.freeze([
+  './0028-suspend-generic-worker-balance-authority.migration',
+  './0033-create-mainnet-financial-action-lifecycle.migration',
+  './0034-bind-mainnet-financial-action-wallet-identity.migration',
+  './index',
+]);
+const EXPECTED_WALLET_IDENTITY_BINDING_MIGRATION_INTEGRATION_SPEC_IMPORTS = Object.freeze([
+  'node:crypto',
+  'pg',
+  'pg',
+  '../../src/blockchain/domain/supported-asset-registry',
+  '../../src/infrastructure/database/migration-runner.service',
+  '../../src/infrastructure/database/migrations',
+  '../../src/wallets/infrastructure/crypto/wallet-registration-crypto',
 ]);
 const EXPECTED_DURABLE_PORT_EXPORTS = Object.freeze([
   'DORMANT_MAINNET_FINANCIAL_ACTION_DURABLE_LIFECYCLE_VERSION',
@@ -151,6 +187,11 @@ const EXPECTED_POSTGRES_ADAPTER_EXPORTS = Object.freeze([
   'DormantMainnetFinancialActionLifecycleClock',
   'PostgresDormantMainnetFinancialActionLifecycleDurableAdapter',
 ]);
+const EXPECTED_WALLET_IDENTITY_BINDING_MIGRATION_EXPORTS = Object.freeze([
+  'createMainnetFinancialActionWalletIdentityBindingMigration',
+  'createMainnetFinancialActionWalletIdentityBindingMigrationV0034',
+  'createMainnetFinancialActionWalletIdentityBindingTestSchemaMigrationV0034',
+]);
 const EXPECTED_POSTGRES_ADAPTER_SQL_CONSTANTS = Object.freeze([
   'PREPARE_SQL',
   'BIND_SUBMISSION_SQL',
@@ -159,7 +200,7 @@ const EXPECTED_POSTGRES_ADAPTER_SQL_CONSTANTS = Object.freeze([
   'READ_SQL',
 ]);
 const EXPECTED_POSTGRES_ADAPTER_SQL_FUNCTIONS = Object.freeze([
-  'prepare_mainnet_financial_action_lifecycle',
+  'prepare_mainnet_financial_action_lifecycle_v2',
   'bind_mainnet_financial_action_submission',
   'record_mainnet_financial_action_broadcast_observation',
   'record_mainnet_financial_action_reconciliation_observation',
@@ -171,6 +212,7 @@ const EXPECTED_PRODUCTION_MIGRATION_TAIL = Object.freeze([
   'createProviderPositionChainAnchorRecordIntentMigrationV0031',
   'createMainnetBalanceAgreementEvidenceV2MigrationV0032',
   'createMainnetFinancialActionLifecycleMigrationV0033',
+  'createMainnetFinancialActionWalletIdentityBindingMigrationV0034',
 ]);
 const EXPECTED_TEST_MIGRATION_TAIL = Object.freeze([
   'createProviderPositionChainAnchorEvidenceTestSchemaMigrationV0029',
@@ -178,7 +220,10 @@ const EXPECTED_TEST_MIGRATION_TAIL = Object.freeze([
   'createProviderPositionChainAnchorRecordIntentTestSchemaMigrationV0031',
   'createMainnetBalanceAgreementEvidenceV2TestSchemaMigrationV0032',
   'createMainnetFinancialActionLifecycleTestSchemaMigrationV0033',
+  'createMainnetFinancialActionWalletIdentityBindingTestSchemaMigrationV0034',
 ]);
+const EXPECTED_WALLET_IDENTITY_PREPARE_FUNCTION_IDENTITY =
+  'prepare_mainnet_financial_action_lifecycle_v2(uuid,uuid,uuid,uuid,uuid,uuid,uuid,text,text,uuid,text,text,text,text,integer,text,text,text,smallint,text,text,text,text,integer,text,text,text,timestamp with time zone,timestamp with time zone,uuid,smallint[],text[])';
 const EXPECTED_FINGERPRINT_GOLDEN_SHA256 = Object.freeze([
   'e672e31e8e43af4e842b455732232f6edcb398b4be16b0e2481127877781b16c',
   '844539971400540a0c6feb03b8526c2ddb93e6bdf5707703bb1838a3f39a6c18',
@@ -245,9 +290,9 @@ const PROHIBITED_BOUNDARY_SOURCE =
 const RUNTIME_REFERENCE =
   /(?:dormant-mainnet-financial-action|DormantMainnetFinancialAction|DORMANT_MAINNET_FINANCIAL_ACTION|MAINNET_FINANCIAL_ACTION_PROVIDER_CANDIDATES|MAINNET_FINANCIAL_ACTION_DATABASE_FINGERPRINT_ENCODING|PostgresDormantMainnetFinancialActionLifecycleDurableAdapter|assessDormantMainnetFinancialAction|parseDormantMainnetFinancialActionIntent|createDormantMainnetFinancialActionLifecycleProtocol)/u;
 const ACTION_LIFECYCLE_MIGRATION_REFERENCE =
-  /(?:0033-create-mainnet-financial-action-lifecycle|createMainnetFinancialActionLifecycle(?:TestSchema)?MigrationV0033|MAINNET_ACTION_FINGERPRINT_GOLDEN_VECTORS|mainnet_financial_action_(?:intents|events|evidence_claims)|(?:read|prepare|bind|record)_mainnet_financial_action_(?:lifecycle|submission|broadcast_observation|reconciliation_observation))/u;
+  /(?:0033-create-mainnet-financial-action-lifecycle|0034-bind-mainnet-financial-action-wallet-identity|createMainnetFinancialActionLifecycle(?:TestSchema)?MigrationV0033|createMainnetFinancialActionWalletIdentityBinding(?:TestSchema)?MigrationV0034|MAINNET_ACTION_FINGERPRINT_GOLDEN_VECTORS|mainnet_financial_action_(?:intents|events|evidence_claims)|(?:read|prepare|bind|record)_mainnet_financial_action_(?:lifecycle(?:_v2)?|submission|broadcast_observation|reconciliation_observation))/u;
 const ACTION_LIFECYCLE_DATABASE_FUNCTION_REFERENCE =
-  /\b(?:prepare_mainnet_financial_action_lifecycle|bind_mainnet_financial_action_submission|record_mainnet_financial_action_broadcast_observation|record_mainnet_financial_action_reconciliation_observation|read_mainnet_financial_action_lifecycle)\b/u;
+  /\b(?:prepare_mainnet_financial_action_lifecycle(?:_v2)?|bind_mainnet_financial_action_submission|record_mainnet_financial_action_broadcast_observation|record_mainnet_financial_action_reconciliation_observation|read_mainnet_financial_action_lifecycle)\b/u;
 const DURABLE_SOURCE_SYMBOL_BRAND = /\bSymbol(?:\.for)?\s*\(/u;
 const DURABLE_STANDALONE_RESULT_EXPORT =
   /\bexport\s+(?:(?:const|function)\s+(?:decode(?:Dormant)?MainnetFinancialActionDatabaseResult|createDormantMainnetFinancialActionDatabaseOutcomeUnknown|databaseOutcomeUnknown)|(?:type|interface|class)\s+DormantMainnetFinancialActionLifecycleDatabase(?:CommandV1|Codec|CodecError|CodecErrorCode))\b/u;
@@ -257,6 +302,8 @@ const PROHIBITED_ADAPTER_DATABASE_CONTROL =
   /(?:\.\s*query\s*\(|\bwithTransaction\s*\(|\b(?:maxRetries|retryDelayMs|retryAttempts|retryCount|retryLimit|retryPolicy)\b|\b(?:setTimeout|setInterval|setImmediate|queueMicrotask)\s*\()/iu;
 const PROHIBITED_ADAPTER_SQL_AUTHORITY =
   /\b(?:GRANT|REVOKE|CREATE|ALTER|DROP|TRUNCATE|INSERT|UPDATE|DELETE)\b/u;
+const PROHIBITED_WALLET_IDENTITY_CANDIDATE_SINK =
+  /(?:\b(?:console|logger|log)\s*\.\s*[A-Za-z_$][A-Za-z0-9_$]*\s*\([\s\S]{0,256}\bwalletIdentity(?:DigestCandidates|KeyRing)\b|\bJSON\s*\.\s*stringify\s*\([\s\S]{0,256}\bwalletIdentity(?:DigestCandidates|KeyRing)\b|\bwalletIdentity(?:DigestCandidates|KeyRing)\b[\s\S]{0,256}\b(?:console|logger|log)\s*\.\s*[A-Za-z_$][A-Za-z0-9_$]*\s*\()/u;
 const PROHIBITED_DURABLE_AUTHORITY =
   /(?:\b(?:sendRawTransaction|sendTransaction|signTransaction|broadcastTransaction|eth_sendRawTransaction|writeContract|JsonRpcProvider|WalletClient|PrivateKeyAccount)\b|\b(?:job_outbox|outbox|enqueue)\b|\b(?:mayAuthorizeFinancialAction|apiMaySign|apiMayBroadcast|mayResendTransaction|automaticRetryAllowed|ledgerSettlementAuthority)\s*:\s*true\b|\bledger_settlement_authority\s*=\s*true\b)/iu;
 const REVIEWED_DORMANT_SOURCE_PATHS = new Set([
@@ -265,6 +312,7 @@ const REVIEWED_DORMANT_SOURCE_PATHS = new Set([
   ACTION_LIFECYCLE_DURABLE_PORT_PATH,
   ACTION_LIFECYCLE_POSTGRES_ADAPTER_PATH,
   ACTION_LIFECYCLE_MIGRATION_PATH,
+  ACTION_WALLET_IDENTITY_BINDING_MIGRATION_PATH,
 ]);
 const REVIEWED_RUNTIME_DYNAMIC_IMPORTS = new Map([
   ['apps/api/src/application-root.ts', Object.freeze(['./local-development-app.module'])],
@@ -596,14 +644,288 @@ function validateDormantActionMigrationSnapshot(migrationSource, migrationSpecSo
     testMigrations?.filter(
       (value) => value === 'createMainnetFinancialActionLifecycleTestSchemaMigrationV0033',
     ).length !== 1 ||
+    productionMigrations?.filter(
+      (value) => value === 'createMainnetFinancialActionWalletIdentityBindingMigrationV0034',
+    ).length !== 1 ||
+    testMigrations?.filter(
+      (value) =>
+        value === 'createMainnetFinancialActionWalletIdentityBindingTestSchemaMigrationV0034',
+    ).length !== 1 ||
     occurrences(
       indexSource,
       "from './0033-create-mainnet-financial-action-lifecycle.migration';",
+    ) !== 2 ||
+    occurrences(
+      indexSource,
+      "from './0034-bind-mainnet-financial-action-wallet-identity.migration';",
     ) !== 2
   ) {
     errors.push(
-      '0033 migration index registration, predecessor order, or export inventory changed',
+      '0033/0034 migration index registration, predecessor order, or export inventory changed',
     );
+  }
+
+  return errors;
+}
+
+function validateWalletIdentityBindingMigrationSnapshot(
+  migrationSource,
+  migrationSpecSource,
+  migrationIntegrationSpecSource,
+) {
+  const errors = [];
+  const prepareBody = extractSection(
+    migrationSource,
+    'const PREPARE_V2_BODY = `',
+    'function createUpSql(',
+  );
+  const upBuilder = extractSection(
+    migrationSource,
+    'function createUpSql(',
+    'function createDownSql(',
+  );
+  const downBuilder = extractSection(
+    migrationSource,
+    'function createDownSql(',
+    'function createVerifierSql(',
+  );
+  const verifierBuilder = extractSection(
+    migrationSource,
+    'function createVerifierSql(',
+    'export function createMainnetFinancialActionWalletIdentityBindingMigration(',
+  );
+
+  if (
+    !exactArray(
+      extractImports(migrationSource),
+      EXPECTED_WALLET_IDENTITY_BINDING_MIGRATION_IMPORTS,
+    ) ||
+    hasUnsupportedExportSyntax(migrationSource) ||
+    !exactArray(extractExports(migrationSource), EXPECTED_WALLET_IDENTITY_BINDING_MIGRATION_EXPORTS)
+  ) {
+    errors.push('0034 wallet identity binding migration import or export inventory changed');
+  }
+  if (
+    !exactArray(
+      extractImports(migrationSpecSource),
+      EXPECTED_WALLET_IDENTITY_BINDING_MIGRATION_SPEC_IMPORTS,
+    ) ||
+    !exactArray(
+      extractImports(migrationIntegrationSpecSource),
+      EXPECTED_WALLET_IDENTITY_BINDING_MIGRATION_INTEGRATION_SPEC_IMPORTS,
+    ) ||
+    hasUnsupportedExportSyntax(migrationSpecSource) ||
+    hasUnsupportedExportSyntax(migrationIntegrationSpecSource) ||
+    extractExports(migrationSpecSource).length !== 0 ||
+    extractExports(migrationIntegrationSpecSource).length !== 0
+  ) {
+    errors.push('0034 wallet identity binding test import or export inventory changed');
+  }
+
+  if (
+    prepareBody === null ||
+    upBuilder === null ||
+    downBuilder === null ||
+    verifierBuilder === null
+  ) {
+    errors.push('0034 wallet identity binding SQL inventory is incomplete or reordered');
+    return errors;
+  }
+
+  if (
+    !migrationSource.includes("id: '0034'") ||
+    occurrences(migrationSource, "supersedesVerificationOf: ['0033']") !== 1 ||
+    !migrationSource.includes(
+      'bind dormant mainnet financial action preparation to registered wallet identity digests',
+    ) ||
+    !migrationSource.includes(`'${EXPECTED_WALLET_IDENTITY_PREPARE_FUNCTION_IDENTITY}'`)
+  ) {
+    errors.push('0034 wallet identity binding migration or function identity changed');
+  }
+
+  for (const marker of [
+    "['requested_wallet_identity_digest_versions', 'smallint[]']",
+    "['requested_wallet_identity_digests_hex', 'text[]']",
+    'procedure.pronargs = 32',
+    'pg_catalog.array_fill(\'i\'::"char", ARRAY[32])',
+    'CREATE FUNCTION prepare_mainnet_financial_action_lifecycle_v2(',
+    'LANGUAGE plpgsql SECURITY DEFINER VOLATILE PARALLEL UNSAFE',
+    "'ALTER FUNCTION %I.${PREPARE_V2} SET search_path TO pg_catalog, %I, pg_temp'",
+  ]) {
+    if (!migrationSource.includes(marker)) {
+      errors.push(`0034 wallet identity binding lacks exact function marker: ${marker}`);
+    }
+  }
+  if (
+    occurrences(prepareBody, 'prepare_mainnet_financial_action_lifecycle(') !== 1 ||
+    prepareBody.includes('prepare_mainnet_financial_action_lifecycle_v2(')
+  ) {
+    errors.push('0034 wallet identity binding no longer delegates exactly once to reviewed 0033');
+  }
+
+  for (const marker of [
+    'requested_wallet_identity_digest_versions IS NULL',
+    'requested_wallet_identity_digests_hex IS NULL',
+    'pg_catalog.array_ndims(requested_wallet_identity_digest_versions) IS DISTINCT FROM 1',
+    'pg_catalog.array_lower(requested_wallet_identity_digest_versions, 1) IS DISTINCT FROM 1',
+    'pg_catalog.cardinality(requested_wallet_identity_digest_versions) NOT BETWEEN 1 AND 3',
+    'requested_wallet_identity_digest_versions[candidate_index] <= 0',
+    '<= requested_wallet_identity_digest_versions[candidate_index - 1]',
+    "requested_wallet_identity_digests_hex[candidate_index] !~ '^[0-9a-f]{64}$'",
+    'pg_catalog.count(DISTINCT candidate.digest_hex)',
+    'IS DISTINCT FROM policy_accepted_read_versions',
+    "policy.policy_name = 'wallet-registration-identity-hmac'",
+  ]) {
+    if (!prepareBody.includes(marker)) {
+      errors.push(`0034 wallet identity candidate validation lost marker: ${marker}`);
+    }
+  }
+
+  const policyLock = prepareBody.indexOf(
+    "policy.policy_name = 'wallet-registration-identity-hmac'",
+  );
+  const intentLock = prepareBody.indexOf('FROM mainnet_financial_action_intents AS stored');
+  const linkageLock = prepareBody.indexOf('FROM yield_operations AS operation');
+  const aliasMatch = prepareBody.indexOf('INNER JOIN registered_wallet_identity_digests AS alias');
+  const delegate = prepareBody.indexOf(
+    'RETURN QUERY SELECT * FROM prepare_mainnet_financial_action_lifecycle(',
+  );
+  if (
+    policyLock < 0 ||
+    intentLock <= policyLock ||
+    linkageLock <= intentLock ||
+    aliasMatch <= linkageLock ||
+    delegate <= aliasMatch
+  ) {
+    errors.push('0034 wallet identity binding lock, proof, or delegation order changed');
+  }
+  for (const marker of [
+    'FOR SHARE;',
+    'WHERE stored.intent_id = requested_intent_id',
+    'FOR UPDATE;',
+    'wallet.wallet_id = requested_wallet_id',
+    'wallet.account_id = requested_account_id',
+    "wallet.status = 'ACTIVE'",
+    "wallet.registry_environment = 'MAINNET'",
+    "requested_network_id = wallet.chain_namespace || ':' || wallet.chain_reference",
+    'FOR UPDATE OF operation, submission, ledger_transaction, wallet',
+    'alias.wallet_id = requested_wallet_id',
+    'alias.account_id = requested_account_id',
+    'alias.address_digest_version =',
+    "pg_catalog.decode(\n              requested_wallet_identity_digests_hex[candidate.candidate_index], 'hex'",
+    "alias.status = 'ACTIVE'",
+    'alias.revoked_at IS NULL',
+  ]) {
+    if (!prepareBody.includes(marker)) {
+      errors.push(`0034 wallet identity binding lost atomic proof marker: ${marker}`);
+    }
+  }
+  if (
+    prepareBody.includes('wallet.address_digest_version') ||
+    prepareBody.includes('wallet.address_digest,')
+  ) {
+    errors.push('0034 wallet identity binding incorrectly requires the immutable parent digest');
+  }
+
+  for (const builder of [upBuilder, downBuilder]) {
+    if (
+      !builder.includes("LOCK TABLE ${HISTORY_TABLES.join(', ')} IN ACCESS EXCLUSIVE MODE;") ||
+      !builder.includes(
+        "${HISTORY_TABLES.map((table) => `EXISTS (SELECT 1 FROM ${table})`).join('\\n        OR ')}",
+      ) ||
+      !builder.includes("USING ERRCODE = '55000'")
+    ) {
+      errors.push('0034 wallet identity binding history transition is no longer fail closed');
+      break;
+    }
+  }
+  if (
+    !downBuilder.includes('DROP FUNCTION ${PREPARE_V2};') ||
+    downBuilder.includes('DROP TABLE') ||
+    downBuilder.includes('prepare_mainnet_financial_action_lifecycle(')
+  ) {
+    errors.push('0034 wallet identity binding rollback surface changed');
+  }
+
+  for (const marker of [
+    'REVOKE ALL ON FUNCTION ${PREPARE_V2} FROM ${guardedRoles}',
+    'NOT pg_catalog.has_function_privilege(${api}',
+    'NOT pg_catalog.has_function_privilege(${worker}',
+    'NOT pg_catalog.has_function_privilege(${legacy}',
+    'NOT pg_catalog.has_function_privilege(${balance}',
+    'NOT pg_catalog.has_function_privilege(${migration}',
+    "NOT pg_catalog.has_function_privilege('public'",
+    'acl.grantee <> procedure.proowner',
+    "procedure.proconfig = ARRAY[\n            'search_path=pg_catalog, '",
+    'pg_catalog.sha256(pg_catalog.convert_to(procedure.prosrc',
+  ]) {
+    if (!migrationSource.includes(marker)) {
+      errors.push(`0034 wallet identity binding lacks owner-only verifier marker: ${marker}`);
+    }
+  }
+  if (
+    migrationSource.includes('GRANT ') ||
+    /@(?:Injectable|Module|Controller)\s*\(|\bproviders\s*:|\bprocess\.env\b/u.test(
+      migrationSource,
+    ) ||
+    /\beip155:8453\b/u.test(migrationSource) ||
+    /\b(?:sendRawTransaction|sendTransaction|signTransaction|broadcastTransaction|eth_sendRawTransaction|job_outbox)\b/iu.test(
+      migrationSource,
+    )
+  ) {
+    errors.push('0034 wallet identity binding grants, registers, widens, or executes authority');
+  }
+  if (
+    /\b(?:INSERT\s+INTO|UPDATE\s+[A-Za-z_$][A-Za-z0-9_$]*\s+SET|DELETE\s+FROM|COPY\s+|pg_notify\s*\()/iu.test(
+      prepareBody,
+    ) ||
+    /\bRAISE\s+(?:DEBUG|LOG|INFO|NOTICE|WARNING)\b/iu.test(prepareBody) ||
+    /\b(?:wallet_address|plaintext|hmac_key|credential|private_key|secret)\b/iu.test(
+      migrationSource,
+    )
+  ) {
+    errors.push('0034 wallet identity candidates can be logged, persisted, or exposed');
+  }
+
+  if (
+    countDeclaredTests(migrationSpecSource) !== 8 ||
+    !migrationSpecSource.includes(
+      "describe('migration 0034 mainnet financial action wallet identity binding'",
+    ) ||
+    !migrationSpecSource.includes('adds one versioned 32-argument wrapper') ||
+    !migrationSpecSource.includes('validates a bounded exact key ring and every digest') ||
+    !migrationSpecSource.includes('locks and binds the exact active account wallet network') ||
+    !migrationSpecSource.includes("expect(up).not.toContain('GRANT ')") ||
+    !migrationSpecSource.includes("expect(up).not.toContain('wallet.address_digest_version')") ||
+    !migrationSpecSource.includes('refuses to bless legacy history')
+  ) {
+    errors.push('0034 wallet identity binding migration spec lost fail-closed evidence');
+  }
+  if (
+    countDeclaredTests(migrationIntegrationSpecSource) !== 5 ||
+    !migrationIntegrationSpecSource.includes(
+      "process.env.RUN_INFRASTRUCTURE_INTEGRATION === '1'",
+    ) ||
+    !migrationIntegrationSpecSource.includes(
+      "!['localhost', '127.0.0.1', '[::1]', '::1'].includes(hostname)",
+    ) ||
+    !migrationIntegrationSpecSource.includes('serverVersionNum < 160_000') ||
+    !migrationIntegrationSpecSource.includes('serverVersionNum >= 170_000') ||
+    !migrationIntegrationSpecSource.includes("({ id }) => id <= '0034'") ||
+    !migrationIntegrationSpecSource.includes('v1_execute') ||
+    !migrationIntegrationSpecSource.includes('v2_execute') ||
+    !migrationIntegrationSpecSource.includes('hostileCandidates') ||
+    !migrationIntegrationSpecSource.includes('expect(await historyCounts(pool)).toEqual(before)') ||
+    !migrationIntegrationSpecSource.includes(
+      'for (const network of [ETHEREUM_FIXTURE, SOLANA_FIXTURE])',
+    ) ||
+    !migrationIntegrationSpecSource.includes('parent-key retirement') ||
+    !migrationIntegrationSpecSource.includes('wallet_identity_digest_version: 1') ||
+    !migrationIntegrationSpecSource.includes('await setIdentityPolicy(pool, 2, [2])') ||
+    !migrationIntegrationSpecSource.includes('requireRunner().down(1)') ||
+    /\b(?:fetch|WebSocket|XMLHttpRequest)\s*\(/u.test(migrationIntegrationSpecSource)
+  ) {
+    errors.push('0034 wallet identity binding loopback integration lost security evidence');
   }
 
   return errors;
@@ -709,6 +1031,59 @@ function validateDormantDurableLifecycleSnapshot(
   if (PROHIBITED_ADAPTER_SQL_AUTHORITY.test(postgresAdapterSource)) {
     errors.push('dormant Postgres adapter contains grant, DDL, or write-table SQL authority');
   }
+  if (PROHIBITED_WALLET_IDENTITY_CANDIDATE_SINK.test(postgresAdapterSource)) {
+    errors.push('dormant Postgres adapter can log or serialize wallet identity key material');
+  }
+
+  const prepareKeyInventory = extractSection(
+    postgresAdapterSource,
+    'const PREPARE_KEYS = Object.freeze([',
+    'const LINK_KEYS = Object.freeze([',
+  );
+  const walletIdentityDerivation = extractSection(
+    postgresAdapterSource,
+    'function captureWalletIdentityKeyRing(',
+    '/** Pure pre-I/O encoder for migration 0034',
+  );
+  const prepareSql = extractSection(
+    postgresAdapterSource,
+    'const PREPARE_SQL = `',
+    'const BIND_SUBMISSION_SQL = `',
+  );
+  if (
+    prepareKeyInventory === null ||
+    /walletIdentity(?:DigestCandidates|DigestVersions|DigestsHex)/u.test(prepareKeyInventory) ||
+    walletIdentityDerivation === null ||
+    !walletIdentityDerivation.includes(
+      "function captureWalletIdentityKeyRing(value: unknown): WalletRegistrationKeyRing<'identity-hmac'>",
+    ) ||
+    !walletIdentityDerivation.includes('const candidates = ring.keys.map((candidate) => {') ||
+    !walletIdentityDerivation.includes(
+      'const reference = digestWalletIdentity(key, networkId, canonicalAddress);',
+    ) ||
+    !postgresAdapterSource.includes(
+      'walletIdentityDigestCandidates: deriveWalletIdentityDigestCandidates(',
+    ) ||
+    !postgresAdapterSource.includes('intent.walletAddress,') ||
+    !postgresAdapterSource.includes('captureWalletIdentityKeyRing(walletIdentityKeyRing)')
+  ) {
+    errors.push('dormant Postgres adapter no longer derives wallet identity candidates internally');
+  }
+  if (
+    prepareSql === null ||
+    !prepareSql.includes('FROM prepare_mainnet_financial_action_lifecycle_v2(') ||
+    !prepareSql.includes('$31::smallint[], $32::text[]') ||
+    occurrences(postgresAdapterSource, 'prepare_mainnet_financial_action_lifecycle_v2(') !== 1 ||
+    occurrences(postgresAdapterSource, 'prepare_mainnet_financial_action_lifecycle(') !== 0 ||
+    !postgresAdapterSource.includes(
+      'Object.freeze(args.walletIdentityDigestCandidates.map((candidate) => candidate.version))',
+    ) ||
+    !postgresAdapterSource.includes(
+      'Object.freeze(args.walletIdentityDigestCandidates.map((candidate) => candidate.value))',
+    )
+  ) {
+    errors.push('dormant Postgres adapter no longer uses only the address-bound V2 prepare call');
+  }
 
   for (const marker of [
     'mayAuthorizeFinancialAction: false;',
@@ -728,6 +1103,7 @@ function validateDormantDurableLifecycleSnapshot(
     'readonly #issuedResults = new WeakMap<object, IssuedResult>();',
     'readonly #requestMethods = new WeakMap<object, DatabaseMethod>();',
     "captureMethod<QueryWithCancellation>(postgres, 'queryWithCancellation')",
+    "walletIdentityKeyRing: WalletRegistrationKeyRing<'identity-hmac'>,",
     'ledgerSettlementAuthority: false as const',
     "recoveryMode: 'READ_THEN_RECONCILE_ONLY' as const",
     'reviewResult(',
@@ -738,7 +1114,7 @@ function validateDormantDurableLifecycleSnapshot(
   }
 
   if (
-    countDeclaredTests(postgresAdapterSpecSource) < 9 ||
+    countDeclaredTests(postgresAdapterSpecSource) < 14 ||
     !postgresAdapterSpecSource.includes(
       "describe('PostgresDormantMainnetFinancialActionLifecycleDurableAdapter'",
     ) ||
@@ -747,7 +1123,15 @@ function validateDormantDurableLifecycleSnapshot(
     !postgresAdapterSpecSource.includes('structuredClone(prepared.result.cursor)') ||
     !postgresAdapterSpecSource.includes("outcome: 'DATABASE_OUTCOME_UNKNOWN'") ||
     !postgresAdapterSpecSource.includes('ledgerSettlementAuthority: false') ||
-    !postgresAdapterSpecSource.includes('toHaveBeenCalledTimes(1)')
+    !postgresAdapterSpecSource.includes('toHaveBeenCalledTimes(1)') ||
+    !postgresAdapterSpecSource.includes(
+      'rejects forged identity key rings before any database operation',
+    ) ||
+    !postgresAdapterSpecSource.includes('prepare_mainnet_financial_action_lifecycle_v2') ||
+    !postgresAdapterSpecSource.includes('sorts rotated address candidates') ||
+    !postgresAdapterSpecSource.includes('different valid address') ||
+    !postgresAdapterSpecSource.includes('caller mutates plaintext after dispatch') ||
+    !postgresAdapterSpecSource.includes('walletIdentityDigestVersions: [1]')
   ) {
     errors.push(
       'dormant Postgres adapter spec lost exact provenance, one-call, or denial coverage',
@@ -763,7 +1147,7 @@ function validateDormantDurableLifecycleSnapshot(
     ) ||
     !postgresAdapterIntegrationSpecSource.includes('serverVersionNum < 160_000') ||
     !postgresAdapterIntegrationSpecSource.includes('serverVersionNum >= 170_000') ||
-    !postgresAdapterIntegrationSpecSource.includes("({ id }) => id <= '0033'") ||
+    !postgresAdapterIntegrationSpecSource.includes("({ id }) => id <= '0034'") ||
     !postgresAdapterIntegrationSpecSource.includes('await adapter.prepare(prepareRequest)') ||
     !postgresAdapterIntegrationSpecSource.includes('await adapter.bindSubmission(bindRequest)') ||
     !postgresAdapterIntegrationSpecSource.includes(
@@ -773,9 +1157,17 @@ function validateDormantDurableLifecycleSnapshot(
     !postgresAdapterIntegrationSpecSource.includes("outcome: 'UNKNOWN'") ||
     postgresAdapterIntegrationSpecSource.includes('adapter.recordBroadcast(') ||
     occurrences(postgresAdapterIntegrationSpecSource, 'ledgerSettlementAuthority: false') < 5 ||
-    !postgresAdapterIntegrationSpecSource.includes('ledger_authority_count: 0')
+    !postgresAdapterIntegrationSpecSource.includes('ledger_authority_count: 0') ||
+    !postgresAdapterIntegrationSpecSource.includes(
+      "createWalletRegistrationKeyRing('identity-hmac', 2",
+    ) ||
+    !postgresAdapterIntegrationSpecSource.includes('parentWalletAddressDigest') ||
+    !postgresAdapterIntegrationSpecSource.includes('currentWalletAddressDigest') ||
+    !postgresAdapterIntegrationSpecSource.includes('accepted_read_versions: [2]') ||
+    !postgresAdapterIntegrationSpecSource.includes('mismatchedIntentId') ||
+    !postgresAdapterIntegrationSpecSource.includes('intent_count: 0')
   ) {
-    errors.push('dormant Postgres adapter integration lost loopback 0033 flow or denial coverage');
+    errors.push('dormant Postgres adapter integration lost loopback 0034 flow or denial coverage');
   }
 
   return errors;
@@ -805,6 +1197,9 @@ export function validateDormantMainnetActionBoundarySnapshot(snapshot) {
     typeof snapshot.postgresAdapterIntegrationSpecSource !== 'string' ||
     typeof snapshot.migrationSource !== 'string' ||
     typeof snapshot.migrationSpecSource !== 'string' ||
+    typeof snapshot.walletIdentityBindingMigrationSource !== 'string' ||
+    typeof snapshot.walletIdentityBindingMigrationSpecSource !== 'string' ||
+    typeof snapshot.walletIdentityBindingMigrationIntegrationSpecSource !== 'string' ||
     typeof snapshot.migrationIndexSource !== 'string' ||
     !(snapshot.runtimeSources instanceof Map)
   ) {
@@ -877,16 +1272,48 @@ export function validateDormantMainnetActionBoundarySnapshot(snapshot) {
     errors.push('0033 action lifecycle migration spec bytes drifted from the reviewed source');
   }
   if (
+    createHash('sha256')
+      .update(snapshot.walletIdentityBindingMigrationSource, 'utf8')
+      .digest('hex') !== REVIEWED_ACTION_WALLET_IDENTITY_BINDING_MIGRATION_SHA256
+  ) {
+    errors.push('0034 wallet identity binding migration bytes drifted from the reviewed source');
+  }
+  if (
+    createHash('sha256')
+      .update(snapshot.walletIdentityBindingMigrationSpecSource, 'utf8')
+      .digest('hex') !== REVIEWED_ACTION_WALLET_IDENTITY_BINDING_MIGRATION_SPEC_SHA256
+  ) {
+    errors.push(
+      '0034 wallet identity binding migration spec bytes drifted from the reviewed source',
+    );
+  }
+  if (
+    createHash('sha256')
+      .update(snapshot.walletIdentityBindingMigrationIntegrationSpecSource, 'utf8')
+      .digest('hex') !== REVIEWED_ACTION_WALLET_IDENTITY_BINDING_MIGRATION_INTEGRATION_SPEC_SHA256
+  ) {
+    errors.push(
+      '0034 wallet identity binding migration integration spec bytes drifted from the reviewed source',
+    );
+  }
+  if (
     createHash('sha256').update(snapshot.migrationIndexSource, 'utf8').digest('hex') !==
     REVIEWED_DATABASE_MIGRATION_INDEX_SHA256
   ) {
-    errors.push('database migration index bytes drifted from the reviewed 0033 registration');
+    errors.push('database migration index bytes drifted from the reviewed 0033/0034 registration');
   }
   errors.push(
     ...validateDormantActionMigrationSnapshot(
       snapshot.migrationSource,
       snapshot.migrationSpecSource,
       snapshot.migrationIndexSource,
+    ),
+  );
+  errors.push(
+    ...validateWalletIdentityBindingMigrationSnapshot(
+      snapshot.walletIdentityBindingMigrationSource,
+      snapshot.walletIdentityBindingMigrationSpecSource,
+      snapshot.walletIdentityBindingMigrationIntegrationSpecSource,
     ),
   );
   errors.push(
@@ -985,7 +1412,7 @@ export function validateDormantMainnetActionBoundarySnapshot(snapshot) {
       errors.push(`runtime source contains unreviewed dynamic loading: ${path}`);
     } else if (ACTION_LIFECYCLE_DATABASE_FUNCTION_REFERENCE.test(runtimeSource)) {
       errors.push(
-        `migration-0033 lifecycle SQL function is referenced outside the reviewed adapter by runtime source ${path}`,
+        `migration-0033/0034 lifecycle SQL function is referenced outside the reviewed adapter by runtime source ${path}`,
       );
     } else if (RUNTIME_REFERENCE.test(runtimeSource)) {
       errors.push(`dormant mainnet action boundary is referenced by runtime source ${path}`);
@@ -993,7 +1420,7 @@ export function validateDormantMainnetActionBoundarySnapshot(snapshot) {
       normalizedPath(path) !== DATABASE_MIGRATION_INDEX_PATH &&
       ACTION_LIFECYCLE_MIGRATION_REFERENCE.test(runtimeSource)
     ) {
-      errors.push(`0033 dormant action persistence is referenced by runtime source ${path}`);
+      errors.push(`0033/0034 dormant action persistence is referenced by runtime source ${path}`);
     }
   }
   return [...new Set(errors)];
@@ -1092,6 +1519,18 @@ export function loadDormantMainnetActionBoundarySnapshot(repositoryRoot = REPOSI
       ),
       migrationSource: repositoryFile(repositoryRoot, ACTION_LIFECYCLE_MIGRATION_PATH),
       migrationSpecSource: repositoryFile(repositoryRoot, ACTION_LIFECYCLE_MIGRATION_SPEC_PATH),
+      walletIdentityBindingMigrationSource: repositoryFile(
+        repositoryRoot,
+        ACTION_WALLET_IDENTITY_BINDING_MIGRATION_PATH,
+      ),
+      walletIdentityBindingMigrationSpecSource: repositoryFile(
+        repositoryRoot,
+        ACTION_WALLET_IDENTITY_BINDING_MIGRATION_SPEC_PATH,
+      ),
+      walletIdentityBindingMigrationIntegrationSpecSource: repositoryFile(
+        repositoryRoot,
+        ACTION_WALLET_IDENTITY_BINDING_MIGRATION_INTEGRATION_SPEC_PATH,
+      ),
       migrationIndexSource: repositoryFile(repositoryRoot, DATABASE_MIGRATION_INDEX_PATH),
       runtimeSources,
     };
@@ -1115,7 +1554,7 @@ if (import.meta.url === invokedPath) {
   const errors = validateDormantMainnetActionBoundaryFiles();
   if (errors.length === 0) {
     console.log(
-      'Dormant mainnet action boundary is valid: 10 candidates, 0 enabled, owner-only 0033 persistence, unregistered durable adapter',
+      'Dormant mainnet action boundary is valid: 10 candidates, 0 enabled, owner-only 0033/0034 persistence, address-bound unregistered durable adapter',
     );
   } else {
     for (const error of errors) console.error(`- ${error}`);

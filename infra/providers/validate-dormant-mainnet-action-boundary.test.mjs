@@ -16,6 +16,9 @@ import {
   ACTION_LIFECYCLE_POSTGRES_ADAPTER_PATH,
   ACTION_LIFECYCLE_POSTGRES_ADAPTER_SPEC_PATH,
   ACTION_LIFECYCLE_SPEC_PATH,
+  ACTION_WALLET_IDENTITY_BINDING_MIGRATION_INTEGRATION_SPEC_PATH,
+  ACTION_WALLET_IDENTITY_BINDING_MIGRATION_PATH,
+  ACTION_WALLET_IDENTITY_BINDING_MIGRATION_SPEC_PATH,
   DATABASE_MIGRATION_INDEX_PATH,
   EXPECTED_ACTIONS,
   EXPECTED_PROVIDER_CANDIDATES,
@@ -30,6 +33,9 @@ import {
   REVIEWED_ACTION_LIFECYCLE_POSTGRES_ADAPTER_SHA256,
   REVIEWED_ACTION_LIFECYCLE_POSTGRES_ADAPTER_SPEC_SHA256,
   REVIEWED_ACTION_LIFECYCLE_SPEC_SHA256,
+  REVIEWED_ACTION_WALLET_IDENTITY_BINDING_MIGRATION_INTEGRATION_SPEC_SHA256,
+  REVIEWED_ACTION_WALLET_IDENTITY_BINDING_MIGRATION_SHA256,
+  REVIEWED_ACTION_WALLET_IDENTITY_BINDING_MIGRATION_SPEC_SHA256,
   REVIEWED_DATABASE_MIGRATION_INDEX_SHA256,
   validateDormantMainnetActionBoundaryFiles,
   validateDormantMainnetActionBoundarySnapshot,
@@ -49,6 +55,10 @@ function snapshot() {
     postgresAdapterIntegrationSpecSource: baseline.postgresAdapterIntegrationSpecSource,
     migrationSource: baseline.migrationSource,
     migrationSpecSource: baseline.migrationSpecSource,
+    walletIdentityBindingMigrationSource: baseline.walletIdentityBindingMigrationSource,
+    walletIdentityBindingMigrationSpecSource: baseline.walletIdentityBindingMigrationSpecSource,
+    walletIdentityBindingMigrationIntegrationSpecSource:
+      baseline.walletIdentityBindingMigrationIntegrationSpecSource,
     migrationIndexSource: baseline.migrationIndexSource,
     runtimeSources: new Map(baseline.runtimeSources),
   };
@@ -93,18 +103,48 @@ test('the exact Ethereum and Solana lending action candidate boundary is dormant
   assert.equal(REVIEWED_ACTION_LIFECYCLE_POSTGRES_ADAPTER_INTEGRATION_SPEC_SHA256.length, 64);
   assert.equal(REVIEWED_ACTION_LIFECYCLE_MIGRATION_SHA256.length, 64);
   assert.equal(REVIEWED_ACTION_LIFECYCLE_MIGRATION_SPEC_SHA256.length, 64);
+  assert.equal(REVIEWED_ACTION_WALLET_IDENTITY_BINDING_MIGRATION_SHA256.length, 64);
+  assert.equal(REVIEWED_ACTION_WALLET_IDENTITY_BINDING_MIGRATION_SPEC_SHA256.length, 64);
+  assert.equal(
+    REVIEWED_ACTION_WALLET_IDENTITY_BINDING_MIGRATION_INTEGRATION_SPEC_SHA256.length,
+    64,
+  );
   assert.equal(REVIEWED_DATABASE_MIGRATION_INDEX_SHA256.length, 64);
+  assert.equal(
+    REVIEWED_ACTION_LIFECYCLE_POSTGRES_ADAPTER_SHA256,
+    '6cc68db5865afc2fd5e79939dfc195b5b7ac41d653156af451cbb92187c5e6e4',
+  );
+  assert.equal(
+    REVIEWED_ACTION_LIFECYCLE_POSTGRES_ADAPTER_SPEC_SHA256,
+    '557230d0ebd066d18cf67273b20e600aab9b73929ec7d2c50e846cde3a435b70',
+  );
+  assert.equal(
+    REVIEWED_ACTION_LIFECYCLE_POSTGRES_ADAPTER_INTEGRATION_SPEC_SHA256,
+    '2d91c396aad02abb9c35bc997f994bd96682da2eac367fc146ef2316c11bef2c',
+  );
   assert.equal(
     REVIEWED_ACTION_LIFECYCLE_MIGRATION_SHA256,
     'c3840f3b3cd7de0e7dbf159c335fbe0784e55e81c936defdf618c9b0092ffa27',
   );
   assert.equal(
     REVIEWED_ACTION_LIFECYCLE_MIGRATION_SPEC_SHA256,
-    '7015c5fc30584e868cbdc2df3a376479521d1972f516134d4e95c595a4b7816e',
+    'a45f5e3cb86e4c118d0f3579013a2c3d3a6f34f19a9de8d1900bdf8cf1b0ec03',
+  );
+  assert.equal(
+    REVIEWED_ACTION_WALLET_IDENTITY_BINDING_MIGRATION_SHA256,
+    '11fd11a882e81f417d0efdfbbb7da3c8bed0171ed9aec420068772e8c56a75a7',
+  );
+  assert.equal(
+    REVIEWED_ACTION_WALLET_IDENTITY_BINDING_MIGRATION_SPEC_SHA256,
+    '5cd10d6162cfa5af54f2941176dc9dd3dba3d7dd1a5a85276e1603f890b4fd71',
+  );
+  assert.equal(
+    REVIEWED_ACTION_WALLET_IDENTITY_BINDING_MIGRATION_INTEGRATION_SPEC_SHA256,
+    '7aa0e97a3563468bd1c520a80876ee0f7c12939f13b3a8021d9e6bb44b49d31b',
   );
   assert.equal(
     REVIEWED_DATABASE_MIGRATION_INDEX_SHA256,
-    '6ec4f52c67e555070782c3b0a87950ff887e1f513cd92567534ee9dd9393a78b',
+    'd62add472520e4101623d0e0fcefe600ec0bd028e3c5dc8b5e28c9feb64c66fb',
   );
 });
 
@@ -320,6 +360,16 @@ test('adapter database access is one-call, cancellable, allowlisted, and retry-f
     },
   );
   mutationReports(
+    'V1 prepare fallback',
+    'dormant Postgres adapter no longer uses only the address-bound V2 prepare call',
+    (value) => {
+      value.postgresAdapterSource = value.postgresAdapterSource.replace(
+        'FROM prepare_mainnet_financial_action_lifecycle_v2(',
+        'FROM prepare_mainnet_financial_action_lifecycle(',
+      );
+    },
+  );
+  mutationReports(
     'second database call',
     'dormant Postgres adapter no longer performs one cancellable call without retry',
     (value) => {
@@ -336,6 +386,41 @@ test('adapter database access is one-call, cancellable, allowlisted, and retry-f
     mutationReports(
       source,
       'dormant Postgres adapter no longer performs one cancellable call without retry',
+      (value) => {
+        value.postgresAdapterSource += source;
+      },
+    );
+  }
+});
+
+test('adapter candidates stay internally derived, V2-only, and out of logs', () => {
+  mutationReports(
+    'caller-authored candidate versions',
+    'dormant Postgres adapter no longer derives wallet identity candidates internally',
+    (value) => {
+      value.postgresAdapterSource = value.postgresAdapterSource.replace(
+        "  'correlationId',",
+        "  'correlationId',\n  'walletIdentityDigestVersions',",
+      );
+    },
+  );
+  mutationReports(
+    'digest derivation removed',
+    'dormant Postgres adapter no longer derives wallet identity candidates internally',
+    (value) => {
+      value.postgresAdapterSource = value.postgresAdapterSource.replace(
+        'const reference = digestWalletIdentity(key, networkId, canonicalAddress);',
+        'const reference = candidate;',
+      );
+    },
+  );
+  for (const source of [
+    '\nlogger.info(walletIdentityDigestCandidates);',
+    '\nJSON.stringify(walletIdentityKeyRing);',
+  ]) {
+    mutationReports(
+      source,
+      'dormant Postgres adapter can log or serialize wallet identity key material',
       (value) => {
         value.postgresAdapterSource += source;
       },
@@ -396,20 +481,31 @@ test('adapter unit and loopback integration security evidence is pinned', () => 
       );
     },
   );
+  mutationReports(
+    'unit wallet key-ring rejection removed',
+    'dormant Postgres adapter spec lost exact provenance, one-call, or denial coverage',
+    (value) => {
+      value.postgresAdapterSpecSource = value.postgresAdapterSpecSource.replace(
+        'rejects forged identity key rings before any database operation',
+        'accepts unreviewed identity configuration',
+      );
+    },
+  );
   for (const [name, from, to] of [
     ['loopback removed', "!['localhost', '127.0.0.1', '[::1]', '::1'].includes(hostname)", 'false'],
     ['PostgreSQL 16 removed', 'serverVersionNum < 160_000', 'serverVersionNum < 1'],
-    ['migration cap widened', "({ id }) => id <= '0033'", "({ id }) => id <= '9999'"],
+    ['migration cap widened', "({ id }) => id <= '0034'", "({ id }) => id <= '9999'"],
     [
       'direct reconciliation removed',
       'await adapter.recordReconciliation(reconciliationRequest)',
       'await adapter.recordBroadcast(reconciliationRequest)',
     ],
     ['settlement authority enabled', 'ledger_authority_count: 0', 'ledger_authority_count: 1'],
+    ['rotation evidence removed', 'accepted_read_versions: [2]', 'accepted_read_versions: [1]'],
   ]) {
     mutationReports(
       name,
-      'dormant Postgres adapter integration lost loopback 0033 flow or denial coverage',
+      'dormant Postgres adapter integration lost loopback 0034 flow or denial coverage',
       (value) => {
         value.postgresAdapterIntegrationSpecSource =
           value.postgresAdapterIntegrationSpecSource.replace(from, to);
@@ -435,7 +531,7 @@ test('the exact 0033 migration, spec, and index inventory is pinned', () => {
   );
   mutationReports(
     'migration index byte drift',
-    'database migration index bytes drifted from the reviewed 0033 registration',
+    'database migration index bytes drifted from the reviewed 0033/0034 registration',
     (value) => {
       value.migrationIndexSource += '\n// reordered elsewhere';
     },
@@ -452,10 +548,159 @@ test('the exact 0033 migration, spec, and index inventory is pinned', () => {
   );
 });
 
-test('0033 index registration and exact predecessor order fail closed', () => {
+test('the exact 0034 migration and focused security evidence are pinned', () => {
+  for (const [name, field, expectedError] of [
+    [
+      '0034 migration byte drift',
+      'walletIdentityBindingMigrationSource',
+      '0034 wallet identity binding migration bytes drifted from the reviewed source',
+    ],
+    [
+      '0034 migration spec byte drift',
+      'walletIdentityBindingMigrationSpecSource',
+      '0034 wallet identity binding migration spec bytes drifted from the reviewed source',
+    ],
+    [
+      '0034 migration integration byte drift',
+      'walletIdentityBindingMigrationIntegrationSpecSource',
+      '0034 wallet identity binding migration integration spec bytes drifted from the reviewed source',
+    ],
+  ]) {
+    mutationReports(name, expectedError, (value) => {
+      value[field] += '\n// unreviewed drift';
+    });
+  }
+  mutationReports(
+    '0034 detached import',
+    '0034 wallet identity binding migration import or export inventory changed',
+    (value) => {
+      value.walletIdentityBindingMigrationSource = `import { request } from 'node:https';\n${value.walletIdentityBindingMigrationSource}`;
+    },
+  );
+  mutationReports(
+    '0034 weak migration spec',
+    '0034 wallet identity binding migration spec lost fail-closed evidence',
+    (value) => {
+      value.walletIdentityBindingMigrationSpecSource =
+        value.walletIdentityBindingMigrationSpecSource.replace(
+          'validates a bounded exact key ring and every digest',
+          'performs a shallow happy-path check',
+        );
+    },
+  );
+  mutationReports(
+    '0034 weak loopback integration',
+    '0034 wallet identity binding loopback integration lost security evidence',
+    (value) => {
+      value.walletIdentityBindingMigrationIntegrationSpecSource =
+        value.walletIdentityBindingMigrationIntegrationSpecSource.replaceAll(
+          'hostileCandidates',
+          'uncheckedCandidates',
+        );
+    },
+  );
+});
+
+test('0034 function identity, candidate proof, lock order, and rotation rules fail closed', () => {
+  mutationReports(
+    'function identity changed',
+    '0034 wallet identity binding migration or function identity changed',
+    (value) => {
+      value.walletIdentityBindingMigrationSource =
+        value.walletIdentityBindingMigrationSource.replace(
+          "uuid,smallint[],text[])';",
+          "uuid,text[],text[])';",
+        );
+    },
+  );
+  mutationReports(
+    'accepted-version equality removed',
+    '0034 wallet identity candidate validation lost marker: IS DISTINCT FROM policy_accepted_read_versions',
+    (value) => {
+      value.walletIdentityBindingMigrationSource =
+        value.walletIdentityBindingMigrationSource.replace(
+          'IS DISTINCT FROM policy_accepted_read_versions',
+          'IS NOT DISTINCT FROM policy_accepted_read_versions',
+        );
+    },
+  );
+  mutationReports(
+    'wallet lock removed',
+    '0034 wallet identity binding lost atomic proof marker: FOR UPDATE OF operation, submission, ledger_transaction, wallet',
+    (value) => {
+      value.walletIdentityBindingMigrationSource =
+        value.walletIdentityBindingMigrationSource.replace(
+          'FOR UPDATE OF operation, submission, ledger_transaction, wallet',
+          'FOR UPDATE OF operation',
+        );
+    },
+  );
+  mutationReports(
+    'parent digest required after rotation',
+    '0034 wallet identity binding incorrectly requires the immutable parent digest',
+    (value) => {
+      value.walletIdentityBindingMigrationSource =
+        value.walletIdentityBindingMigrationSource.replace(
+          "AND wallet.registry_environment = 'MAINNET'",
+          "AND wallet.registry_environment = 'MAINNET'\n        AND wallet.address_digest_version = requested_wallet_identity_digest_versions[1]",
+        );
+    },
+  );
+  mutationReports(
+    'second V1 delegation',
+    '0034 wallet identity binding no longer delegates exactly once to reviewed 0033',
+    (value) => {
+      value.walletIdentityBindingMigrationSource =
+        value.walletIdentityBindingMigrationSource.replace(
+          'RETURN QUERY SELECT * FROM prepare_mainnet_financial_action_lifecycle(',
+          'PERFORM prepare_mainnet_financial_action_lifecycle(\n        requested_intent_id);\n      RETURN QUERY SELECT * FROM prepare_mainnet_financial_action_lifecycle(',
+        );
+    },
+  );
+});
+
+test('0034 grants, runtime activation, candidate persistence, and logging fail closed', () => {
+  for (const source of [
+    "\nconst unsafeGrant = 'GRANT EXECUTE ON FUNCTION prepare_mainnet_financial_action_lifecycle_v2 TO crypto_api_runtime';",
+    '\n@Controller() class RuntimeWalletBinding {}',
+    "\nconst unreviewedNetwork = 'eip155:8453';",
+  ]) {
+    mutationReports(
+      source,
+      '0034 wallet identity binding grants, registers, widens, or executes authority',
+      (value) => {
+        value.walletIdentityBindingMigrationSource += source;
+      },
+    );
+  }
+  for (const [name, injected] of [
+    [
+      'candidate persistence',
+      'INSERT INTO unsafe_wallet_candidate_log VALUES (requested_wallet_identity_digests_hex);',
+    ],
+    [
+      'candidate logging',
+      "RAISE LOG 'wallet identity candidates %', requested_wallet_identity_digests_hex;",
+    ],
+  ]) {
+    mutationReports(
+      name,
+      '0034 wallet identity candidates can be logged, persisted, or exposed',
+      (value) => {
+        value.walletIdentityBindingMigrationSource =
+          value.walletIdentityBindingMigrationSource.replace(
+            'RETURN QUERY SELECT * FROM prepare_mainnet_financial_action_lifecycle(',
+            `${injected}\n      RETURN QUERY SELECT * FROM prepare_mainnet_financial_action_lifecycle(`,
+          );
+      },
+    );
+  }
+});
+
+test('0033/0034 index registration and exact predecessor order fail closed', () => {
   mutationReports(
     'production order drift',
-    '0033 migration index registration, predecessor order, or export inventory changed',
+    '0033/0034 migration index registration, predecessor order, or export inventory changed',
     (value) => {
       value.migrationIndexSource = value.migrationIndexSource.replace(
         /createMainnetBalanceAgreementEvidenceV2MigrationV0032,\s+createMainnetFinancialActionLifecycleMigrationV0033,/u,
@@ -464,8 +709,18 @@ test('0033 index registration and exact predecessor order fail closed', () => {
     },
   );
   mutationReports(
+    'wallet binding order drift',
+    '0033/0034 migration index registration, predecessor order, or export inventory changed',
+    (value) => {
+      value.migrationIndexSource = value.migrationIndexSource.replace(
+        /createMainnetFinancialActionLifecycleMigrationV0033,\s+createMainnetFinancialActionWalletIdentityBindingMigrationV0034,/u,
+        'createMainnetFinancialActionWalletIdentityBindingMigrationV0034,\n  createMainnetFinancialActionLifecycleMigrationV0033,',
+      );
+    },
+  );
+  mutationReports(
     'duplicate registration',
-    '0033 migration index registration, predecessor order, or export inventory changed',
+    '0033/0034 migration index registration, predecessor order, or export inventory changed',
     (value) => {
       value.migrationIndexSource = value.migrationIndexSource.replaceAll(
         'createMainnetFinancialActionLifecycleMigrationV0033,',
@@ -474,8 +729,28 @@ test('0033 index registration and exact predecessor order fail closed', () => {
     },
   );
   mutationReports(
+    'duplicate wallet binding registration',
+    '0033/0034 migration index registration, predecessor order, or export inventory changed',
+    (value) => {
+      value.migrationIndexSource = value.migrationIndexSource.replaceAll(
+        'createMainnetFinancialActionWalletIdentityBindingMigrationV0034,',
+        'createMainnetFinancialActionWalletIdentityBindingMigrationV0034,\n  createMainnetFinancialActionWalletIdentityBindingMigrationV0034,',
+      );
+    },
+  );
+  mutationReports(
+    'detached wallet binding import',
+    '0033/0034 migration index registration, predecessor order, or export inventory changed',
+    (value) => {
+      value.migrationIndexSource = value.migrationIndexSource.replace(
+        "from './0034-bind-mainnet-financial-action-wallet-identity.migration';",
+        "from './0034-unreviewed.migration';",
+      );
+    },
+  );
+  mutationReports(
     'detached import',
-    '0033 migration index registration, predecessor order, or export inventory changed',
+    '0033/0034 migration index registration, predecessor order, or export inventory changed',
     (value) => {
       value.migrationIndexSource = value.migrationIndexSource.replace(
         "from './0033-create-mainnet-financial-action-lifecycle.migration';",
@@ -606,11 +881,11 @@ test('0033 canonical identities, digest-only evidence, framing, and goldens fail
   );
 });
 
-test('only the reviewed migration index may wire or reference 0033 at runtime', () => {
+test('only the reviewed migration index may wire or reference 0033/0034 at runtime', () => {
   assert.ok(baseline.runtimeSources.has(DATABASE_MIGRATION_INDEX_PATH));
   mutationReports(
     'runtime migration import',
-    '0033 dormant action persistence is referenced by runtime source apps/api/src/application-root.ts',
+    '0033/0034 dormant action persistence is referenced by runtime source apps/api/src/application-root.ts',
     (value) => {
       value.runtimeSources.set(
         'apps/api/src/application-root.ts',
@@ -619,8 +894,18 @@ test('only the reviewed migration index may wire or reference 0033 at runtime', 
     },
   );
   mutationReports(
+    'runtime wallet binding migration import',
+    '0033/0034 dormant action persistence is referenced by runtime source apps/api/src/application-root.ts',
+    (value) => {
+      value.runtimeSources.set(
+        'apps/api/src/application-root.ts',
+        `${value.runtimeSources.get('apps/api/src/application-root.ts')}\nimport { createMainnetFinancialActionWalletIdentityBindingMigrationV0034 } from './infrastructure/database/migrations/0034-bind-mainnet-financial-action-wallet-identity.migration';`,
+      );
+    },
+  );
+  mutationReports(
     'runtime repository access',
-    '0033 dormant action persistence is referenced by runtime source apps/api/src/mainnet-actions/runtime-repository.ts',
+    '0033/0034 dormant action persistence is referenced by runtime source apps/api/src/mainnet-actions/runtime-repository.ts',
     (value) => {
       value.runtimeSources.set(
         'apps/api/src/mainnet-actions/runtime-repository.ts',
@@ -630,11 +915,21 @@ test('only the reviewed migration index may wire or reference 0033 at runtime', 
   );
   mutationReports(
     'runtime lifecycle SQL function',
-    'migration-0033 lifecycle SQL function is referenced outside the reviewed adapter by runtime source apps/api/src/mainnet-actions/unsafe-durable-store.ts',
+    'migration-0033/0034 lifecycle SQL function is referenced outside the reviewed adapter by runtime source apps/api/src/mainnet-actions/unsafe-durable-store.ts',
     (value) => {
       value.runtimeSources.set(
         'apps/api/src/mainnet-actions/unsafe-durable-store.ts',
         "const sql = 'SELECT * FROM prepare_mainnet_financial_action_lifecycle($1)';",
+      );
+    },
+  );
+  mutationReports(
+    'runtime V2 lifecycle SQL function',
+    'migration-0033/0034 lifecycle SQL function is referenced outside the reviewed adapter by runtime source apps/api/src/mainnet-actions/unsafe-wallet-binding-store.ts',
+    (value) => {
+      value.runtimeSources.set(
+        'apps/api/src/mainnet-actions/unsafe-wallet-binding-store.ts',
+        "const sql = 'SELECT * FROM prepare_mainnet_financial_action_lifecycle_v2($1)';",
       );
     },
   );
@@ -708,6 +1003,9 @@ test('malformed snapshots and runtime inventories fail closed without throwing',
   mutationRejected('missing migration source', (value) => {
     delete value.migrationSource;
   });
+  mutationRejected('missing wallet binding migration source', (value) => {
+    delete value.walletIdentityBindingMigrationSource;
+  });
   mutationRejected('malformed migration index', (value) => {
     value.migrationIndexSource = null;
   });
@@ -780,6 +1078,30 @@ test('repository loading rejects missing reviewed artifacts with a value-free er
       repositoryRoot,
       ACTION_LIFECYCLE_MIGRATION_SPEC_PATH,
       baseline.migrationSpecSource,
+    );
+    assert.deepEqual(validateDormantMainnetActionBoundaryFiles(repositoryRoot), [
+      ACTION_BOUNDARY_INPUT_ERROR,
+    ]);
+    writeFixture(
+      repositoryRoot,
+      ACTION_WALLET_IDENTITY_BINDING_MIGRATION_PATH,
+      baseline.walletIdentityBindingMigrationSource,
+    );
+    assert.deepEqual(validateDormantMainnetActionBoundaryFiles(repositoryRoot), [
+      ACTION_BOUNDARY_INPUT_ERROR,
+    ]);
+    writeFixture(
+      repositoryRoot,
+      ACTION_WALLET_IDENTITY_BINDING_MIGRATION_SPEC_PATH,
+      baseline.walletIdentityBindingMigrationSpecSource,
+    );
+    assert.deepEqual(validateDormantMainnetActionBoundaryFiles(repositoryRoot), [
+      ACTION_BOUNDARY_INPUT_ERROR,
+    ]);
+    writeFixture(
+      repositoryRoot,
+      ACTION_WALLET_IDENTITY_BINDING_MIGRATION_INTEGRATION_SPEC_PATH,
+      baseline.walletIdentityBindingMigrationIntegrationSpecSource,
     );
     assert.deepEqual(validateDormantMainnetActionBoundaryFiles(repositoryRoot), [
       ACTION_BOUNDARY_INPUT_ERROR,
