@@ -11,6 +11,8 @@ import * as activeScopeProviderResearchCapture from '../infra/providers/validate
 import { loadValidatedProviderDecisionSnapshot } from '../infra/providers/validate-kan-62-provider-decision.mjs';
 // @ts-expect-error The audited local validator is an ESM JavaScript module without declarations.
 import { validateDormantProviderInventoryFiles } from '../infra/providers/validate-dormant-provider-inventory.mjs';
+// @ts-expect-error The audited local validator is an ESM JavaScript module without declarations.
+import { validateDormantMainnetActionBoundaryFiles } from '../infra/providers/validate-dormant-mainnet-action-boundary.mjs';
 // @ts-expect-error The operations-owned audited manifest boundary is an ESM JavaScript module.
 import * as releaseCandidateManifest from './release-candidate-manifest.mjs';
 import {
@@ -856,7 +858,7 @@ const REVIEWED_BALANCE_CONSUMER_ARTIFACT_SHA256 = Object.freeze({
   sqsModuleSource: 'dc958100bd372500a9428c28cc6219a4cb00db61314a63478368d0b0cf95221b',
   sqsTokensSource: REVIEWED_SQS_TOKENS_SOURCE_SHA256,
   apiPackageSource: 'c911e7171be6ff64908d1c15fc1d240f51ace8e8b90d6bcad4c605c994439774',
-  rootPackageSource: '1a2c762fe9278975a123073be69b7dc332b547e348ecbb71303233da7ebac8fd',
+  rootPackageSource: 'a757b5cc519c311ce2c351c4b3980535cd2fe51991ce899914bbeffaa375478a',
   rootPackageLockSource: 'ac745baf70f2e70b3ba779612f0a3cc2b10692860a47c54c927a1e4805b2e6a6',
   applicationTemplateSource: '58b040eea3858661d45ab0f1334457c0b937cfb8179bad665aa3bb649171807c',
   applicationValidatorSource: '3da9441a8d3c5de0b47b88fd0c11d489c940234702f768ea9774279f7fab3e00',
@@ -14305,8 +14307,15 @@ export function loadRepositoryProductionPreflightInput(
   }
   let dormantProviderInventoryValidationPassed = false;
   try {
-    const errors = validateDormantProviderInventoryFiles(repositoryRoot) as unknown;
-    dormantProviderInventoryValidationPassed = Array.isArray(errors) && errors.length === 0;
+    const inventoryErrors = validateDormantProviderInventoryFiles(repositoryRoot) as unknown;
+    const actionBoundaryErrors = validateDormantMainnetActionBoundaryFiles(
+      repositoryRoot,
+    ) as unknown;
+    dormantProviderInventoryValidationPassed =
+      Array.isArray(inventoryErrors) &&
+      inventoryErrors.length === 0 &&
+      Array.isArray(actionBoundaryErrors) &&
+      actionBoundaryErrors.length === 0;
   } catch {
     // The evaluator emits a distinct closed inventory-validation blocker.
   }
