@@ -63,6 +63,23 @@ describe('authentication configuration', () => {
     expect(Object.isFrozen(config)).toBe(true);
   });
 
+  it.each(['production', 'Production', ' production '] as const)(
+    'requires explicit managed OIDC when NODE_ENV is %s',
+    (nodeEnvironment) => {
+      for (const authMode of [undefined, 'disabled'] as const) {
+        const environment: NodeJS.ProcessEnv = { NODE_ENV: nodeEnvironment };
+        if (authMode !== undefined) environment.AUTH_MODE = authMode;
+
+        expect(() => loadAuthenticationConfig(environment)).toThrow(
+          expect.objectContaining({
+            code: 'CONFIGURATION_ERROR',
+            field: 'AUTH_MODE',
+          }),
+        );
+      }
+    },
+  );
+
   it.each([
     'OIDC_CLIENT_ID',
     'OIDC_REQUIRED_TOKEN_USE',

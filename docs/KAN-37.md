@@ -158,10 +158,11 @@ emit an `address:port` value that this parser deliberately rejects.
 
 ## Configuration and rotation rules
 
-`AUTH_MODE` defaults to `disabled`. Disabled mode keeps the principal resolver
-deny-all and rejects stray OIDC configuration. Enabling `oidc` requires the
-complete `OIDC_*`/`AUTH_*` contract validated in
-`authentication.config.ts`; secrets are never assigned usable defaults.
+`AUTH_MODE` defaults to `disabled` only outside production. Disabled mode keeps
+the principal resolver deny-all and rejects stray OIDC configuration. A
+production API refuses to start unless `AUTH_MODE=oidc`; enabling it requires
+the complete `OIDC_*`/`AUTH_*` contract validated in
+`authentication.config.ts`. Secrets are never assigned usable defaults.
 
 Production identity, session, and CSRF HMAC configuration now requires three
 separate canonical JSON key rings. Each ring contains one to three keys with

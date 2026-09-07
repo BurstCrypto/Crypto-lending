@@ -407,6 +407,9 @@ export function loadAuthenticationConfig(
   const mode = configuredMode === undefined ? 'disabled' : configuredMode;
   if (mode !== 'disabled' && mode !== 'oidc') return fail('AUTH_MODE');
   if (mode === 'disabled') {
+    if (environment.NODE_ENV?.trim().toLowerCase() === 'production') {
+      return fail('AUTH_MODE');
+    }
     const unexpected = OIDC_VARIABLES.find((name) => environment[name] !== undefined);
     if (unexpected) return fail(unexpected);
     return Object.freeze({ mode: 'disabled' });
