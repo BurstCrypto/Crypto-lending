@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { readdirSync, realpathSync } from 'node:fs';
+import { opendirSync, realpathSync } from 'node:fs';
 import { dirname, relative, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { TextDecoder } from 'node:util';
@@ -16,6 +16,9 @@ const API_SOURCE_ROOT = 'apps/api/src';
 export const MAX_DORMANT_PROVIDER_ARTIFACT_BYTES = 2 * 1024 * 1024;
 export const MAX_DORMANT_PROVIDER_RUNTIME_FILES = 4_096;
 export const MAX_DORMANT_PROVIDER_RUNTIME_BYTES = 24 * 1024 * 1024;
+export const MAX_DORMANT_PROVIDER_RUNTIME_DIRECTORIES = 4_096;
+export const MAX_DORMANT_PROVIDER_RUNTIME_DEPTH = 64;
+export const MAX_DORMANT_PROVIDER_RUNTIME_ENTRIES = 16_384;
 export const DORMANT_PROVIDER_INVENTORY_INPUT_ERROR =
   'Dormant provider inventory inputs must be non-empty, stable, single-link regular files of at most 2097152 bytes at canonical paths inside the repository and contain UTF-8 text without a byte-order mark.';
 
@@ -192,6 +195,8 @@ export const DORMANT_ACCOUNT_POSITION_SEMANTICS = Object.freeze([
     useSymbol: 'MORPHO_BLUE_ACCOUNT_POSITION_SEMANTICS_USE',
     use: 'DORMANT_MORPHO_BLUE_ACCOUNT_POSITION_SEMANTICS_ONLY',
     minimumTests: 10,
+    sha256: 'ddf94542537ec5595b65143fc2563ead405edc6fc61a3abc077b58bf3420e0f6',
+    specSha256: '4f9ca78e82be564cbfddba0994d8c845025759a006ba90d63f2af9264270853b',
   }),
   Object.freeze({
     id: 'euler-account-position-semantics',
@@ -202,6 +207,8 @@ export const DORMANT_ACCOUNT_POSITION_SEMANTICS = Object.freeze([
     useSymbol: 'EULER_V2_ACCOUNT_POSITION_SEMANTICS_USE',
     use: 'DORMANT_EULER_V2_ACCOUNT_AND_EVC_SEMANTICS_ONLY',
     minimumTests: 7,
+    sha256: 'dfcb25ed82404ed8e8ce388b1045d09a31e579cf907b5df543d3c26b5fe93977',
+    specSha256: 'bced3208b1c384176ac05f2a24def3bc463d27bb2c6b38851e06560207e90c21',
   }),
   Object.freeze({
     id: 'gearbox-account-position-semantics',
@@ -212,6 +219,8 @@ export const DORMANT_ACCOUNT_POSITION_SEMANTICS = Object.freeze([
     useSymbol: 'GEARBOX_V3_ACCOUNT_POSITION_SEMANTICS_USE',
     use: 'DORMANT_GEARBOX_V3_USDC_ACCOUNT_POSITION_SEMANTICS_ONLY',
     minimumTests: 13,
+    sha256: 'b7237a614b04658cf54a520907151742ba59670f96860ce8b7d2f9333b4ad59b',
+    specSha256: '77564a7329dbe0454a07a24bfb2b34c42d3dbba80b5569ee1bf6e14772e43358',
   }),
   Object.freeze({
     id: 'save-account-position-semantics',
@@ -222,6 +231,8 @@ export const DORMANT_ACCOUNT_POSITION_SEMANTICS = Object.freeze([
     useSymbol: 'SAVE_LEND_ACCOUNT_POSITION_SEMANTICS_USE',
     use: 'DORMANT_SAVE_LEND_ACCOUNT_POSITION_SUPPLIED_SNAPSHOT_ONLY',
     minimumTests: 9,
+    sha256: 'e57b679cbc1218f481e7b2402db46fe57ff4db3e91c7311c5e4e5cd61b540c09',
+    specSha256: 'dff7d31028aedaa4d50324e368ee9755f41ddc5f33e333b9d7b2c323723b47d4',
   }),
   Object.freeze({
     id: 'marginfi-account-position-semantics',
@@ -232,6 +243,8 @@ export const DORMANT_ACCOUNT_POSITION_SEMANTICS = Object.freeze([
     useSymbol: 'MARGINFI_V2_ACCOUNT_POSITION_SEMANTICS_USE',
     use: 'DORMANT_MARGINFI_V2_ACCOUNT_POSITION_SUPPLIED_SNAPSHOT_ONLY',
     minimumTests: 14,
+    sha256: 'dacd560ed037d7c4355a069dda3b911abae1cd081850c7fb38b247ce4450b7ab',
+    specSha256: '97d921a4f0bdd1997aba09d5278de3c8b358e80401e42866b3a38b7ccfb41dc7',
   }),
 ]);
 
@@ -251,6 +264,13 @@ const REVIEWED_SEMANTICS_IMPORTS = Object.freeze([
 ]);
 const PROHIBITED_SEMANTICS_RUNTIME =
   /(?:\bprocess(?:\.|\[)|\b(?:fetch|WebSocket|XMLHttpRequest|eval|Function)\s*\()/u;
+const REVIEWED_RUNTIME_DYNAMIC_IMPORTS = new Map([
+  ['apps/api/src/application-root.ts', Object.freeze(['./local-development-app.module'])],
+  [
+    'apps/api/src/blockchain-sync/application/balance-sync-consumer.cli-mode.ts',
+    Object.freeze(['./balance-sync-consumer.runtime']),
+  ],
+]);
 const PLANNED_PLATFORM =
   /plannedPlatform\(\s*\{\s*id:\s*'([^']+)'\s*,\s*name:\s*'([^']+)'\s*,\s*protocol:\s*'([^']+)'\s*\}\s*,\s*'(EVM|SOLANA)'\s*,\s*\[\s*(ETHEREUM|SOLANA)\s*,?\s*\]\s*\)/gu;
 
@@ -268,6 +288,20 @@ function countTests(source) {
 
 function importedModules(source) {
   return [...source.matchAll(/\b(?:from\s+|import\s*)['"]([^'"]+)['"]/gu)].map((match) => match[1]);
+}
+
+function hasUnreviewedDynamicLoading(path, source) {
+  if (/\b(?:require|eval|Function)\s*\(/u.test(source)) return true;
+  const tokenCount = (source.match(/\bimport\s*\(/gu) ?? []).length;
+  const literalImports = [...source.matchAll(/\bimport\s*\(\s*(['"])([^'"]+)\1\s*\)/gu)].map(
+    (match) => match[2],
+  );
+  const expected = REVIEWED_RUNTIME_DYNAMIC_IMPORTS.get(normalizedPath(path)) ?? [];
+  return (
+    tokenCount !== literalImports.length ||
+    literalImports.length !== expected.length ||
+    literalImports.some((value, index) => value !== expected[index])
+  );
 }
 
 function parsePlannedProviders(source) {
@@ -462,6 +496,15 @@ export function validateDormantProviderInventorySnapshot(snapshot) {
       continue;
     }
     if (typeof spec !== 'string') errors.push(`${semantics.id} spec artifact is missing`);
+    if (createHash('sha256').update(source, 'utf8').digest('hex') !== semantics.sha256) {
+      errors.push(`${semantics.id} bytes drifted`);
+    }
+    if (
+      typeof spec === 'string' &&
+      createHash('sha256').update(spec, 'utf8').digest('hex') !== semantics.specSha256
+    ) {
+      errors.push(`${semantics.id} spec bytes drifted`);
+    }
     if (
       !source.includes(`export const ${semantics.useSymbol}`) ||
       !source.includes(`'${semantics.use}' as const`)
@@ -509,6 +552,9 @@ export function validateDormantProviderInventorySnapshot(snapshot) {
     if (typeof path !== 'string' || typeof source !== 'string') {
       errors.push('runtime source inventory is malformed');
       continue;
+    }
+    if (hasUnreviewedDynamicLoading(path, source)) {
+      errors.push(`runtime source contains unreviewed dynamic loading: ${path}`);
     }
     for (const provider of DORMANT_PROVIDER_INVENTORY) {
       if (
@@ -566,27 +612,47 @@ function repositoryFile(repositoryRoot, path, maximumBytes, afterFirstReadForTes
 function runtimeSourcePaths(repositoryRoot) {
   const sourceRoot = resolve(repositoryRoot, API_SOURCE_ROOT);
   const paths = [];
-  const visit = (directory) => {
-    const entries = readdirSync(directory, { withFileTypes: true });
-    for (const entry of entries) {
-      const absolute = resolve(directory, entry.name);
-      if (entry.isSymbolicLink()) throw new Error('runtime source tree contains a symbolic link');
-      if (entry.isDirectory()) {
-        visit(absolute);
-      } else if (
-        entry.isFile() &&
-        entry.name.endsWith('.ts') &&
-        !entry.name.endsWith('.spec.ts') &&
-        !entry.name.endsWith('.test.ts')
-      ) {
-        paths.push(normalizedPath(relative(repositoryRoot, absolute)));
-        if (paths.length > MAX_DORMANT_PROVIDER_RUNTIME_FILES) {
+  let directories = 0;
+  let entries = 0;
+  const visit = (directory, depth) => {
+    directories += 1;
+    if (
+      directories > MAX_DORMANT_PROVIDER_RUNTIME_DIRECTORIES ||
+      depth > MAX_DORMANT_PROVIDER_RUNTIME_DEPTH
+    ) {
+      throw new Error(DORMANT_PROVIDER_INVENTORY_INPUT_ERROR);
+    }
+    const handle = opendirSync(directory);
+    try {
+      for (;;) {
+        const entry = handle.readSync();
+        if (entry === null) break;
+        entries += 1;
+        if (entries > MAX_DORMANT_PROVIDER_RUNTIME_ENTRIES) {
           throw new Error(DORMANT_PROVIDER_INVENTORY_INPUT_ERROR);
         }
+        const absolute = resolve(directory, entry.name);
+        if (entry.isSymbolicLink()) {
+          throw new Error('runtime source tree contains a symbolic link');
+        }
+        if (entry.isDirectory()) {
+          visit(absolute, depth + 1);
+        } else if (
+          entry.isFile() &&
+          entry.name.endsWith('.ts') &&
+          !entry.name.endsWith('.spec.ts')
+        ) {
+          paths.push(normalizedPath(relative(repositoryRoot, absolute)));
+          if (paths.length > MAX_DORMANT_PROVIDER_RUNTIME_FILES) {
+            throw new Error(DORMANT_PROVIDER_INVENTORY_INPUT_ERROR);
+          }
+        }
       }
+    } finally {
+      handle.closeSync();
     }
   };
-  visit(sourceRoot);
+  visit(sourceRoot, 0);
   return paths.sort();
 }
 

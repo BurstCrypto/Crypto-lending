@@ -335,6 +335,8 @@ test('the additional Kamino source is byte-pinned, authority-free, and unregiste
 
 test('the five account-position semantics foundations are authority-free and unregistered', () => {
   for (const semantics of DORMANT_ACCOUNT_POSITION_SEMANTICS) {
+    assert.match(semantics.sha256, /^[0-9a-f]{64}$/u);
+    assert.match(semantics.specSha256, /^[0-9a-f]{64}$/u);
     assertMutationRejected(`${semantics.id} missing`, (value) => {
       value.artifacts.delete(semantics.path);
     });
@@ -360,6 +362,12 @@ test('the five account-position semantics foundations are authority-free and unr
         `import './${semantics.path.slice(semantics.path.lastIndexOf('/') + 1, -3)}';`,
       );
     });
+    assertMutationRejected(`${semantics.id} compiled test import`, (value) => {
+      value.runtimeSources.set(
+        `apps/api/src/unsafe-${semantics.providerId}.test.ts`,
+        `export * from './${semantics.path.slice(semantics.path.lastIndexOf('/') + 1, -3)}';`,
+      );
+    });
   }
 });
 
@@ -377,10 +385,27 @@ test('semantics decorators, adapter dependencies, and unreviewed semantics fail 
   assertMutationRejected('global network call', (value) => {
     value.artifacts.set(semantics.path, `${value.artifacts.get(semantics.path)}\nfetch('x');\n`);
   });
+  assertMutationRejected('viem RPC construction', (value) => {
+    value.artifacts.set(
+      semantics.path,
+      value.artifacts
+        .get(semantics.path)
+        .replace(
+          "import { isAddress } from 'viem';",
+          "import { createPublicClient, http, isAddress } from 'viem';\nvoid createPublicClient({ transport: http('x') });",
+        ),
+    );
+  });
   assertMutationRejected('unreviewed semantics', (value) => {
     value.runtimeSources.set(
       'apps/api/src/smart-lending/infrastructure/unsafe/new-account-position.semantics.ts',
       'export const MAYBE_SAFE = true;',
+    );
+  });
+  assertMutationRejected('split dynamic semantics path', (value) => {
+    value.runtimeSources.set(
+      'apps/api/src/unsafe-dynamic-runtime.ts',
+      "void import('./morpho-blue-account-' + 'position.semantics');",
     );
   });
 });

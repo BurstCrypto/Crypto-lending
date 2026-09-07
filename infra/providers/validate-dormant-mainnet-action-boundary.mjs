@@ -1,4 +1,5 @@
-import { readdirSync, realpathSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { opendirSync, realpathSync } from 'node:fs';
 import { dirname, relative, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { TextDecoder } from 'node:util';
@@ -13,6 +14,13 @@ export const ACTION_BOUNDARY_SPEC_PATH =
 export const MAX_ACTION_BOUNDARY_FILE_BYTES = 512 * 1024;
 export const MAX_ACTION_BOUNDARY_RUNTIME_FILES = 4_096;
 export const MAX_ACTION_BOUNDARY_RUNTIME_BYTES = 24 * 1024 * 1024;
+export const MAX_ACTION_BOUNDARY_RUNTIME_DIRECTORIES = 4_096;
+export const MAX_ACTION_BOUNDARY_RUNTIME_DEPTH = 64;
+export const MAX_ACTION_BOUNDARY_RUNTIME_ENTRIES = 16_384;
+export const REVIEWED_ACTION_BOUNDARY_SHA256 =
+  '4add78d42c9c729f8d2fe91e91af4c3596640d0a603a9ba116b66e05594f499e';
+export const REVIEWED_ACTION_BOUNDARY_SPEC_SHA256 =
+  'fb250e45fbb525b35e1671fc820f00b2c79fa007d344b0f62ee0a10101acbc7a';
 export const ACTION_BOUNDARY_INPUT_ERROR =
   'Dormant mainnet action boundary inputs must be stable, single-link regular UTF-8 files at canonical paths inside the repository and within the reviewed size limits.';
 
@@ -69,9 +77,16 @@ const REQUIRED_CLOSED_MARKERS = Object.freeze([
 const UNSAFE_CAPABILITY =
   /\b(?:mayAuthorizeFinancialAction|apiMaySign|apiMayBroadcast|crossChainExecutionAllowed|automaticResendAllowed|automaticFeeEscalationAllowed|durableReplayProtectionAvailable|durableLimitCountersAvailable|providerWriteApprovalAvailable|marketWriteManifestAvailable)\s*:\s*true\b/u;
 const PROHIBITED_BOUNDARY_SOURCE =
-  /(?:\bprocess\.env\b|\b(?:fetch|WebSocket|XMLHttpRequest|eval)\s*\(|\b(?:require|import)\s*\(|\b(?:sendRawTransaction|sendTransaction|signTransaction|broadcastTransaction|eth_sendRawTransaction)\b|@(Injectable|Module|Controller)\s*\()/u;
+  /(?:\bprocess\.env\b|\b(?:fetch|WebSocket|XMLHttpRequest|eval|Function)\s*\(|\b(?:require|import)\s*\(|\bexport\s+(?:\*|\{[^}]*\})\s+from\s*['"]|\b(?:sendRawTransaction|sendTransaction|signTransaction|broadcastTransaction|eth_sendRawTransaction)\b|@(Injectable|Module|Controller)\s*\()/u;
 const RUNTIME_REFERENCE =
   /(?:dormant-mainnet-financial-action|DormantMainnetFinancialAction|DORMANT_MAINNET_FINANCIAL_ACTION|MAINNET_FINANCIAL_ACTION_PROVIDER_CANDIDATES|assessDormantMainnetFinancialAction|parseDormantMainnetFinancialActionIntent)/u;
+const REVIEWED_RUNTIME_DYNAMIC_IMPORTS = new Map([
+  ['apps/api/src/application-root.ts', Object.freeze(['./local-development-app.module'])],
+  [
+    'apps/api/src/blockchain-sync/application/balance-sync-consumer.cli-mode.ts',
+    Object.freeze(['./balance-sync-consumer.runtime']),
+  ],
+]);
 
 function normalizedPath(path) {
   return path.split('\\').join('/');
@@ -121,6 +136,16 @@ function countTests(source) {
   return [...source.matchAll(/\b(?:it|test)\s*\(/gu)].length;
 }
 
+function hasUnreviewedDynamicLoading(path, source) {
+  if (/\b(?:require|eval|Function)\s*\(/u.test(source)) return true;
+  const tokenCount = (source.match(/\bimport\s*\(/gu) ?? []).length;
+  const literalImports = [...source.matchAll(/\bimport\s*\(\s*(['"])([^'"]+)\1\s*\)/gu)].map(
+    (match) => match[2],
+  );
+  const expected = REVIEWED_RUNTIME_DYNAMIC_IMPORTS.get(normalizedPath(path)) ?? [];
+  return tokenCount !== literalImports.length || !exactArray(literalImports, expected);
+}
+
 export function validateDormantMainnetActionBoundarySnapshot(snapshot) {
   if (
     typeof snapshot !== 'object' ||
@@ -134,6 +159,17 @@ export function validateDormantMainnetActionBoundarySnapshot(snapshot) {
 
   const errors = [];
   const source = snapshot.boundarySource;
+  if (
+    createHash('sha256').update(source, 'utf8').digest('hex') !== REVIEWED_ACTION_BOUNDARY_SHA256
+  ) {
+    errors.push('action boundary bytes drifted from the reviewed source');
+  }
+  if (
+    createHash('sha256').update(snapshot.specSource, 'utf8').digest('hex') !==
+    REVIEWED_ACTION_BOUNDARY_SPEC_SHA256
+  ) {
+    errors.push('action boundary spec bytes drifted from the reviewed source');
+  }
   if (!exactArray(extractActions(source), EXPECTED_ACTIONS)) {
     errors.push('action boundary must contain exactly the four reviewed lending actions');
   }
@@ -188,6 +224,8 @@ export function validateDormantMainnetActionBoundarySnapshot(snapshot) {
       errors.push('action boundary runtime source inventory is malformed');
     } else if (normalizedPath(path) === ACTION_BOUNDARY_PATH) {
       errors.push('action boundary was incorrectly included in runtime consumers');
+    } else if (hasUnreviewedDynamicLoading(path, runtimeSource)) {
+      errors.push(`runtime source contains unreviewed dynamic loading: ${path}`);
     } else if (RUNTIME_REFERENCE.test(runtimeSource)) {
       errors.push(`dormant mainnet action boundary is referenced by runtime source ${path}`);
     }
@@ -216,27 +254,46 @@ function repositoryFile(repositoryRoot, path) {
 function runtimeSourcePaths(repositoryRoot) {
   const sourceRoot = resolve(repositoryRoot, API_SOURCE_ROOT);
   const paths = [];
-  const visit = (directory) => {
-    for (const entry of readdirSync(directory, { withFileTypes: true })) {
-      const absolute = resolve(directory, entry.name);
-      if (entry.isSymbolicLink()) throw new Error(ACTION_BOUNDARY_INPUT_ERROR);
-      if (entry.isDirectory()) {
-        visit(absolute);
-      } else if (
-        entry.isFile() &&
-        entry.name.endsWith('.ts') &&
-        !entry.name.endsWith('.spec.ts') &&
-        !entry.name.endsWith('.test.ts')
-      ) {
-        const path = normalizedPath(relative(repositoryRoot, absolute));
-        if (path !== ACTION_BOUNDARY_PATH) paths.push(path);
-        if (paths.length > MAX_ACTION_BOUNDARY_RUNTIME_FILES) {
+  let directories = 0;
+  let entries = 0;
+  const visit = (directory, depth) => {
+    directories += 1;
+    if (
+      directories > MAX_ACTION_BOUNDARY_RUNTIME_DIRECTORIES ||
+      depth > MAX_ACTION_BOUNDARY_RUNTIME_DEPTH
+    ) {
+      throw new Error(ACTION_BOUNDARY_INPUT_ERROR);
+    }
+    const handle = opendirSync(directory);
+    try {
+      for (;;) {
+        const entry = handle.readSync();
+        if (entry === null) break;
+        entries += 1;
+        if (entries > MAX_ACTION_BOUNDARY_RUNTIME_ENTRIES) {
           throw new Error(ACTION_BOUNDARY_INPUT_ERROR);
         }
+        const absolute = resolve(directory, entry.name);
+        if (entry.isSymbolicLink()) throw new Error(ACTION_BOUNDARY_INPUT_ERROR);
+        if (entry.isDirectory()) {
+          visit(absolute, depth + 1);
+        } else if (
+          entry.isFile() &&
+          entry.name.endsWith('.ts') &&
+          !entry.name.endsWith('.spec.ts')
+        ) {
+          const path = normalizedPath(relative(repositoryRoot, absolute));
+          if (path !== ACTION_BOUNDARY_PATH) paths.push(path);
+          if (paths.length > MAX_ACTION_BOUNDARY_RUNTIME_FILES) {
+            throw new Error(ACTION_BOUNDARY_INPUT_ERROR);
+          }
+        }
       }
+    } finally {
+      handle.closeSync();
     }
   };
-  visit(sourceRoot);
+  visit(sourceRoot, 0);
   return paths.sort();
 }
 

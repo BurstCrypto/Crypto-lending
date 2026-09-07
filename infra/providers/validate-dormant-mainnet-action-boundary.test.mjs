@@ -11,6 +11,8 @@ import {
   EXPECTED_ACTIONS,
   EXPECTED_PROVIDER_CANDIDATES,
   loadDormantMainnetActionBoundarySnapshot,
+  REVIEWED_ACTION_BOUNDARY_SHA256,
+  REVIEWED_ACTION_BOUNDARY_SPEC_SHA256,
   validateDormantMainnetActionBoundaryFiles,
   validateDormantMainnetActionBoundarySnapshot,
 } from './validate-dormant-mainnet-action-boundary.mjs';
@@ -45,6 +47,8 @@ test('the exact Ethereum and Solana lending action candidate boundary is dormant
     [...new Set(EXPECTED_PROVIDER_CANDIDATES.map((entry) => entry[2]))],
     ['eip155:1', 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp'],
   );
+  assert.equal(REVIEWED_ACTION_BOUNDARY_SHA256.length, 64);
+  assert.equal(REVIEWED_ACTION_BOUNDARY_SPEC_SHA256.length, 64);
 });
 
 test('action, provider, protocol, order, and chain drift fail closed', () => {
@@ -102,7 +106,10 @@ test('I/O, dynamic code, runtime decorators, and transaction construction fail c
     "\nprocess.env['RPC_URL'];",
     "\nfetch('https://rpc.invalid');",
     "\nimport('./transaction-writer');",
+    "\nexport * from './transaction-writer';",
+    "\nexport { request } from 'node:https';",
     '\nsendRawTransaction(payload);',
+    "\nFunction('return true')();",
     '\n@Controller() class MainnetActionController {}',
   ]) {
     mutationRejected(prohibited, (value) => {
@@ -121,6 +128,9 @@ test('weak or detached tests fail closed', () => {
   mutationRejected('insufficient depth', (value) => {
     value.specSource = "import './dormant-mainnet-financial-action';\ntest('only one', () => {});";
   });
+  mutationRejected('marker-preserving fake spec', (value) => {
+    value.specSource += "\n// new Proxy; decision: 'DENY'; test(\n";
+  });
 });
 
 test('any runtime reference to the dormant boundary fails closed', () => {
@@ -133,6 +143,18 @@ test('any runtime reference to the dormant boundary fails closed', () => {
       value.runtimeSources.set('apps/api/src/mainnet-actions/runtime.ts', source);
     });
   }
+  mutationRejected('compiled test barrel', (value) => {
+    value.runtimeSources.set(
+      'apps/api/src/mainnet-actions/unsafe.test.ts',
+      "export * from './domain/dormant-mainnet-financial-action';",
+    );
+  });
+  mutationRejected('split dynamic path', (value) => {
+    value.runtimeSources.set(
+      'apps/api/src/mainnet-actions/unsafe-runtime.ts',
+      "void import('./domain/dormant-mainnet-' + 'financial-action');",
+    );
+  });
 });
 
 test('malformed snapshots and runtime inventories fail closed without throwing', () => {
