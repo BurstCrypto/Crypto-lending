@@ -132,7 +132,7 @@ const PRODUCTION_INFRASTRUCTURE_CONTRACT_ARTIFACT_PATHS = Object.freeze({
     'infra/aws/validate-auth-wallet-secret-version-transition.mjs',
   redisOperatorTransitionValidatorSource:
     'infra/aws/validate-redis-operator-secret-version-transition.mjs',
-  deploymentTargetValidatorSource: 'scripts/production-deployment-target.ts',
+  deploymentTargetValidatorSource: 'scripts/production-deployment-target.mjs',
 });
 const PRODUCTION_INFRASTRUCTURE_CONTRACT_ARTIFACTS = Object.freeze(
   Object.fromEntries(
@@ -4560,6 +4560,10 @@ test('production contract rejects representative cost, network, credential, reco
     ['AutomaticRollback: ENABLED', 'AutomaticRollback: DISABLED'],
     ['GlobalKillSwitch: ENGAGED', 'GlobalKillSwitch: DISENGAGED'],
     ['AuthorityStatus: NOT_APPROVED', 'AuthorityStatus: APPROVED'],
+    [
+      'DeploymentDestinationRegistryStatus: EMPTY',
+      'DeploymentDestinationRegistryStatus: POPULATED',
+    ],
     ['DeploymentTargetRegistryStatus: EMPTY', 'DeploymentTargetRegistryStatus: POPULATED'],
     ['ExactReleaseBindingRequired: true', 'ExactReleaseBindingRequired: false'],
     ['IndependentApprovalRequired: true', 'IndependentApprovalRequired: false'],

@@ -195,12 +195,12 @@
       "data": [
         "Git revision and tree identity",
         "release component digests",
-        "production deployment target identity",
+        "prospective production destination, deployment epoch, and deployed-target identity",
         "role-scoped signed technical evidence and public-launch decisions"
       ],
       "evidence": [
         "scripts/release-candidate-manifest.mjs",
-        "scripts/production-deployment-target.ts",
+        "scripts/production-deployment-target.mjs",
         "scripts/production-evidence-bundle.ts",
         "scripts/public-launch-authority-decision.ts"
       ]
@@ -467,11 +467,11 @@
     },
     {
       "id": "DATA-019",
-      "name": "Release candidate, deployment-target, technical-evidence, RDS supporting-capture, and public-launch decision records",
+      "name": "Release candidate, deployment-destination, deployed-target, technical-evidence, RDS supporting-capture, and public-launch decision records",
       "classification": "INTERNAL",
       "cia": { "confidentiality": "MEDIUM", "integrity": "HIGH", "availability": "HIGH" },
       "stores": [
-        "Version-controlled empty authority and deployment-target registries",
+        "Version-controlled empty authority, deployment-destination, and deployed-target registries",
         "Short-lived CI release artifacts",
         "Separately controlled canonical signed evidence files",
         "Separately retained canonical sanitized RDS lifecycle capture files"
@@ -482,7 +482,7 @@
       "evidence": [
         ".github/workflows/ci.yml",
         "scripts/release-candidate-manifest.mjs",
-        "scripts/production-deployment-target.ts",
+        "scripts/production-deployment-target.mjs",
         "scripts/production-evidence-bundle.ts",
         "scripts/public-launch-authority-decision.ts"
       ]
@@ -1482,13 +1482,14 @@
       "id": "THR-SUPPLY-004",
       "domain": "SUPPLY_CHAIN",
       "stride": ["SPOOFING", "TAMPERING", "REPUDIATION", "ELEVATION_OF_PRIVILEGE"],
-      "scenario": "Valid-looking technical or launch evidence is replayed across revisions, deployment targets, environments, or time windows, or one signer impersonates multiple independent release authorities.",
+      "scenario": "Valid-looking deployment, technical, or launch evidence is replayed across revisions, deployment epochs, deployment targets, environments, or time windows, or one signer impersonates multiple independent release authorities.",
       "risk": "HIGH",
       "boundaryIds": ["TB-13"],
       "assetIds": ["DATA-015", "DATA-016", "DATA-019"],
       "response": "MITIGATE",
       "mitigations": [
-        "Canonical evidence binds the exact release-candidate manifest digest and schema-v2 production deployment-target digest rather than trusting a signer-authored revision label; the v2 target hash covers the exact CloudFormation stack, RDS database/resource/managed-secret/application-key identities, and other closed target identities",
+        "The prospective destination hash covers the reviewed nonzero deployment epoch, account, Region, stack name, and public origin before generated resource identities exist; its production registry is empty and its injected-registry resolver cannot mint the private production brand",
+        "Canonical evidence binds the exact release-candidate manifest digest and schema-v2 deployed-target digest rather than trusting a signer-authored revision label; the v2 target hash covers the exact CloudFormation stack, RDS database/resource/managed-secret/application-key identities, and other closed target identities, while its empty registry remains a fail-closed legacy evidence boundary rather than claiming a source-enrollment path",
         "Technical read-only evidence requires distinct role-scoped issuer and independent-verifier signatures over identical bytes and rejects mainnet-write claims",
         "Public launch decisions require distinct role-scoped legal, regulatory, privacy, operations, independent-security, dependency-risk, and deployment-owner signatures",
         "Short validity windows, trusted application-time revalidation, empty production registries, and fail-closed parsing prevent local self-approval"
@@ -1496,13 +1497,13 @@
       "owner": "Release, Security, and Risk",
       "status": "OPEN_EXTERNAL",
       "evidence": [
-        "scripts/production-deployment-target.ts",
+        "scripts/production-deployment-target.mjs",
         "scripts/production-evidence-bundle.ts",
         "scripts/public-launch-authority-decision.ts",
         "scripts/production-go-live-preflight.ts"
       ],
-      "residualRisk": "No production target or authority key is enrolled, no external decision exists, trusted-clock operations and emergency revocation are unexercised, and the complete gate has not received independent acceptance.",
-      "followUp": "Enroll each target and one independently controlled key per role through reviewed changes, exercise expiry and revocation from a trusted release environment, and obtain separately signed decisions for the exact candidate before go-live"
+      "residualRisk": "No prospective production destination, deployed target, or authority key is enrolled; atomic epoch consumption, external decisions, trusted-clock operations, and emergency revocation remain unexercised, and the complete gate has not received independent acceptance.",
+      "followUp": "Enroll each prospective destination epoch and one independently controlled key per role through reviewed changes; design an external independently signed post-deploy target-enrollment protocol that avoids release-digest circularity; atomically consume deployment epochs; exercise expiry and revocation from a trusted release environment; and obtain separately signed decisions for the exact candidate before go-live"
     },
     {
       "id": "THR-SECRETS-004",

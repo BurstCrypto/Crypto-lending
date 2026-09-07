@@ -26,7 +26,7 @@ export const threatModelFingerprintPath = resolve(
 export const MAX_THREAT_MODEL_BYTES = 131_072;
 export const MAX_THREAT_MODEL_SIDECAR_BYTES = 65;
 export const EXPECTED_THREAT_MODEL_SHA256 =
-  '9feb17ecd393ac826e27cbf7695a28573d340b5b698fa58ed215b86beffae765';
+  'd595531bf2c98c21d4fa155098eac949473aa41882988497d2c9fe974b1d7607';
 export const THREAT_MODEL_FILE_ERROR =
   'Canonical threat model or fingerprint file is missing, unsafe, or unreadable.';
 export const THREAT_MODEL_JSON_ERROR =

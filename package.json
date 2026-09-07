@@ -43,7 +43,7 @@
     "test:production:sbom": "node --test scripts/production-sboms.test.mjs",
     "production:preflight": "tsx scripts/production-go-live-preflight.ts",
     "production:preflight:json": "tsx scripts/production-go-live-preflight.ts --json",
-    "lint:production:preflight": "eslint scripts/job-envelope-rollout-preflight.ts scripts/job-envelope-rollout-preflight.test.ts scripts/production-deployment-target.ts scripts/production-evidence-bundle.ts scripts/production-evidence-bundle.test.ts scripts/production-go-live-preflight.ts scripts/production-go-live-preflight.test.ts scripts/public-launch-authority-decision.ts scripts/public-launch-authority-decision.test.ts --config scripts/eslint.config.mjs",
+    "lint:production:preflight": "eslint scripts/job-envelope-rollout-preflight.ts scripts/job-envelope-rollout-preflight.test.ts scripts/production-deployment-target.mjs scripts/production-evidence-bundle.ts scripts/production-evidence-bundle.test.ts scripts/production-go-live-preflight.ts scripts/production-go-live-preflight.test.ts scripts/public-launch-authority-decision.ts scripts/public-launch-authority-decision.test.ts --config scripts/eslint.config.mjs --global URL",
     "typecheck:production:preflight": "tsc --noEmit -p tsconfig.production-preflight.json",
     "test:production:preflight": "tsx --test scripts/job-envelope-rollout-preflight.test.ts scripts/production-evidence-bundle.test.ts scripts/production-go-live-preflight.test.ts scripts/public-launch-authority-decision.test.ts",
     "build": "npm run build --workspaces --if-present",

@@ -21,7 +21,7 @@
     "scripts/job-envelope-rollout-preflight.test.ts",
     "scripts/production-evidence-bundle.ts",
     "scripts/production-evidence-bundle.test.ts",
-    "scripts/production-deployment-target.ts",
+    "scripts/production-deployment-target.d.mts",
     "scripts/production-go-live-preflight.ts",
     "scripts/production-go-live-preflight.test.ts",
     "scripts/public-launch-authority-decision.ts",

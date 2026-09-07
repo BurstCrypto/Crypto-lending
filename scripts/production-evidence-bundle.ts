@@ -23,8 +23,8 @@ import {
   resolveProductionDeploymentTarget,
   resolveProductionDeploymentTargetWithTestRegistry,
   type ProductionDeploymentTargetRegistry,
-  type VerifiedProductionDeploymentTarget,
-} from './production-deployment-target';
+  type ResolvedProductionDeploymentTarget,
+} from './production-deployment-target.mjs';
 
 export const PRODUCTION_EVIDENCE_BUNDLE_SCHEMA_VERSION = 2 as const;
 export const MAX_PRODUCTION_EVIDENCE_BUNDLE_BYTES = 262_144 as const;
@@ -764,7 +764,7 @@ function rdsMasterLifecycleEvidence(
 
 function validateRdsMasterLifecycleTargetBinding(
   evidence: ProductionRdsMasterLifecycleEvidence,
-  target: VerifiedProductionDeploymentTarget,
+  target: ResolvedProductionDeploymentTarget,
 ): void {
   if (
     evidence.binding.applicationDataKeyArn !== target.rds.applicationDataKeyArn ||
@@ -1079,7 +1079,7 @@ function validateContext(
   evaluatedAtValue: unknown,
   releaseManifest: unknown,
   releaseManifestBrandVerifier: (candidate: unknown) => boolean,
-  targetResolver: (targetId: string, targetSha256: string) => VerifiedProductionDeploymentTarget,
+  targetResolver: (targetId: string, targetSha256: string) => ResolvedProductionDeploymentTarget,
   minimumEvaluatedAtMilliseconds?: number,
 ): number {
   const evaluatedAt = timestamp(evaluatedAtValue);
@@ -1134,7 +1134,7 @@ function verifyProductionEvidenceBundleBytesAgainstContext(
   options: EvaluatedProductionEvidenceBundleOptions,
   authorityKeyRegistry: ProductionEvidenceAuthorityKeyRegistry,
   releaseManifestBrandVerifier: (candidate: unknown) => boolean,
-  targetResolver: (targetId: string, targetSha256: string) => VerifiedProductionDeploymentTarget,
+  targetResolver: (targetId: string, targetSha256: string) => ResolvedProductionDeploymentTarget,
 ): Readonly<{ bundle: VerifiedProductionEvidenceBundle; evaluatedAtMilliseconds: number }> {
   try {
     if (

@@ -655,12 +655,12 @@ const PRODUCTION_INFRASTRUCTURE_CONTRACT_ARTIFACT_PATHS = Object.freeze({
     'infra/aws/validate-auth-wallet-secret-version-transition.mjs',
   redisOperatorTransitionValidatorSource:
     'infra/aws/validate-redis-operator-secret-version-transition.mjs',
-  deploymentTargetValidatorSource: 'scripts/production-deployment-target.ts',
+  deploymentTargetValidatorSource: 'scripts/production-deployment-target.mjs',
 } as const satisfies Readonly<
   Record<keyof ProductionInfrastructureContractArtifactSources, string>
 >);
 const PRODUCTION_INFRASTRUCTURE_CONTRACT_ARTIFACT_SHA256 = Object.freeze({
-  contractTemplateSource: 'df76d9831f9b29b3c3717b3c6cb69a768ac463ba341252870912594bd23df10b',
+  contractTemplateSource: '2df10dee0d16dfbe7443c2e86f07d88b70a9c6d4b89991c4c1f698c8aee43a10',
   applicationDeploymentGuardSource:
     '327a5a640fb946a5c07ec0381166112008e6fa8f805c4fca764bcaed4727512b',
   billingControlValidatorSource: 'ea30979bfeb5166c2c51b33b0fad28e92ba03f8cebad9b475ca9f8c4654006cc',
@@ -672,7 +672,7 @@ const PRODUCTION_INFRASTRUCTURE_CONTRACT_ARTIFACT_SHA256 = Object.freeze({
   redisOperatorTransitionValidatorSource:
     '41f40f195042707204de5da07d4ef288fe134f3d91303262ed3bf73763d5c56b',
   deploymentTargetValidatorSource:
-    'c0104488e19cca7a393e7d7113664abfdf3059dee2ce5b890a6f0bdc3bd3e2c6',
+    '54fb72f7f71d0faf101978d5c54f397dbc403024b25926523bc8bc4b5c1c0dd9',
 } as const satisfies Readonly<
   Record<keyof ProductionInfrastructureContractArtifactSources, string>
 >);
@@ -955,7 +955,7 @@ const REVIEWED_BALANCE_CONSUMER_ARTIFACT_SHA256 = Object.freeze({
   sqsModuleSource: 'dc958100bd372500a9428c28cc6219a4cb00db61314a63478368d0b0cf95221b',
   sqsTokensSource: REVIEWED_SQS_TOKENS_SOURCE_SHA256,
   apiPackageSource: 'c911e7171be6ff64908d1c15fc1d240f51ace8e8b90d6bcad4c605c994439774',
-  rootPackageSource: '7430df9250cd78896c7eadc318ef8cc45bc32f25e6650e1f88d70312363a14f7',
+  rootPackageSource: '4fd74323a78fdf2983e1482142de801aefd699bd4062052467733b33f7841f78',
   rootPackageLockSource: 'ac745baf70f2e70b3ba779612f0a3cc2b10692860a47c54c927a1e4805b2e6a6',
   applicationTemplateSource: '58b040eea3858661d45ab0f1334457c0b937cfb8179bad665aa3bb649171807c',
   applicationValidatorSource: '3da9441a8d3c5de0b47b88fd0c11d489c940234702f768ea9774279f7fab3e00',
@@ -981,7 +981,7 @@ const REVIEWED_BALANCE_CONSUMER_ARTIFACT_SHA256 = Object.freeze({
   mainnetBalanceAgreementEvidenceV2MigrationSource:
     'c9afef59a9101d568597eb37845d6d2a997edf63f1496d3d04296075fcc61fff',
   migrationIndexSource: '58a83e45c98c5e2d99b5fe982aef0770c11e55cc037341c45d1b60cd4d8edd78',
-  releaseManifestSource: 'a2a636d768d7693fdc31a9e181ef93d6c4ed355d3f04d0f0f810ed7a39513acc',
+  releaseManifestSource: 'be48e1413bd8dab9378436e4fd381fed3029c126f09fec675b5bebaf2ef53246',
   productionContainerValidatorSource:
     'a9fbc9e638f4a33266e823ff8c07a9b53703e1bc8f1f4f46eab30c7b50a9b0b0',
 } satisfies Readonly<Record<keyof BalanceConsumerArtifactSources, string>>);
@@ -2282,11 +2282,12 @@ const PRODUCTION_INFRASTRUCTURE_CONTRACT_REQUIRED_LINES = Object.freeze([
   'RollbackPlanStatus: NOT_APPROVED',
   'NonZeroRuntimePolicy: SOURCE_CHANGE_AND_REVIEWED_ROLLBACK_PLAN_REQUIRED',
   'AuthorityStatus: NOT_APPROVED',
+  'DeploymentDestinationRegistryStatus: EMPTY',
   'DeploymentTargetRegistryStatus: EMPTY',
   'ExactReleaseBindingRequired: true',
   'IndependentApprovalRequired: true',
   'DeploymentGuard: infra/aws/invoke-application-baseline.ps1',
-  'DeploymentTargetValidator: scripts/production-deployment-target.ts',
+  'DeploymentTargetValidator: scripts/production-deployment-target.mjs',
   'Default: DISABLED',
   'AllowedValues: [DISABLED]',
   'Resources: {}',
@@ -2348,7 +2349,11 @@ function hasExactProductionInfrastructureContract(
     sources.deploymentTargetValidatorSource.includes(
       'export const PRODUCTION_DEPLOYMENT_TARGET_REGISTRY = Object.freeze({',
     ) &&
-    sources.deploymentTargetValidatorSource.includes('targets: Object.freeze([]),')
+    sources.deploymentTargetValidatorSource.includes('targets: Object.freeze([]),') &&
+    sources.deploymentTargetValidatorSource.includes(
+      'export const PRODUCTION_DEPLOYMENT_DESTINATION_REGISTRY = Object.freeze({',
+    ) &&
+    sources.deploymentTargetValidatorSource.includes('destinations: Object.freeze([]),')
   );
 }
 

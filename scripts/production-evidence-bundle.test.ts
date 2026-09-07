@@ -38,15 +38,27 @@ import {
   type UnsignedProductionEvidenceBundle,
 } from './production-evidence-bundle';
 import {
+  PRODUCTION_DEPLOYMENT_DESTINATION_REGISTRY,
   PRODUCTION_DEPLOYMENT_TARGET_REGISTRY,
+  ProductionDeploymentDestinationInvalidError,
   ProductionDeploymentTargetInvalidError,
+  isVerifiedProductionDeploymentDestination,
   isVerifiedProductionDeploymentTarget,
+  productionDeploymentDestinationSha256,
   productionDeploymentTargetSha256,
+  resolveProductionDeploymentDestination,
+  resolveProductionDeploymentDestinationWithTestRegistry,
   resolveProductionDeploymentTarget,
   resolveProductionDeploymentTargetWithTestRegistry,
+  type ProductionDeploymentDestination,
+  type ProductionDeploymentDestinationRegistry,
   type ProductionDeploymentTarget,
   type ProductionDeploymentTargetRegistry,
-} from './production-deployment-target';
+  type ResolvedProductionDeploymentDestination,
+  type ResolvedProductionDeploymentTarget,
+  type VerifiedProductionDeploymentDestination,
+  type VerifiedProductionDeploymentTarget,
+} from './production-deployment-target.mjs';
 import {
   applyVerifiedProductionEvidenceBundle,
   productionPreflightCliErrorCode,
@@ -146,6 +158,31 @@ function targetRegistry(
     schemaVersion: 2,
     artifactType: 'PRODUCTION_DEPLOYMENT_TARGET_REGISTRY',
     targets: Object.freeze(targets),
+  });
+}
+
+function validDeploymentDestination(
+  overrides: Partial<ProductionDeploymentDestination> = {},
+): ProductionDeploymentDestination {
+  return {
+    destinationId: 'production-provisioning-us-east-1',
+    epochId: '1'.repeat(64),
+    environment: 'production',
+    awsAccountId: AWS_ACCOUNT_ID,
+    awsRegion: AWS_REGION,
+    stackName: 'crypto-lending-production',
+    publicOrigin: 'https://app.example.com',
+    ...overrides,
+  };
+}
+
+function destinationRegistry(
+  destinations: readonly ProductionDeploymentDestination[] = [validDeploymentDestination()],
+): ProductionDeploymentDestinationRegistry {
+  return Object.freeze({
+    schemaVersion: 1,
+    artifactType: 'PRODUCTION_DEPLOYMENT_DESTINATION_REGISTRY',
+    destinations: Object.freeze(destinations),
   });
 }
 
@@ -1021,7 +1058,10 @@ test('RDS lifecycle evidence is covered by the bundle signatures', () => {
 
 test('deployment targets close Cognito, RDS/KMS, origin, account/region, image, and task identities', () => {
   const target = validDeploymentTarget();
-  assert.match(productionDeploymentTargetSha256(target), /^[a-f0-9]{64}$/u);
+  assert.equal(
+    productionDeploymentTargetSha256(target),
+    'c3d6ec5c2d965f4a9845e76d24b45e7f730921e860fef518926c2631478fcde4',
+  );
   assert.equal(PRODUCTION_DEPLOYMENT_TARGET_REGISTRY.schemaVersion, 2);
   assert.equal(PRODUCTION_DEPLOYMENT_TARGET_REGISTRY.targets.length, 0);
   assert.equal(
@@ -1037,13 +1077,17 @@ test('deployment targets close Cognito, RDS/KMS, origin, account/region, image, 
     productionDeploymentTargetSha256(target),
     targetRegistry([target]),
   );
+  const resolvedTarget: ResolvedProductionDeploymentTarget = testResolved;
+  // @ts-expect-error Test-registry resolution cannot confer the nominal production brand.
+  const productionBrandedTarget: VerifiedProductionDeploymentTarget = testResolved;
+  void productionBrandedTarget;
   assert.equal(isVerifiedProductionDeploymentTarget(testResolved), false);
-  assert.equal(Object.isFrozen(testResolved.rds), true);
-  assert.equal(testResolved.rds.cloudFormationStackId, APPLICATION_STACK_ID);
-  assert.equal(testResolved.rds.databaseInstanceArn, DATABASE_INSTANCE_ARN);
-  assert.equal(testResolved.rds.databaseResourceId, DATABASE_RESOURCE_ID);
-  assert.equal(testResolved.rds.databaseManagedSecretArn, DATABASE_MANAGED_SECRET_ARN);
-  assert.equal(testResolved.rds.applicationDataKeyArn, APPLICATION_DATA_KEY_ARN);
+  assert.equal(Object.isFrozen(resolvedTarget.rds), true);
+  assert.equal(resolvedTarget.rds.cloudFormationStackId, APPLICATION_STACK_ID);
+  assert.equal(resolvedTarget.rds.databaseInstanceArn, DATABASE_INSTANCE_ARN);
+  assert.equal(resolvedTarget.rds.databaseResourceId, DATABASE_RESOURCE_ID);
+  assert.equal(resolvedTarget.rds.databaseManagedSecretArn, DATABASE_MANAGED_SECRET_ARN);
+  assert.equal(resolvedTarget.rds.applicationDataKeyArn, APPLICATION_DATA_KEY_ARN);
   assert.throws(
     () =>
       resolveProductionDeploymentTarget(target.targetId, productionDeploymentTargetSha256(target)),
@@ -1308,6 +1352,130 @@ test('deployment targets close Cognito, RDS/KMS, origin, account/region, image, 
         } as unknown as ProductionDeploymentTargetRegistry,
       ),
     ProductionDeploymentTargetInvalidError,
+  );
+});
+
+test('deployment destinations bind prospective coordinates and epochs without minting production trust', () => {
+  const destination = validDeploymentDestination();
+  assert.notEqual(destination.destinationId, validDeploymentTarget().targetId);
+  const destinationSha256 = productionDeploymentDestinationSha256(destination);
+  assert.equal(
+    destinationSha256,
+    'ae02b29526b0f61d7b0da26009e23f3914b8bd410516af4da9dfd1f972cc6700',
+  );
+  assert.equal(PRODUCTION_DEPLOYMENT_DESTINATION_REGISTRY.schemaVersion, 1);
+  assert.equal(PRODUCTION_DEPLOYMENT_DESTINATION_REGISTRY.destinations.length, 0);
+  assert.equal(Object.isFrozen(PRODUCTION_DEPLOYMENT_DESTINATION_REGISTRY), true);
+  assert.equal(Object.isFrozen(PRODUCTION_DEPLOYMENT_DESTINATION_REGISTRY.destinations), true);
+
+  const testResolved = resolveProductionDeploymentDestinationWithTestRegistry(
+    destination.destinationId,
+    destinationSha256,
+    destinationRegistry([destination]),
+  );
+  const resolvedDestination: ResolvedProductionDeploymentDestination = testResolved;
+  // @ts-expect-error Test-registry resolution cannot confer the nominal production brand.
+  const productionBrandedDestination: VerifiedProductionDeploymentDestination = testResolved;
+  void productionBrandedDestination;
+  assert.equal(isVerifiedProductionDeploymentDestination(testResolved), false);
+  assert.equal(isVerifiedProductionDeploymentDestination({ ...testResolved }), false);
+  assert.equal(Object.isFrozen(testResolved), true);
+  assert.equal(testResolved.epochId, destination.epochId);
+  assert.equal(
+    resolvedDestination.registrySha256,
+    '3cda62e6a7c6e38ea24d399a8bc99753889c643ffb7a15be9929cdee4721dd48',
+  );
+  assert.throws(
+    () => resolveProductionDeploymentDestination(destination.destinationId, destinationSha256),
+    ProductionDeploymentDestinationInvalidError,
+  );
+
+  const replacementEpoch = validDeploymentDestination({ epochId: '2'.repeat(64) });
+  assert.notEqual(productionDeploymentDestinationSha256(replacementEpoch), destinationSha256);
+
+  const { epochId: omittedEpochId, ...missingEpoch } = destination;
+  assert.equal(omittedEpochId, destination.epochId);
+  const hostileDestinations: unknown[] = [
+    validDeploymentDestination({ destinationId: 'Production' }),
+    validDeploymentDestination({ epochId: '0'.repeat(64) }),
+    validDeploymentDestination({ epochId: 'A'.repeat(64) }),
+    validDeploymentDestination({ epochId: '1'.repeat(63) }),
+    validDeploymentDestination({ environment: 'staging' as 'production' }),
+    validDeploymentDestination({ awsAccountId: '000000000000' }),
+    validDeploymentDestination({ awsAccountId: '123' }),
+    validDeploymentDestination({ awsRegion: 'us-gov-west-1' }),
+    validDeploymentDestination({ stackName: '_invalid' }),
+    validDeploymentDestination({ publicOrigin: 'http://app.example.com' }),
+    validDeploymentDestination({ publicOrigin: 'https://app.example.com/path' }),
+    validDeploymentDestination({ publicOrigin: 'https://127.0.0.1' }),
+    missingEpoch,
+    { ...destination, undocumentedAuthority: true },
+  ];
+  for (const hostile of hostileDestinations) {
+    assert.throws(
+      () => productionDeploymentDestinationSha256(hostile),
+      ProductionDeploymentDestinationInvalidError,
+    );
+  }
+
+  assert.throws(
+    () =>
+      resolveProductionDeploymentDestinationWithTestRegistry(
+        destination.destinationId,
+        'f'.repeat(64),
+        destinationRegistry([destination]),
+      ),
+    ProductionDeploymentDestinationInvalidError,
+  );
+  assert.throws(
+    () =>
+      resolveProductionDeploymentDestinationWithTestRegistry(
+        destination.destinationId,
+        destinationSha256,
+        destinationRegistry([
+          destination,
+          validDeploymentDestination({
+            epochId: '2'.repeat(64),
+            awsRegion: 'us-west-2',
+            stackName: 'crypto-lending-production-secondary',
+            publicOrigin: 'https://secondary.example.com',
+          }),
+        ]),
+      ),
+    ProductionDeploymentDestinationInvalidError,
+  );
+  assert.throws(
+    () =>
+      resolveProductionDeploymentDestinationWithTestRegistry(
+        destination.destinationId,
+        destinationSha256,
+        destinationRegistry([
+          destination,
+          validDeploymentDestination({
+            destinationId: 'production-us-west-2-secondary',
+            awsRegion: 'us-west-2',
+            stackName: 'crypto-lending-production-secondary',
+            publicOrigin: 'https://secondary.example.com',
+          }),
+        ]),
+      ),
+    ProductionDeploymentDestinationInvalidError,
+  );
+  assert.throws(
+    () =>
+      resolveProductionDeploymentDestinationWithTestRegistry(
+        destination.destinationId,
+        destinationSha256,
+        destinationRegistry([
+          destination,
+          validDeploymentDestination({
+            destinationId: 'production-us-east-1-secondary',
+            epochId: '2'.repeat(64),
+            publicOrigin: 'https://secondary.example.com',
+          }),
+        ]),
+      ),
+    ProductionDeploymentDestinationInvalidError,
   );
 });
 

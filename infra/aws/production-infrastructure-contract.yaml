@@ -47,11 +47,12 @@ Metadata:
       NonZeroRuntimePolicy: SOURCE_CHANGE_AND_REVIEWED_ROLLBACK_PLAN_REQUIRED
     DeploymentAuthority:
       AuthorityStatus: NOT_APPROVED
+      DeploymentDestinationRegistryStatus: EMPTY
       DeploymentTargetRegistryStatus: EMPTY
       ExactReleaseBindingRequired: true
       IndependentApprovalRequired: true
       DeploymentGuard: infra/aws/invoke-application-baseline.ps1
-      DeploymentTargetValidator: scripts/production-deployment-target.ts
+      DeploymentTargetValidator: scripts/production-deployment-target.mjs
 
 Parameters:
   ActivationMode:

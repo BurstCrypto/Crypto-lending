@@ -7,7 +7,6 @@ export default tseslint.config(eslint.configs.recommended, ...tseslint.configs.r
     'job-envelope-rollout-preflight.test.ts',
     'production-evidence-bundle.ts',
     'production-evidence-bundle.test.ts',
-    'production-deployment-target.ts',
     'production-go-live-preflight.ts',
     'production-go-live-preflight.test.ts',
     'public-launch-authority-decision.ts',

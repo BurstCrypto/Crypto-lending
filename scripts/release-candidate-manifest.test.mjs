@@ -370,8 +370,14 @@ test('binds the inert production infrastructure contract as an exact release com
   assert.throws(() => verifyReleaseManifest(root, manifest), ReleaseManifestError);
 });
 
-test('binds the production deployment-intent validator and inert example exactly', () => {
+test('binds the production deployment-target runtime, intent validator, and inert example exactly', () => {
   const specifications = [
+    {
+      name: 'production-deployment-target-validator',
+      path: 'scripts/production-deployment-target.mjs',
+      kind: 'file',
+      requiredFiles: ['.'],
+    },
     {
       name: 'production-deployment-intent-validator',
       path: 'infra/aws/validate-production-deployment-intent.mjs',

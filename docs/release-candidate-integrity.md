@@ -25,7 +25,9 @@ component set:
 - the API/web Dockerfiles, closed Docker build-context policy, pinned RDS trust
   bundle and digest, and offline source/runtime/OCI-metadata validators;
 - the application, observability child, nested workload-boundary, and
-  migration-task CloudFormation templates; and
+  migration-task CloudFormation templates;
+- the canonical offline production deployment-target and prospective-destination
+  runtime, deployment-intent validator, and inert intent example; and
 - every repository decision artifact directly inspected by production
   preflight: the authentication/application template, egress policy, RPC
   decision and its SHA-256 sidecar, the dated exact-byte active-scope provider
@@ -41,6 +43,15 @@ junctions and other intermediate reparse points, multiply linked files, special
 files, case/Unicode/platform-colliding names, missing runtime entry points,
 oversized inputs, unstable reads, unknown fields, duplicate/noncanonical JSON,
 and byte drift all fail closed.
+
+The prospective-destination registry binds only pre-provision coordinates and
+a nonzero epoch intended for single use; it rejects duplicate IDs, epochs, or
+account/Region/stack tuples and is empty in production. The separately branded
+deployed-target registry remains an empty, fail-closed legacy evidence boundary.
+It cannot be populated safely by a release-bound source edit because generated
+resource and image identities do not exist until after provisioning. A future
+independently signed post-deploy enrollment protocol is still required; this
+runtime performs no I/O, provisioning, enrollment, or deployment.
 
 Generation additionally requires `HEAD` to equal the requested revision and
 rejects any staged, unstaged, non-ignored untracked, sparse, skip-worktree, or

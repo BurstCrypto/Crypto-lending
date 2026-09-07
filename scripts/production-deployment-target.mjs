@@ -1,6 +1,5 @@
 import { createHash } from 'node:crypto';
 import { isIP } from 'node:net';
-
 const TARGET_KEYS = Object.freeze([
   'targetId',
   'environment',
@@ -22,9 +21,20 @@ const RDS_KEYS = Object.freeze([
 const COMPONENT_SET_KEYS = Object.freeze(['api', 'web', 'outboxWorker', 'migration']);
 const COMPONENT_KEYS = Object.freeze(['imageUri', 'taskDefinitionArn']);
 const REGISTRY_KEYS = Object.freeze(['schemaVersion', 'artifactType', 'targets']);
+const DESTINATION_KEYS = Object.freeze([
+  'destinationId',
+  'epochId',
+  'environment',
+  'awsAccountId',
+  'awsRegion',
+  'stackName',
+  'publicOrigin',
+]);
+const DESTINATION_REGISTRY_KEYS = Object.freeze(['schemaVersion', 'artifactType', 'destinations']);
 const TARGET_ID_PATTERN = /^[a-z0-9]+(?:[._-][a-z0-9]+)*$/u;
 const ACCOUNT_ID_PATTERN = /^[0-9]{12}$/u;
 const REGION_PATTERN = /^[a-z]{2}-[a-z]+-[1-9][0-9]?$/u;
+const STACK_NAME_PATTERN = /^[A-Za-z][A-Za-z0-9-]{0,127}$/u;
 const CLIENT_ID_PATTERN = /^[a-z0-9]{26}$/u;
 const SHA256_PATTERN = /^[a-f0-9]{64}$/u;
 const CLOUDFORMATION_STACK_RESOURCE_PATTERN =
@@ -34,95 +44,73 @@ const RDS_MANAGED_SECRET_RESOURCE_PATTERN = /^secret:rds!db-[A-Za-z0-9/_+=.@-]{1
 const KMS_KEY_RESOURCE_PATTERN =
   /^key\/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/u;
 const MAX_DATABASE_RESOURCE_ID_LENGTH = 256;
-const TARGET_HASH_DOMAIN = 'crypto-lending:production-deployment-target:v2' as const;
-const VERIFIED_TARGETS = new WeakSet<object>();
-
-export interface ProductionDeployedComponentIdentity {
-  readonly imageUri: string;
-  readonly taskDefinitionArn: string;
-}
-
-export interface ProductionDeploymentTarget {
-  readonly targetId: string;
-  readonly environment: 'production';
-  readonly awsAccountId: string;
-  readonly awsRegion: string;
-  readonly publicOrigin: string;
-  readonly cognito: Readonly<{
-    userPoolId: string;
-    appClientId: string;
-    loginHost: string;
-    issuer: string;
-  }>;
-  readonly rds: Readonly<{
-    cloudFormationStackId: string;
-    databaseInstanceArn: string;
-    databaseResourceId: string;
-    databaseManagedSecretArn: string;
-    applicationDataKeyArn: string;
-  }>;
-  readonly deployedComponents: Readonly<{
-    api: ProductionDeployedComponentIdentity;
-    web: ProductionDeployedComponentIdentity;
-    outboxWorker: ProductionDeployedComponentIdentity;
-    migration: ProductionDeployedComponentIdentity;
-  }>;
-}
-
-export interface ProductionDeploymentTargetRegistry {
-  readonly schemaVersion: 2;
-  readonly artifactType: 'PRODUCTION_DEPLOYMENT_TARGET_REGISTRY';
-  readonly targets: readonly ProductionDeploymentTarget[];
-}
-
-export interface VerifiedProductionDeploymentTarget extends ProductionDeploymentTarget {
-  readonly targetSha256: string;
-  readonly registrySha256: string;
-}
-
+const TARGET_HASH_DOMAIN = 'crypto-lending:production-deployment-target:v2';
+const DESTINATION_HASH_DOMAIN = 'crypto-lending:production-deployment-destination:v1';
+const DESTINATION_REGISTRY_HASH_DOMAIN =
+  'crypto-lending:production-deployment-destination-registry:v1';
+const VERIFIED_TARGETS = new WeakSet();
+const VERIFIED_DESTINATIONS = new WeakSet();
 /**
- * Production trust is intentionally empty. A real target must be introduced by
- * an independently reviewed source change; an evidence bundle cannot add one.
+ * This empty deployed-target registry is retained as a fail-closed legacy
+ * evidence boundary. Generated resource and image identities make source
+ * enrollment circular with the release digest, so this module authorizes no
+ * enrollment path. A future independently signed post-deploy enrollment
+ * protocol must replace or extend this boundary; evidence cannot add a target.
  */
 export const PRODUCTION_DEPLOYMENT_TARGET_REGISTRY = Object.freeze({
   schemaVersion: 2,
   artifactType: 'PRODUCTION_DEPLOYMENT_TARGET_REGISTRY',
   targets: Object.freeze([]),
-} as const satisfies ProductionDeploymentTargetRegistry);
-
+});
+/**
+ * Prospective production trust is intentionally empty. Unlike a deployed
+ * target, a destination contains only identities knowable before resources
+ * exist. Enrollment still requires an independently reviewed source change.
+ */
+export const PRODUCTION_DEPLOYMENT_DESTINATION_REGISTRY = Object.freeze({
+  schemaVersion: 1,
+  artifactType: 'PRODUCTION_DEPLOYMENT_DESTINATION_REGISTRY',
+  destinations: Object.freeze([]),
+});
 export class ProductionDeploymentTargetInvalidError extends Error {
   constructor() {
     super('Production deployment target is invalid');
     this.name = 'ProductionDeploymentTargetInvalidError';
   }
 }
-
-function invalid(): never {
+export class ProductionDeploymentDestinationInvalidError extends Error {
+  constructor() {
+    super('Production deployment destination is invalid');
+    this.name = 'ProductionDeploymentDestinationInvalidError';
+  }
+}
+function invalid() {
   throw new ProductionDeploymentTargetInvalidError();
 }
-
-function record(value: unknown, expectedKeys: readonly string[]): Record<string, unknown> {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) return invalid();
+function destinationInvalid() {
+  throw new ProductionDeploymentDestinationInvalidError();
+}
+function record(value, expectedKeys, reject = invalid) {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return reject();
   const prototype = Object.getPrototypeOf(value);
-  if (prototype !== Object.prototype && prototype !== null) return invalid();
+  if (prototype !== Object.prototype && prototype !== null) return reject();
   const descriptors = Object.getOwnPropertyDescriptors(value);
   const keys = Reflect.ownKeys(descriptors);
   if (
     keys.length !== expectedKeys.length ||
     keys.some((key) => typeof key !== 'string' || !expectedKeys.includes(key))
   ) {
-    return invalid();
+    return reject();
   }
-  const result = Object.create(null) as Record<string, unknown>;
+  const result = Object.create(null);
   for (const key of expectedKeys) {
     const descriptor = descriptors[key];
-    if (!descriptor?.enumerable || !('value' in descriptor)) return invalid();
+    if (!descriptor?.enumerable || !('value' in descriptor)) return reject();
     result[key] = descriptor.value;
   }
   return result;
 }
-
-function canonicalJson(value: unknown): string {
+function canonicalJson(value) {
   if (value === null || typeof value === 'boolean' || typeof value === 'string') {
     return JSON.stringify(value);
   }
@@ -134,14 +122,13 @@ function canonicalJson(value: unknown): string {
     return `[${value.map((item) => canonicalJson(item)).join(',')}]`;
   }
   if (typeof value !== 'object') return invalid();
-  const object = value as Record<string, unknown>;
+  const object = value;
   return `{${Object.keys(object)
     .sort()
     .map((key) => `${JSON.stringify(key)}:${canonicalJson(object[key])}`)
     .join(',')}}`;
 }
-
-function dnsHost(value: string): boolean {
+function dnsHost(value) {
   if (value.length === 0 || value.length > 253 || isIP(value) !== 0) return false;
   const labels = value.split('.');
   return (
@@ -152,14 +139,13 @@ function dnsHost(value: string): boolean {
     )
   );
 }
-
-function httpsOrigin(value: unknown): Readonly<{ origin: string; hostname: string }> {
-  if (typeof value !== 'string' || value.length > 255) return invalid();
-  let url: URL;
+function httpsOrigin(value, reject = invalid) {
+  if (typeof value !== 'string' || value.length > 255) return reject();
+  let url;
   try {
     url = new URL(value);
   } catch {
-    return invalid();
+    return reject();
   }
   if (
     url.protocol !== 'https:' ||
@@ -173,17 +159,147 @@ function httpsOrigin(value: unknown): Readonly<{ origin: string; hostname: strin
     !dnsHost(url.hostname) ||
     value !== url.origin
   ) {
-    return invalid();
+    return reject();
   }
   return Object.freeze({ origin: value, hostname: url.hostname });
 }
-
-function componentIdentity(
-  value: unknown,
-  accountId: string,
-  region: string,
-  expectedRepository: 'crypto-lending-api' | 'crypto-lending-web',
-): ProductionDeployedComponentIdentity {
+function deploymentDestination(value) {
+  const parsed = record(value, DESTINATION_KEYS, destinationInvalid);
+  if (
+    typeof parsed.destinationId !== 'string' ||
+    parsed.destinationId.length > 96 ||
+    !TARGET_ID_PATTERN.test(parsed.destinationId) ||
+    typeof parsed.epochId !== 'string' ||
+    !SHA256_PATTERN.test(parsed.epochId) ||
+    /^0{64}$/u.test(parsed.epochId) ||
+    parsed.environment !== 'production' ||
+    typeof parsed.awsAccountId !== 'string' ||
+    !ACCOUNT_ID_PATTERN.test(parsed.awsAccountId) ||
+    /^0{12}$/u.test(parsed.awsAccountId) ||
+    typeof parsed.awsRegion !== 'string' ||
+    !REGION_PATTERN.test(parsed.awsRegion) ||
+    typeof parsed.stackName !== 'string' ||
+    !STACK_NAME_PATTERN.test(parsed.stackName)
+  ) {
+    return destinationInvalid();
+  }
+  const origin = httpsOrigin(parsed.publicOrigin, destinationInvalid);
+  return Object.freeze({
+    destinationId: parsed.destinationId,
+    epochId: parsed.epochId,
+    environment: 'production',
+    awsAccountId: parsed.awsAccountId,
+    awsRegion: parsed.awsRegion,
+    stackName: parsed.stackName,
+    publicOrigin: origin.origin,
+  });
+}
+export function productionDeploymentDestinationSha256(value) {
+  try {
+    const destination = deploymentDestination(value);
+    return createHash('sha256')
+      .update(`${DESTINATION_HASH_DOMAIN}\n`, 'utf8')
+      .update(canonicalJson(destination), 'utf8')
+      .digest('hex');
+  } catch {
+    return destinationInvalid();
+  }
+}
+function validatedDestinationRegistry(value) {
+  const parsed = record(value, DESTINATION_REGISTRY_KEYS, destinationInvalid);
+  if (
+    parsed.schemaVersion !== 1 ||
+    parsed.artifactType !== 'PRODUCTION_DEPLOYMENT_DESTINATION_REGISTRY' ||
+    !Array.isArray(parsed.destinations) ||
+    parsed.destinations.length > 16
+  ) {
+    return destinationInvalid();
+  }
+  const ids = new Set();
+  const epochs = new Set();
+  const physicalDestinations = new Set();
+  const destinations = parsed.destinations.map((candidate) => {
+    const destination = deploymentDestination(candidate);
+    const physicalDestination = [
+      destination.awsAccountId,
+      destination.awsRegion,
+      destination.stackName,
+    ].join('\0');
+    if (
+      ids.has(destination.destinationId) ||
+      epochs.has(destination.epochId) ||
+      physicalDestinations.has(physicalDestination)
+    ) {
+      return destinationInvalid();
+    }
+    ids.add(destination.destinationId);
+    epochs.add(destination.epochId);
+    physicalDestinations.add(physicalDestination);
+    return destination;
+  });
+  const normalizedRegistry = {
+    schemaVersion: 1,
+    artifactType: 'PRODUCTION_DEPLOYMENT_DESTINATION_REGISTRY',
+    destinations,
+  };
+  return Object.freeze({
+    registrySha256: createHash('sha256')
+      .update(`${DESTINATION_REGISTRY_HASH_DOMAIN}\n`, 'utf8')
+      .update(canonicalJson(normalizedRegistry), 'utf8')
+      .digest('hex'),
+    destinations: Object.freeze(destinations),
+  });
+}
+function resolveDestinationAgainstRegistry(destinationId, destinationSha256, registry) {
+  try {
+    if (
+      typeof destinationId !== 'string' ||
+      !TARGET_ID_PATTERN.test(destinationId) ||
+      typeof destinationSha256 !== 'string' ||
+      !SHA256_PATTERN.test(destinationSha256)
+    ) {
+      return destinationInvalid();
+    }
+    const validated = validatedDestinationRegistry(registry);
+    const destination = validated.destinations.find(
+      (candidate) => candidate.destinationId === destinationId,
+    );
+    if (
+      destination === undefined ||
+      productionDeploymentDestinationSha256(destination) !== destinationSha256
+    ) {
+      return destinationInvalid();
+    }
+    return Object.freeze({
+      ...destination,
+      destinationSha256,
+      registrySha256: validated.registrySha256,
+    });
+  } catch {
+    return destinationInvalid();
+  }
+}
+export function resolveProductionDeploymentDestination(destinationId, destinationSha256) {
+  const destination = resolveDestinationAgainstRegistry(
+    destinationId,
+    destinationSha256,
+    PRODUCTION_DEPLOYMENT_DESTINATION_REGISTRY,
+  );
+  VERIFIED_DESTINATIONS.add(destination);
+  return destination;
+}
+/** Test seam; the returned destination deliberately lacks the production brand. */
+export function resolveProductionDeploymentDestinationWithTestRegistry(
+  destinationId,
+  destinationSha256,
+  registry,
+) {
+  return resolveDestinationAgainstRegistry(destinationId, destinationSha256, registry);
+}
+export function isVerifiedProductionDeploymentDestination(value) {
+  return typeof value === 'object' && value !== null && VERIFIED_DESTINATIONS.has(value);
+}
+function componentIdentity(value, accountId, region, expectedRepository) {
   const parsed = record(value, COMPONENT_KEYS);
   if (typeof parsed.imageUri !== 'string' || typeof parsed.taskDefinitionArn !== 'string') {
     return invalid();
@@ -213,14 +329,7 @@ function componentIdentity(
     taskDefinitionArn: parsed.taskDefinitionArn,
   });
 }
-
-function regionalArn(
-  value: unknown,
-  service: 'cloudformation' | 'kms' | 'rds' | 'secretsmanager',
-  accountId: string,
-  region: string,
-  resourcePattern: RegExp,
-): string {
+function regionalArn(value, service, accountId, region, resourcePattern) {
   if (typeof value !== 'string' || value.length === 0 || value.length > 1_024) return invalid();
   const prefix = `arn:aws:${service}:${region}:${accountId}:`;
   if (!value.startsWith(prefix) || !resourcePattern.test(value.slice(prefix.length))) {
@@ -228,8 +337,7 @@ function regionalArn(
   }
   return value;
 }
-
-function opaqueDatabaseResourceId(value: unknown): string {
+function opaqueDatabaseResourceId(value) {
   const containsAsciiControl =
     typeof value === 'string' &&
     Array.from(value).some((character) => {
@@ -247,12 +355,7 @@ function opaqueDatabaseResourceId(value: unknown): string {
   }
   return value;
 }
-
-function rdsIdentity(
-  value: unknown,
-  accountId: string,
-  region: string,
-): ProductionDeploymentTarget['rds'] {
+function rdsIdentity(value, accountId, region) {
   const parsed = record(value, RDS_KEYS);
   const databaseInstanceArn = regionalArn(
     parsed.databaseInstanceArn,
@@ -290,8 +393,7 @@ function rdsIdentity(
     ),
   });
 }
-
-function deploymentTarget(value: unknown): ProductionDeploymentTarget {
+function deploymentTarget(value) {
   const parsed = record(value, TARGET_KEYS);
   if (
     typeof parsed.targetId !== 'string' ||
@@ -372,19 +474,18 @@ function deploymentTarget(value: unknown): ProductionDeploymentTarget {
     environment: 'production',
     awsAccountId: parsed.awsAccountId,
     awsRegion: parsed.awsRegion,
-    publicOrigin: parsed.publicOrigin as string,
+    publicOrigin: parsed.publicOrigin,
     cognito: Object.freeze({
       userPoolId: cognito.userPoolId,
       appClientId: cognito.appClientId,
       loginHost: cognito.loginHost,
-      issuer: cognito.issuer as string,
+      issuer: cognito.issuer,
     }),
     rds,
     deployedComponents: Object.freeze({ api, web, outboxWorker, migration }),
   });
 }
-
-export function productionDeploymentTargetSha256(value: unknown): string {
+export function productionDeploymentTargetSha256(value) {
   try {
     const target = deploymentTarget(value);
     return createHash('sha256')
@@ -395,11 +496,7 @@ export function productionDeploymentTargetSha256(value: unknown): string {
     return invalid();
   }
 }
-
-function validatedRegistry(value: unknown): Readonly<{
-  registrySha256: string;
-  targets: readonly ProductionDeploymentTarget[];
-}> {
+function validatedRegistry(value) {
   const parsed = record(value, REGISTRY_KEYS);
   if (
     parsed.schemaVersion !== 2 ||
@@ -409,7 +506,7 @@ function validatedRegistry(value: unknown): Readonly<{
   ) {
     return invalid();
   }
-  const ids = new Set<string>();
+  const ids = new Set();
   const targets = parsed.targets.map((candidate) => {
     const target = deploymentTarget(candidate);
     if (ids.has(target.targetId)) return invalid();
@@ -420,7 +517,7 @@ function validatedRegistry(value: unknown): Readonly<{
     schemaVersion: 2,
     artifactType: 'PRODUCTION_DEPLOYMENT_TARGET_REGISTRY',
     targets,
-  } as const;
+  };
   return Object.freeze({
     registrySha256: createHash('sha256')
       .update(canonicalJson(normalizedRegistry), 'utf8')
@@ -428,12 +525,7 @@ function validatedRegistry(value: unknown): Readonly<{
     targets: Object.freeze(targets),
   });
 }
-
-function resolveAgainstRegistry(
-  targetId: string,
-  targetSha256: string,
-  registry: ProductionDeploymentTargetRegistry,
-): VerifiedProductionDeploymentTarget {
+function resolveAgainstRegistry(targetId, targetSha256, registry) {
   try {
     if (
       typeof targetId !== 'string' ||
@@ -457,11 +549,7 @@ function resolveAgainstRegistry(
     return invalid();
   }
 }
-
-export function resolveProductionDeploymentTarget(
-  targetId: string,
-  targetSha256: string,
-): VerifiedProductionDeploymentTarget {
+export function resolveProductionDeploymentTarget(targetId, targetSha256) {
   const target = resolveAgainstRegistry(
     targetId,
     targetSha256,
@@ -470,18 +558,14 @@ export function resolveProductionDeploymentTarget(
   VERIFIED_TARGETS.add(target);
   return target;
 }
-
 /** Test seam; the returned target deliberately lacks the production brand. */
 export function resolveProductionDeploymentTargetWithTestRegistry(
-  targetId: string,
-  targetSha256: string,
-  registry: ProductionDeploymentTargetRegistry,
-): VerifiedProductionDeploymentTarget {
+  targetId,
+  targetSha256,
+  registry,
+) {
   return resolveAgainstRegistry(targetId, targetSha256, registry);
 }
-
-export function isVerifiedProductionDeploymentTarget(
-  value: unknown,
-): value is VerifiedProductionDeploymentTarget {
+export function isVerifiedProductionDeploymentTarget(value) {
   return typeof value === 'object' && value !== null && VERIFIED_TARGETS.has(value);
 }

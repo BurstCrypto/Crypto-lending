@@ -192,6 +192,12 @@ export const RELEASE_COMPONENTS = Object.freeze([
     requiredFiles: Object.freeze(['.']),
   }),
   Object.freeze({
+    name: 'production-deployment-target-validator',
+    path: 'scripts/production-deployment-target.mjs',
+    kind: 'file',
+    requiredFiles: Object.freeze(['.']),
+  }),
+  Object.freeze({
     name: 'production-deployment-intent-validator',
     path: 'infra/aws/validate-production-deployment-intent.mjs',
     kind: 'file',
