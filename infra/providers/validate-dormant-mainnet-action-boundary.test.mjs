@@ -9,14 +9,20 @@ import {
   ACTION_BOUNDARY_PATH,
   ACTION_BOUNDARY_SPEC_PATH,
   ACTION_LIFECYCLE_PATH,
+  ACTION_LIFECYCLE_MIGRATION_PATH,
+  ACTION_LIFECYCLE_MIGRATION_SPEC_PATH,
   ACTION_LIFECYCLE_SPEC_PATH,
+  DATABASE_MIGRATION_INDEX_PATH,
   EXPECTED_ACTIONS,
   EXPECTED_PROVIDER_CANDIDATES,
   loadDormantMainnetActionBoundarySnapshot,
   REVIEWED_ACTION_BOUNDARY_SHA256,
   REVIEWED_ACTION_BOUNDARY_SPEC_SHA256,
   REVIEWED_ACTION_LIFECYCLE_SHA256,
+  REVIEWED_ACTION_LIFECYCLE_MIGRATION_SHA256,
+  REVIEWED_ACTION_LIFECYCLE_MIGRATION_SPEC_SHA256,
   REVIEWED_ACTION_LIFECYCLE_SPEC_SHA256,
+  REVIEWED_DATABASE_MIGRATION_INDEX_SHA256,
   validateDormantMainnetActionBoundaryFiles,
   validateDormantMainnetActionBoundarySnapshot,
 } from './validate-dormant-mainnet-action-boundary.mjs';
@@ -29,6 +35,9 @@ function snapshot() {
     specSource: baseline.specSource,
     lifecycleSource: baseline.lifecycleSource,
     lifecycleSpecSource: baseline.lifecycleSpecSource,
+    migrationSource: baseline.migrationSource,
+    migrationSpecSource: baseline.migrationSpecSource,
+    migrationIndexSource: baseline.migrationIndexSource,
     runtimeSources: new Map(baseline.runtimeSources),
   };
 }
@@ -37,6 +46,15 @@ function mutationRejected(name, mutate) {
   const changed = snapshot();
   mutate(changed);
   assert.ok(validateDormantMainnetActionBoundarySnapshot(changed).length > 0, `${name} must fail`);
+}
+
+function mutationReports(name, expectedError, mutate) {
+  const changed = snapshot();
+  mutate(changed);
+  assert.ok(
+    validateDormantMainnetActionBoundarySnapshot(changed).includes(expectedError),
+    `${name} must report: ${expectedError}`,
+  );
 }
 
 function writeFixture(repositoryRoot, path, source) {
@@ -57,6 +75,9 @@ test('the exact Ethereum and Solana lending action candidate boundary is dormant
   assert.equal(REVIEWED_ACTION_BOUNDARY_SPEC_SHA256.length, 64);
   assert.equal(REVIEWED_ACTION_LIFECYCLE_SHA256.length, 64);
   assert.equal(REVIEWED_ACTION_LIFECYCLE_SPEC_SHA256.length, 64);
+  assert.equal(REVIEWED_ACTION_LIFECYCLE_MIGRATION_SHA256.length, 64);
+  assert.equal(REVIEWED_ACTION_LIFECYCLE_MIGRATION_SPEC_SHA256.length, 64);
+  assert.equal(REVIEWED_DATABASE_MIGRATION_INDEX_SHA256.length, 64);
 });
 
 test('action, provider, protocol, order, and chain drift fail closed', () => {
@@ -178,6 +199,218 @@ test('lifecycle bytes, pure imports, closed authority, and adversarial spec are 
   });
 });
 
+test('the exact 0033 migration, spec, and index inventory is pinned', () => {
+  mutationReports(
+    'migration byte drift',
+    '0033 action lifecycle migration bytes drifted from the reviewed source',
+    (value) => {
+      value.migrationSource += '\n// unauthorized drift';
+    },
+  );
+  mutationReports(
+    'migration spec byte drift',
+    '0033 action lifecycle migration spec bytes drifted from the reviewed source',
+    (value) => {
+      value.migrationSpecSource += '\n// weakened review';
+    },
+  );
+  mutationReports(
+    'migration index byte drift',
+    'database migration index bytes drifted from the reviewed 0033 registration',
+    (value) => {
+      value.migrationIndexSource += '\n// reordered elsewhere';
+    },
+  );
+  mutationReports(
+    'predecessor drift',
+    '0033 migration identity or predecessor verification changed',
+    (value) => {
+      value.migrationSource = value.migrationSource.replace(
+        "supersedesVerificationOf: ['0032']",
+        "supersedesVerificationOf: ['0031']",
+      );
+    },
+  );
+});
+
+test('0033 index registration and exact predecessor order fail closed', () => {
+  mutationReports(
+    'production order drift',
+    '0033 migration index registration, predecessor order, or export inventory changed',
+    (value) => {
+      value.migrationIndexSource = value.migrationIndexSource.replace(
+        /createMainnetBalanceAgreementEvidenceV2MigrationV0032,\s+createMainnetFinancialActionLifecycleMigrationV0033,/u,
+        'createMainnetFinancialActionLifecycleMigrationV0033,\n  createMainnetBalanceAgreementEvidenceV2MigrationV0032,',
+      );
+    },
+  );
+  mutationReports(
+    'duplicate registration',
+    '0033 migration index registration, predecessor order, or export inventory changed',
+    (value) => {
+      value.migrationIndexSource = value.migrationIndexSource.replaceAll(
+        'createMainnetFinancialActionLifecycleMigrationV0033,',
+        'createMainnetFinancialActionLifecycleMigrationV0033,\n  createMainnetFinancialActionLifecycleMigrationV0033,',
+      );
+    },
+  );
+  mutationReports(
+    'detached import',
+    '0033 migration index registration, predecessor order, or export inventory changed',
+    (value) => {
+      value.migrationIndexSource = value.migrationIndexSource.replace(
+        "from './0033-create-mainnet-financial-action-lifecycle.migration';",
+        "from './0033-unreviewed.migration';",
+      );
+    },
+  );
+});
+
+test('0033 weak specs, grants, and authority activation fail closed', () => {
+  mutationReports(
+    'weak spec',
+    '0033 migration spec is weak, detached, or no longer tests the dormant boundary',
+    (value) => {
+      value.migrationSpecSource = value.migrationSpecSource.replaceAll(
+        'encodeClmaFp1',
+        'removedFingerprintReview',
+      );
+    },
+  );
+  mutationReports(
+    'runtime grant',
+    '0033 migration grants or activates runtime financial-action authority',
+    (value) => {
+      value.migrationSource +=
+        '\nconst unsafeGrant = `GRANT EXECUTE ON FUNCTION prepare_mainnet_financial_action_lifecycle TO crypto_api_runtime;`;';
+    },
+  );
+  mutationReports(
+    'API signing authority',
+    '0033 migration lacks dormant authority marker: AND NOT api_may_sign AND NOT api_may_broadcast',
+    (value) => {
+      value.migrationSource = value.migrationSource.replace(
+        'AND NOT api_may_sign AND NOT api_may_broadcast',
+        'AND api_may_sign AND api_may_broadcast',
+      );
+    },
+  );
+  mutationReports(
+    'database replay disabled',
+    '0033 migration lacks dormant authority marker: AND database_replay_protection_enforced',
+    (value) => {
+      value.migrationSource = value.migrationSource.replace(
+        'AND database_replay_protection_enforced',
+        'AND NOT database_replay_protection_enforced',
+      );
+    },
+  );
+});
+
+test('0033 prepare, bind, and crash-recovery guarantees fail closed', () => {
+  mutationReports(
+    'prepare accepts revoked wallets',
+    '0033 prepare path no longer requires an active wallet and unexpired intent',
+    (value) => {
+      value.migrationSource = value.migrationSource.replace(
+        "OR wallet_status <> 'ACTIVE'",
+        "OR wallet_status <> 'ANY'",
+      );
+    },
+  );
+  mutationReports(
+    'bind accepts expired intents',
+    '0033 bind path no longer requires an active wallet and unexpired intent',
+    (value) => {
+      value.migrationSource = value.migrationSource.replace(
+        'OR database_recorded_at >= intent.expires_at',
+        'OR database_recorded_at < intent.expires_at',
+      );
+    },
+  );
+  mutationReports(
+    'post-bind expiry gate',
+    '0033 post-bind evidence path can be stranded by wallet, operation, or expiry drift',
+    (value) => {
+      value.migrationSource = value.migrationSource.replace(
+        "IF current_event.stage <> 'WALLET_SIGNED_SUBMISSION_BOUND'",
+        "IF intent.expires_at <= database_recorded_at\n        OR current_event.stage <> 'WALLET_SIGNED_SUBMISSION_BOUND'",
+      );
+    },
+  );
+  mutationReports(
+    'direct reconciliation removed',
+    '0033 reconciliation cannot recover directly from a signed-bound submission',
+    (value) => {
+      value.migrationSource = value.migrationSource.replace(
+        "current_event.stage NOT IN (\n          'WALLET_SIGNED_SUBMISSION_BOUND',",
+        "current_event.stage NOT IN (\n          'BROADCAST_REQUIRED',",
+      );
+    },
+  );
+});
+
+test('0033 canonical identities, digest-only evidence, framing, and goldens fail closed', () => {
+  mutationReports(
+    'public transaction identity removed',
+    '0033 migration lacks canonical public identity or digest evidence: chain_transaction_id text',
+    (value) => {
+      value.migrationSource = value.migrationSource.replaceAll(
+        'chain_transaction_id text',
+        'chain_transaction_digest text',
+      );
+    },
+  );
+  mutationReports(
+    'raw signature persisted',
+    '0033 migration persists raw signing, transaction, credential, or endpoint material',
+    (value) => {
+      value.migrationSource += '\nconst unsafeSchema = `wallet_signature bytea`;';
+    },
+  );
+  mutationReports(
+    'fingerprint frame changed',
+    '0033 CLMA-FP-1 framing or reviewed golden vectors changed',
+    (value) => {
+      value.migrationSource = value.migrationSource.replaceAll('434c4d41465001', '434c4d41465002');
+    },
+  );
+  mutationReports(
+    'golden digest changed',
+    '0033 CLMA-FP-1 framing or reviewed golden vectors changed',
+    (value) => {
+      value.migrationSource = value.migrationSource.replace(
+        'e672e31e8e43af4e842b455732232f6edcb398b4be16b0e2481127877781b16c',
+        'ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff',
+      );
+    },
+  );
+});
+
+test('only the reviewed migration index may wire or reference 0033 at runtime', () => {
+  assert.ok(baseline.runtimeSources.has(DATABASE_MIGRATION_INDEX_PATH));
+  mutationReports(
+    'runtime migration import',
+    '0033 dormant action persistence is referenced by runtime source apps/api/src/application-root.ts',
+    (value) => {
+      value.runtimeSources.set(
+        'apps/api/src/application-root.ts',
+        `${value.runtimeSources.get('apps/api/src/application-root.ts')}\nimport { createMainnetFinancialActionLifecycleMigrationV0033 } from './infrastructure/database/migrations/0033-create-mainnet-financial-action-lifecycle.migration';`,
+      );
+    },
+  );
+  mutationReports(
+    'runtime repository access',
+    '0033 dormant action persistence is referenced by runtime source apps/api/src/mainnet-actions/runtime-repository.ts',
+    (value) => {
+      value.runtimeSources.set(
+        'apps/api/src/mainnet-actions/runtime-repository.ts',
+        "export const query = 'SELECT * FROM mainnet_financial_action_intents';",
+      );
+    },
+  );
+});
+
 test('any runtime reference to the dormant boundary fails closed', () => {
   for (const source of [
     "export * from './domain/dormant-mainnet-financial-action';",
@@ -224,6 +457,12 @@ test('malformed snapshots and runtime inventories fail closed without throwing',
   mutationRejected('malformed runtime entry', (value) => {
     value.runtimeSources.set(1, null);
   });
+  mutationRejected('missing migration source', (value) => {
+    delete value.migrationSource;
+  });
+  mutationRejected('malformed migration index', (value) => {
+    value.migrationIndexSource = null;
+  });
   mutationRejected('boundary in consumers', (value) => {
     value.runtimeSources.set(ACTION_BOUNDARY_PATH, value.boundarySource);
   });
@@ -248,6 +487,22 @@ test('repository loading rejects missing reviewed artifacts with a value-free er
       ACTION_BOUNDARY_INPUT_ERROR,
     ]);
     writeFixture(repositoryRoot, ACTION_LIFECYCLE_SPEC_PATH, baseline.lifecycleSpecSource);
+    assert.deepEqual(validateDormantMainnetActionBoundaryFiles(repositoryRoot), [
+      ACTION_BOUNDARY_INPUT_ERROR,
+    ]);
+    writeFixture(repositoryRoot, ACTION_LIFECYCLE_MIGRATION_PATH, baseline.migrationSource);
+    assert.deepEqual(validateDormantMainnetActionBoundaryFiles(repositoryRoot), [
+      ACTION_BOUNDARY_INPUT_ERROR,
+    ]);
+    writeFixture(
+      repositoryRoot,
+      ACTION_LIFECYCLE_MIGRATION_SPEC_PATH,
+      baseline.migrationSpecSource,
+    );
+    assert.deepEqual(validateDormantMainnetActionBoundaryFiles(repositoryRoot), [
+      ACTION_BOUNDARY_INPUT_ERROR,
+    ]);
+    writeFixture(repositoryRoot, DATABASE_MIGRATION_INDEX_PATH, baseline.migrationIndexSource);
     assert.deepEqual(validateDormantMainnetActionBoundaryFiles(repositoryRoot), []);
   } finally {
     rmSync(repositoryRoot, { recursive: true, force: true });
