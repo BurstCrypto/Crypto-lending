@@ -15,9 +15,13 @@ mainnet registry is empty and `NOT_APPROVED`. Recorder V2 durably prepares the
 `0031` intent before at most one guarded dispatch; a separate one-shot processor
 can perform only source-only reconciliation, and a bounded direct-import-only
 lifecycle can sequence processor calls only when explicitly run. The recorder,
-processor, and lifecycle are unregistered and ungranted, and no concrete source,
-owner-authorized workload/principal/credential, populated evidence, production
-migration execution, runtime activation, deployment, or live proof exists.
+processor, and lifecycle are unregistered and ungranted. Four endpoint-free
+provider-target source implementations now exist locally for Aave V3 Ethereum,
+Kamino Solana, Compound III Ethereum, and SparkLend Ethereum, but each remains
+direct-import-only, dormant, and unregistered. No approved independent source
+pair, owner-authorized workload/principal/credential, populated evidence,
+production migration execution, runtime activation, deployment, or live proof
+exists.
 
 ## Exact coverage (version 1)
 
@@ -69,8 +73,11 @@ admission, source port, two-source producer, recorder port, concrete PostgreSQL
 recorder, record-intent reconciliation port and PostgreSQL processor, bounded
 reconciliation lifecycle, pure candidate-finality port and dormant finalizer,
 module, barrel, and controller sources together with migrations `0029`, `0030`,
-and `0031` and the migration index as one selected thirty-eight-file dormant
-critical-source slice. A passing local source inspection
+and `0031` and the migration index. The historical candidate-finality preflight
+covered 38 artifacts. The committed Aave, Kamino, and Compound source pins
+expanded that selected set to 41. Spark preflight commit `2978367` pins source
+commit `d684428` and brings the selected local set to 42 critical artifacts. A
+passing local source inspection
 does not prove recursive dependency closure, whole-application registration
 absence, populated or deployed evidence, or live behavior. It does pin the
 private construction path that passes the composition-owned PostgreSQL reader
@@ -82,7 +89,12 @@ blockers all remain open.
 
 At the candidate-finality milestone implemented in `387a2dc` and verified in
 `7f7347a`, all 64 focused cases in `production-go-live-preflight.test.ts` passed
-for this exact 38-artifact slice. Six
+for the then-current 38-artifact slice. Subsequent source/preflight milestones
+are Aave `1538ec7` / `ecff5b9`, Kamino `1e70d80` / `b41cc62`, and Compound
+`7e10077` / `91bd9bc`. Spark source commit `d684428` passed its focused source
+specification, API typecheck, and targeted static/format checks; preflight commit
+`2978367` pins it, and all 68 cases passed for the resulting exact 42-artifact
+slice in a current focused rerun. Six
 focused PostgreSQL 16 integration cases also passed for the
 migration/recorder/processor path. That is local source and disposable-database
 evidence only, not proof of a production migration, runtime
@@ -129,9 +141,12 @@ does not persist or update migration `0029`; the producer artifact remains
 `PROVISIONAL` and `DISPLAY_ONLY` until a separately reviewed and activated
 authority boundary exists.
 
-There is still no live source implementation, owner-authorized recorder
-workload/principal/credential/grant, populated evidence claim, runtime
-registration or activation, deployment, or live evidence. The finalizer also
+The four concrete provider-target sources remain local artifacts rather than
+live implementations: none owns an endpoint, provider credential, runtime
+registration, or financial-action authority. There is still no approved
+independent source pair, owner-authorized recorder workload/principal/
+credential/grant, populated evidence claim, runtime registration or activation,
+deployment, or live evidence. The finalizer also
 has no module, barrel, controller, scheduler, or composition registration.
 Consequently all three
 provider-position registration blockers remain

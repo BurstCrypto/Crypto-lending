@@ -206,8 +206,13 @@ private dormant runtime composition, infrastructure configuration loader,
 runtime PostgreSQL pool factory, coverage/observation/assessment/policy domains,
 exact Ethereum/Solana mainnet launch-network policy, migration `0029`, the
 deadline-bound migration `0030`, record-intent migration `0031`, the migration
-index, feature module, feature barrel, and HTTP controller as one selected
-thirty-eight-file critical-source slice. Within that slice, the local semantic
+index, feature module, feature barrel, HTTP controller, and the concrete Aave,
+Kamino, Compound, and Spark provider-target sources as one selected local
+critical-source slice. The historical candidate-finality milestone covered 38
+artifacts. Aave, Kamino, and Compound preflight commits `ecff5b9`, `b41cc62`,
+and `91bd9bc` brought the committed set to 41; Spark preflight commit `2978367`
+pins source commit `d684428` and brings the selected set to 42. Within that
+slice, the local semantic
 inspection requires an exact account/correlation
 reader request with no caller-supplied evaluation time and an exact frozen
 result envelope containing the server-authored parser time and covered-snapshot
@@ -230,6 +235,15 @@ the exported direct-source identity reviewer before extracting any candidate or
 snapshot property; structurally identical clones therefore fail without
 running hostile accessors. That reviewer is deliberately absent from the
 feature barrel, module, controller, and reader surface.
+
+The four provider-target sources are endpoint-free and direct-import-only.
+They obtain authenticated durable wallet and chain-continuity context before
+accepting bounded finalized transcripts, bind exact provider/protocol/market/
+network/source identities, and retain false financial-action authority and
+explicit `COMPLETE` zero semantics. Their source commits are Aave `1538ec7`,
+Kamino `1e70d80`, Compound `7e10077`, and Spark `d684428`. Their presence does
+not register a provider, create a source pair, permit egress, add a credential,
+or produce live evidence.
 
 The durable-anchor reader port is an exact Ethereum-mainnet/Solana-mainnet-only,
 authority-free boundary. Each frozen null-prototype request binds account and
@@ -888,7 +902,10 @@ npm run test:production:preflight
 
 For the finality-aware provider-position preflight milestone implemented in
 `387a2dc` and verified in `7f7347a`, all 64 focused cases in
-`production-go-live-preflight.test.ts` passed for the exact 38-artifact slice.
+`production-go-live-preflight.test.ts` passed for the then-current 38-artifact
+slice. The later Aave, Kamino, Compound, and Spark preflight integrations are
+committed in `ecff5b9`, `b41cc62`, `91bd9bc`, and `2978367`; the resulting exact
+42-artifact slice passed all 68 cases in a current focused rerun.
 The record-intent migration was also exercised
 in a disposable local PostgreSQL 16 instance: all six focused integration cases
 passed, covering clean up/down/up migration verification, Ethereum and Solana

@@ -44,6 +44,15 @@ synthetic transcript boundaries: six Ethereum and four Solana. All ten remain
 unregistered and unavailable. The live read-only and transaction-enabled
 provider counts are both zero.
 
+Four account-scoped provider-position source artifacts also exist: Aave V3
+Ethereum (`1538ec7`), Kamino Solana (`1e70d80`), Compound III Ethereum
+(`7e10077`), and SparkLend Ethereum (`d684428`). They are endpoint-free,
+direct-import-only, dormant, and unregistered. Each requires injected
+authenticated durable wallet/continuity context and a bounded finalized
+transcript. None supplies an endpoint, credential, approved independent source
+pair, runtime activation, persistence or financial-action authority, or live
+evidence, so these artifacts do not change either zero count.
+
 ## Required architecture boundary
 
 Any future financial action must use a new mainnet bounded context with its own
@@ -121,11 +130,17 @@ direct-import-only lifecycle can invoke that processor sequentially within a
 reviewed 1-through-64 work-item limit and a 10-millisecond-through-30-second run
 deadline. It accepts one run at a time, propagates aborts, honors authenticated
 retry deferrals only inside the deadline, and cleans up its injected timers and
-listeners. Import and construction start no work. The finality-aware offline
-preflight in `7f7347a` pins all 38 provider-position artifacts; all 64 focused
-cases in `production-go-live-preflight.test.ts` passed. The earlier six focused
-record-intent cases also passed against an isolated local PostgreSQL 16
-instance.
+listeners. Import and construction start no work. At the candidate-finality
+milestone, offline preflight commit `7f7347a` pinned the then-current 38
+provider-position artifacts and all 64 focused cases in
+`production-go-live-preflight.test.ts` passed. Later preflight commits
+`ecff5b9`, `b41cc62`, and `91bd9bc` pin the Aave, Kamino, and Compound sources,
+bringing the committed critical slice to 41 artifacts. Spark source commit
+`d684428` passed its focused specification, API typecheck, and targeted
+static/format checks; preflight commit `2978367` pins it and brings the slice to
+42 artifacts. All 68 cases passed for that exact slice in a current focused
+rerun. The earlier six focused record-intent cases also passed
+against an isolated local PostgreSQL 16 instance.
 
 This closes a local evidence-recording and bounded-run implementation gap only.
 The finalizer, recorder, reconciliation processor, and lifecycle remain

@@ -10,6 +10,16 @@ No evidence writer or reconciliation schedule is composed, and none of the
 private reader, recorder, processor, or lifecycle is registered, granted runtime
 authority, or runtime-reachable.
 
+Four concrete provider-target source artifacts now implement the coordinator's
+source port: Aave V3 Ethereum (`1538ec7`), Kamino Solana (`1e70d80`), Compound
+III Ethereum (`7e10077`), and SparkLend Ethereum (`d684428`). They accept
+authenticated durable wallet/continuity context before a bounded finalized
+transcript, preserve explicit `COMPLETE` zero semantics, and expose no financial
+authority. All four are endpoint-free, direct-import-only, dormant, and absent
+from module, barrel, controller, configuration, and runtime composition. They
+are not an approved independent source pair and have performed no live provider
+read.
+
 ## What the coordinator establishes
 
 `DormantProviderPositionAdmissionCoordinator` is an application boundary between independently implemented provider/account readers and the existing mainnet provider-position coverage domain. For every authoritative active wallet × approved provider market, it:
@@ -240,9 +250,12 @@ trusted-chain-assessment assembler,
 exact mainnet launch-network policy, concrete deadline runner, complete
 wallet-roster cancellation chain, shared PostgreSQL cancellation service,
 runtime-budget resource, private dormant composition, migrations `0029`,
-`0030`, and `0031`, and the migration index with a selected thirty-eight-file
-reader/domain/infrastructure/database/module/barrel/controller critical-source
-slice.
+`0030`, and `0031`, and the migration index. The historical finality milestone
+selected 38 reader/domain/infrastructure/database/module/barrel/controller
+artifacts. Aave, Kamino, and Compound were subsequently pinned by preflight
+commits `ecff5b9`, `b41cc62`, and `91bd9bc`, bringing the committed set to 41.
+Spark preflight commit `2978367` pins source commit `d684428` and brings the
+selected local critical-source set to 42 artifacts.
 Its local check rejects trust, timing, source-method substitution, active-controller
 lifecycle, signal substitution, cancellation/drain/cleanup, query fallback,
 result-cardinality/row-validation weakening, recorder SQL/value order,
@@ -319,7 +332,10 @@ not turn this source artifact into a scheduler or runtime worker.
 
 At the candidate-finality milestone implemented in `387a2dc` and verified in
 `7f7347a`, all 64 focused cases in `production-go-live-preflight.test.ts` passed
-for this exact 38-artifact slice.
+for the then-current 38-artifact slice. Spark commit `d684428` passed its focused
+source specification, API typecheck, and targeted static/format checks;
+preflight commit `2978367` pins it, and all 68 cases passed for the resulting
+exact 42-artifact slice in a current focused rerun.
 Six focused integration cases also passed against an
 isolated local PostgreSQL 16 instance, including the cumulative verifier,
 Ethereum/Solana intent preparation, one-shot/idempotent execution,
@@ -336,7 +352,9 @@ separately reviewed and activated authority boundary permits any ledger mutation
 or financial use.
 
 The checked-in mainnet source-pair registry remains empty and `NOT_APPROVED`.
-No concrete source, endpoint, owner-authorized recorder or reconciliation
+The four provider-target source artifacts do not change that registry and do
+not provide an approved independent witness pair. No live source, endpoint,
+owner-authorized recorder or reconciliation
 workload/principal/credential/grant, module provider, barrel export, composition
 dependency, finalizer registration, lifecycle registration, schedule,
 deployment, or runtime activation is added, so all three
