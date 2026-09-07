@@ -702,9 +702,9 @@ const REVIEWED_PROVIDER_POSITION_READ_ARTIFACT_SHA256 = Object.freeze({
   providerPositionRuntimePostgresPoolSource:
     'd15b4a0604cda0bcc9d8df7f597863e42c4ef573ba8ed4362386cd2beaa1f823',
   portfolioWalletRegistrationReaderPortSource:
-    '51261b1f960a7a3918dbeb72a789cf0ff75d299727f93c844e525477bf51806c',
+    'e836af316b00ad985e800580756cabdcac403131981c44b4893c6351f358de08',
   registeredPortfolioWalletReaderSource:
-    'da78b8e539a83e94c13ad2ce718559bceb0efbacdb5cb3931d284591f5c06af2',
+    'b1722a4f8480b0e78e0aa913ad851f8a6d3b4ede0e272639c1afb92893d08d0d',
   walletRegistrationServiceSource:
     '1961a2bf8b3bbfd56d849f831753bc5944a4f2f32f636acc4aed28fe28899c3f',
   walletRegistrationRepositoryPortSource:
@@ -6982,25 +6982,15 @@ function hasDormantProviderPositionReadBoundaryContract(
     'signal: activeController.signal,',
     coordinatorRosterCorrelation,
   );
-  const registeredSignalCapture = registeredWalletReader.indexOf('const signal = request.signal;');
-  const registeredLegacyBranch = registeredWalletReader.indexOf(
-    'signal === undefined',
-    registeredSignalCapture,
-  );
-  const registeredLegacyRead = registeredWalletReader.indexOf(
-    '? await this.wallets.listActiveWallets(request.accountId)',
-    registeredLegacyBranch,
-  );
   const registeredSignaledRead = registeredWalletReader.indexOf(
-    ': await this.wallets.listActiveWallets(',
-    registeredLegacyRead,
+    'const roster = await this.wallets.listActiveWallets(',
   );
   const registeredSignaledAccount = registeredWalletReader.indexOf(
     'request.accountId,',
     registeredSignaledRead,
   );
   const registeredSignaledSignal = registeredWalletReader.indexOf(
-    'Object.freeze({ signal }),',
+    'Object.freeze({ signal: request.signal }),',
     registeredSignaledAccount,
   );
   const walletServiceList = walletRegistrationService.indexOf('async listActiveWallets(');
@@ -8205,23 +8195,22 @@ function hasDormantProviderPositionReadBoundaryContract(
     coordinatorRosterEvaluation > coordinatorRosterAccount &&
     coordinatorRosterCorrelation > coordinatorRosterEvaluation &&
     coordinatorRosterSignal > coordinatorRosterCorrelation &&
-    exactExecutableLineCount(portfolioWalletReaderPort, 'readonly signal?: AbortSignal;') === 1 &&
+    exactExecutableLineCount(portfolioWalletReaderPort, 'readonly signal: AbortSignal;') === 1 &&
     exactExecutableLineCount(
       portfolioWalletReaderPort,
       'request: ReadActivePortfolioWalletRegistrationsRequest,',
     ) === 1 &&
-    registeredSignalCapture >= 0 &&
-    registeredLegacyBranch > registeredSignalCapture &&
-    registeredLegacyRead > registeredLegacyBranch &&
-    registeredSignaledRead > registeredLegacyRead &&
+    registeredSignaledRead >= 0 &&
     registeredSignaledAccount > registeredSignaledRead &&
     registeredSignaledSignal > registeredSignaledAccount &&
-    exactExecutableLineCount(registeredWalletReader, 'const signal = request.signal;') === 1 &&
     exactExecutableLineCount(
       registeredWalletReader,
-      '? await this.wallets.listActiveWallets(request.accountId)',
+      'const roster = await this.wallets.listActiveWallets(',
     ) === 1 &&
-    exactExecutableLineCount(registeredWalletReader, 'Object.freeze({ signal }),') === 1 &&
+    exactExecutableLineCount(
+      registeredWalletReader,
+      'Object.freeze({ signal: request.signal }),',
+    ) === 1 &&
     walletServiceList >= 0 &&
     walletServiceAccountParse > walletServiceList &&
     walletServiceRepositoryRead > walletServiceAccountParse &&
