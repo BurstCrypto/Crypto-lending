@@ -3330,8 +3330,8 @@ test('provider-position read inspection rejects dormant durable evidence and mig
     ],
     [
       'providerPositionMigrationIndexSource',
-      '  suspendGenericWorkerBalanceAuthorityMigrationV0028,\n  createProviderPositionChainAnchorEvidenceMigrationV0029,\n  enforceProviderPositionChainAnchorRecordDeadlineMigrationV0030,\n  createProviderPositionChainAnchorRecordIntentMigrationV0031,\n  createMainnetBalanceAgreementEvidenceV2MigrationV0032,\n]);',
-      '  suspendGenericWorkerBalanceAuthorityMigrationV0028,\n  createProviderPositionChainAnchorEvidenceTestSchemaMigrationV0029,\n  enforceProviderPositionChainAnchorRecordDeadlineMigrationV0030,\n  createProviderPositionChainAnchorRecordIntentMigrationV0031,\n  createMainnetBalanceAgreementEvidenceV2MigrationV0032,\n]);',
+      '  suspendGenericWorkerBalanceAuthorityMigrationV0028,\n  createProviderPositionChainAnchorEvidenceMigrationV0029,\n  enforceProviderPositionChainAnchorRecordDeadlineMigrationV0030,\n  createProviderPositionChainAnchorRecordIntentMigrationV0031,\n  createMainnetBalanceAgreementEvidenceV2MigrationV0032,\n  createMainnetFinancialActionLifecycleMigrationV0033,\n]);',
+      '  suspendGenericWorkerBalanceAuthorityMigrationV0028,\n  createProviderPositionChainAnchorEvidenceTestSchemaMigrationV0029,\n  enforceProviderPositionChainAnchorRecordDeadlineMigrationV0030,\n  createProviderPositionChainAnchorRecordIntentMigrationV0031,\n  createMainnetBalanceAgreementEvidenceV2MigrationV0032,\n  createMainnetFinancialActionLifecycleMigrationV0033,\n]);',
     ],
     [
       'providerPositionMigrationIndexSource',
@@ -6014,13 +6014,13 @@ test('balance-consumer inspection pins immutable V1 input and one-way owner-only
     ],
     [
       'migrationIndexSource',
-      '  createProviderPositionChainAnchorRecordIntentMigrationV0031,\n  createMainnetBalanceAgreementEvidenceV2MigrationV0032,\n]);',
-      '  createProviderPositionChainAnchorRecordIntentMigrationV0031,\n  createMainnetBalanceAgreementEvidenceV2TestSchemaMigrationV0032,\n]);',
+      '  createProviderPositionChainAnchorRecordIntentMigrationV0031,\n  createMainnetBalanceAgreementEvidenceV2MigrationV0032,\n  createMainnetFinancialActionLifecycleMigrationV0033,\n]);',
+      '  createProviderPositionChainAnchorRecordIntentMigrationV0031,\n  createMainnetBalanceAgreementEvidenceV2TestSchemaMigrationV0032,\n  createMainnetFinancialActionLifecycleMigrationV0033,\n]);',
     ],
     [
       'migrationIndexSource',
-      '  createProviderPositionChainAnchorRecordIntentTestSchemaMigrationV0031,\n  createMainnetBalanceAgreementEvidenceV2TestSchemaMigrationV0032,\n]);',
-      '  createProviderPositionChainAnchorRecordIntentTestSchemaMigrationV0031,\n  createMainnetBalanceAgreementEvidenceV2MigrationV0032,\n]);',
+      '  createProviderPositionChainAnchorRecordIntentTestSchemaMigrationV0031,\n  createMainnetBalanceAgreementEvidenceV2TestSchemaMigrationV0032,\n  createMainnetFinancialActionLifecycleTestSchemaMigrationV0033,\n]);',
+      '  createProviderPositionChainAnchorRecordIntentTestSchemaMigrationV0031,\n  createMainnetBalanceAgreementEvidenceV2MigrationV0032,\n  createMainnetFinancialActionLifecycleTestSchemaMigrationV0033,\n]);',
     ],
   ];
 
@@ -6844,14 +6844,14 @@ test('repository loader brands the bounded full API runtime absence attestation'
   assert.equal(Object.isFrozen(attestation), true);
   assert.deepEqual(attestation, {
     inspected: true,
-    sourceFileCount: 393,
-    sourceBytes: 6_048_616,
+    sourceFileCount: 395,
+    sourceBytes: 6_265_963,
     repositorySnapshotSha256: attestation?.repositorySnapshotSha256,
     concreteDeploymentIdentityRegistration: 'ABSENT',
   });
   assert.equal(
     attestation?.repositorySnapshotSha256,
-    '0d11c90d870eeac4f0c1565f82be3025053a9b510b0516482d51b0d8b5155c20',
+    'e3c282da6404df5d631b6b110dc52f48111beb1e087b0c56648661b70db737ad',
   );
 });
 
