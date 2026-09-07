@@ -175,11 +175,12 @@ export class PostgresPortfolioBalanceReader implements PortfolioBalanceReader {
         networkId,
       }));
       const resultLimit = expectedWallets.length * MAX_BALANCE_ROWS_PER_WALLET + 1;
-      const result = await this.postgres.query<PortfolioBalanceRow>(
+      const result = await this.postgres.queryWithCancellation<PortfolioBalanceRow>(
         `SELECT balance.*
          FROM read_balance_sync_portfolio($1::uuid, $2::jsonb, $3::timestamptz) AS balance
          LIMIT $4::integer`,
         [accountId, JSON.stringify(expectedJson), evaluatedAt, resultLimit],
+        request.signal,
       );
       if (!Array.isArray(result.rows) || result.rows.length >= resultLimit) return fail();
       const grouped = new Map<string, PortfolioBalanceRow[]>();

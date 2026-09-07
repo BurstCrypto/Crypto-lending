@@ -9,6 +9,7 @@ import { createBalanceSyncReadModelTestSchemaMigrationV0020 } from '../../src/in
 import { createStablecoinPriceEvidenceReadModelTestSchemaMigrationV0021 } from '../../src/infrastructure/database/migrations/0021-create-stablecoin-price-evidence-read-model.migration';
 import { suspendStablecoinIngestionAuthorityTestSchemaMigrationV0026 } from '../../src/infrastructure/database/migrations/0026-suspend-stablecoin-ingestion-authority.migration';
 import { DATABASE_TEST_SCHEMA_MIGRATION_LIST } from '../../src/infrastructure/database/migrations';
+import { postgresStartupOptions } from '../../src/infrastructure/database/postgres-startup-options';
 import { PostgresService } from '../../src/infrastructure/database/postgres.service';
 import type { RecordStablecoinPriceEvidenceRequest } from '../../src/valuation/application/ports/stablecoin-price-evidence-store.port';
 import {
@@ -138,6 +139,24 @@ async function asRole<T>(
   });
 }
 
+async function priceReaderAsRole<T>(
+  schema: string,
+  role: string,
+  work: (reader: PostgresPortfolioPriceEvidenceReader) => Promise<T>,
+): Promise<T> {
+  if (!IDENTIFIER.test(schema)) throw new Error('Unsafe price evidence test schema');
+  const rolePool = new Pool({
+    connectionString: testDatabaseUrl,
+    max: 1,
+    options: `${postgresStartupOptions(role)} -c search_path=${schema},pg_temp`,
+  });
+  try {
+    return await work(new PostgresPortfolioPriceEvidenceReader(new PostgresService(rolePool)));
+  } finally {
+    await rolePool.end();
+  }
+}
+
 describeWithPostgres('stablecoin price evidence PostgreSQL controls', () => {
   jest.setTimeout(120_000);
 
@@ -209,7 +228,6 @@ describeWithPostgres('stablecoin price evidence PostgreSQL controls', () => {
   });
 
   it('keeps API reads while every runtime and PUBLIC-only role is denied ingestion', async () => {
-    const reader = new PostgresPortfolioPriceEvidenceReader(postgres);
     const api = PRODUCTION_DATABASE_PRINCIPALS.apiRuntimeRole;
     const deniedRoles = [
       PRODUCTION_DATABASE_PRINCIPALS.workerRuntimeRole,
@@ -221,13 +239,14 @@ describeWithPostgres('stablecoin price evidence PostgreSQL controls', () => {
       asset: ETHEREUM_USDC,
       evaluatedAt: at(baseTime, 30_000),
       correlationId: randomUUID(),
+      signal: new AbortController().signal,
     };
     await expect(
-      asRole(postgres, api, () => reader.readPriceEvidence(request)),
+      priceReaderAsRole(schema, api, (reader) => reader.readPriceEvidence(request)),
     ).resolves.toMatchObject({ observations: [] });
     for (const role of deniedRoles) {
       await expect(
-        asRole(postgres, role, () => reader.readPriceEvidence(request)),
+        priceReaderAsRole(schema, role, (reader) => reader.readPriceEvidence(request)),
       ).rejects.toBeInstanceOf(StablecoinPriceEvidencePersistenceError);
     }
 
@@ -357,13 +376,16 @@ describeWithPostgres('stablecoin price evidence PostgreSQL controls', () => {
       "SELECT pg_catalog.date_trunc('milliseconds', pg_catalog.clock_timestamp()) AS now",
     );
     const evaluatedAt = now.rows[0]?.now.toISOString() ?? '';
-    const reader = new PostgresPortfolioPriceEvidenceReader(postgres);
-    const snapshot = await asRole(postgres, PRODUCTION_DATABASE_PRINCIPALS.apiRuntimeRole, () =>
-      reader.readPriceEvidence({
-        asset: ETHEREUM_USDC,
-        evaluatedAt,
-        correlationId: randomUUID(),
-      }),
+    const snapshot = await priceReaderAsRole(
+      schema,
+      PRODUCTION_DATABASE_PRINCIPALS.apiRuntimeRole,
+      (reader) =>
+        reader.readPriceEvidence({
+          asset: ETHEREUM_USDC,
+          evaluatedAt,
+          correlationId: randomUUID(),
+          signal: new AbortController().signal,
+        }),
     );
     expect(snapshot.observations).toHaveLength(1);
     expect(snapshot.observations[0]?.sourceSequence).toBe('2');

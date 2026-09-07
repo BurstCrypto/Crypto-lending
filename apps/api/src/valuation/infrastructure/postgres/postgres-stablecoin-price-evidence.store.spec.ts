@@ -54,11 +54,14 @@ function recordRequest(): RecordStablecoinPriceEvidenceRequest {
   };
 }
 
-function readRequest(): ReadPortfolioPriceEvidenceRequest {
+function readRequest(
+  signal: AbortSignal = new AbortController().signal,
+): ReadPortfolioPriceEvidenceRequest {
   return {
     asset: ASSET,
     evaluatedAt: EVALUATED_AT,
     correlationId: '22222222-2222-4222-8222-222222222222',
+    signal,
   };
 }
 
@@ -133,13 +136,16 @@ function result(rows: Record<string, unknown>[]): QueryResult {
 
 function harness(): {
   readonly query: jest.Mock;
+  readonly queryWithCancellation: jest.Mock;
   readonly writer: PostgresStablecoinPriceEvidenceWriter;
   readonly reader: PostgresPortfolioPriceEvidenceReader;
 } {
   const query = jest.fn();
-  const postgres = { query } as unknown as PostgresService;
+  const queryWithCancellation = jest.fn();
+  const postgres = { query, queryWithCancellation } as unknown as PostgresService;
   return {
     query,
+    queryWithCancellation,
     writer: new PostgresStablecoinPriceEvidenceWriter(postgres),
     reader: new PostgresPortfolioPriceEvidenceReader(postgres),
   };
@@ -221,11 +227,12 @@ describe('Postgres stablecoin price evidence adapters', () => {
 
   it('returns two first-use watermarks and no synthetic prices for empty history', async () => {
     const test = harness();
-    test.query.mockResolvedValue(
+    test.queryWithCancellation.mockResolvedValue(
       result([evidenceRow('PYTH_CORE'), evidenceRow('CHAINLINK_DATA_FEEDS')]),
     );
 
-    const snapshot = await test.reader.readPriceEvidence(readRequest());
+    const signal = new AbortController().signal;
+    const snapshot = await test.reader.readPriceEvidence(readRequest(signal));
     expect(snapshot.snapshotId).toMatch(/^price-evidence-[0-9a-f]{64}$/u);
     expect(snapshot.observations).toEqual([]);
     expect(snapshot.sourceWatermarks).toEqual([
@@ -244,11 +251,13 @@ describe('Postgres stablecoin price evidence adapters', () => {
         lastAcceptedUpdateId: null,
       },
     ]);
+    expect(test.queryWithCancellation.mock.calls[0]?.[2]).toBe(signal);
+    expect(test.query).not.toHaveBeenCalled();
   });
 
   it('returns the predecessor watermark so the latest accepted observation remains eligible', async () => {
     const test = harness();
-    test.query.mockResolvedValue(
+    test.queryWithCancellation.mockResolvedValue(
       result([acceptedPythRow('2'), evidenceRow('CHAINLINK_DATA_FEEDS')]),
     );
 
@@ -291,7 +300,7 @@ describe('Postgres stablecoin price evidence adapters', () => {
     ],
   ])('fails closed on %s', async (rows) => {
     const test = harness();
-    test.query.mockResolvedValue(result(rows as Record<string, unknown>[]));
+    test.queryWithCancellation.mockResolvedValue(result(rows as Record<string, unknown>[]));
     await expect(test.reader.readPriceEvidence(readRequest())).rejects.toBeInstanceOf(
       StablecoinPriceEvidencePersistenceError,
     );
@@ -299,7 +308,7 @@ describe('Postgres stablecoin price evidence adapters', () => {
 
   it('sanitizes validation and database details', async () => {
     const test = harness();
-    test.query.mockRejectedValue(new Error('postgres://secret@example/key'));
+    test.queryWithCancellation.mockRejectedValue(new Error('postgres://secret@example/key'));
     await expect(test.reader.readPriceEvidence(readRequest())).rejects.toEqual(
       expect.objectContaining({
         code: 'STABLECOIN_PRICE_EVIDENCE_PERSISTENCE_FAILED',

@@ -15,14 +15,10 @@ export class RegisteredPortfolioWalletReader implements PortfolioWalletRegistrat
   async readActiveWalletRegistrations(
     request: ReadActivePortfolioWalletRegistrationsRequest,
   ): Promise<readonly ActivePortfolioWalletRegistration[]> {
-    const signal = request.signal;
-    const roster =
-      signal === undefined
-        ? await this.wallets.listActiveWallets(request.accountId)
-        : await this.wallets.listActiveWallets(
-            request.accountId,
-            Object.freeze({ signal }),
-          );
+    const roster = await this.wallets.listActiveWallets(
+      request.accountId,
+      Object.freeze({ signal: request.signal }),
+    );
     return Object.freeze(
       roster.wallets.map(({ walletId, chainId }) =>
         Object.freeze({ walletId, networkId: chainId }),

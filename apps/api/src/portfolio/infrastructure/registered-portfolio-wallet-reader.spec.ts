@@ -22,15 +22,18 @@ describe('RegisteredPortfolioWalletReader', () => {
     };
     const wallets = { listActiveWallets: jest.fn(async () => roster) };
     const reader = new RegisteredPortfolioWalletReader(wallets as never);
+    const controller = new AbortController();
 
     const result = await reader.readActiveWalletRegistrations({
       accountId: ACCOUNT_ID,
       evaluatedAt: '2026-09-02T18:00:00.000Z',
       correlationId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+      signal: controller.signal,
     });
 
-    expect(wallets.listActiveWallets).toHaveBeenCalledWith(ACCOUNT_ID);
-    expect(wallets.listActiveWallets.mock.calls[0]).toHaveLength(1);
+    expect(wallets.listActiveWallets).toHaveBeenCalledWith(ACCOUNT_ID, {
+      signal: controller.signal,
+    });
     expect(result).toEqual([
       {
         walletId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
@@ -41,7 +44,7 @@ describe('RegisteredPortfolioWalletReader', () => {
     expect(JSON.stringify(result)).not.toContain('0x1111111111111111111111111111111111111111');
   });
 
-  it('forwards the exact optional cancellation signal to the durable roster read', async () => {
+  it('forwards the exact required cancellation signal to the durable roster read', async () => {
     const roster: ActiveWalletRoster = { version: 1, wallets: [] };
     const listActiveWallets = jest.fn(
       async (
@@ -77,14 +80,18 @@ describe('RegisteredPortfolioWalletReader', () => {
     const failure = new Error('wallet registration unavailable');
     const wallets = { listActiveWallets: jest.fn(async () => Promise.reject(failure)) };
     const reader = new RegisteredPortfolioWalletReader(wallets as never);
+    const controller = new AbortController();
 
     await expect(
       reader.readActiveWalletRegistrations({
         accountId: ACCOUNT_ID,
         evaluatedAt: '2026-09-02T18:00:00.000Z',
         correlationId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+        signal: controller.signal,
       }),
     ).rejects.toBe(failure);
-    expect(wallets.listActiveWallets.mock.calls[0]).toHaveLength(1);
+    expect(wallets.listActiveWallets).toHaveBeenCalledWith(ACCOUNT_ID, {
+      signal: controller.signal,
+    });
   });
 });

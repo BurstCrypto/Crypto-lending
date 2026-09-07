@@ -24,8 +24,10 @@ import type {
 } from './ports/portfolio-wallet-registration-reader.port';
 import type { UnifiedPortfolio } from '../domain/unified-portfolio';
 import {
+  PORTFOLIO_READ_DEADLINE_MILLISECONDS,
   PortfolioService,
   type PortfolioClock,
+  type PortfolioTimerRuntime,
   type ReadUnifiedPortfolioRequest,
 } from './portfolio.service';
 import { PortfolioUnavailableError } from './portfolio.errors';
@@ -40,6 +42,67 @@ const WALLET_D = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
 const ETHEREUM_USDC = '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48';
 const ETHEREUM_USDT = '0xdac17f958d2ee523a2206206994597c13d831ec7';
 const SOLANA_USDT = 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB';
+const EVALUATED_AT_MILLISECONDS = Date.parse(EVALUATED_AT);
+
+interface Deferred<T> {
+  readonly promise: Promise<T>;
+  readonly resolve: (value: T) => void;
+  readonly reject: (error: unknown) => void;
+}
+
+function deferred<T>(): Deferred<T> {
+  let resolvePromise: ((value: T) => void) | undefined;
+  let rejectPromise: ((error: unknown) => void) | undefined;
+  const promise = new Promise<T>((resolve, reject) => {
+    resolvePromise = resolve;
+    rejectPromise = reject;
+  });
+  return Object.freeze({
+    promise,
+    resolve: (value: T): void => resolvePromise?.(value),
+    reject: (error: unknown): void => rejectPromise?.(error),
+  });
+}
+
+class MutablePortfolioClock implements PortfolioClock {
+  constructor(public milliseconds = EVALUATED_AT_MILLISECONDS) {}
+
+  now(): Date {
+    return new Date(this.milliseconds);
+  }
+}
+
+class ManualPortfolioTimerRuntime implements PortfolioTimerRuntime {
+  readonly delays: number[] = [];
+  readonly callbacks = new Map<number, () => void>();
+  cancelCalls = 0;
+  private nextHandle = 1;
+
+  schedule(callback: () => void, milliseconds: number): number {
+    const handle = this.nextHandle;
+    this.nextHandle += 1;
+    this.delays.push(milliseconds);
+    this.callbacks.set(handle, callback);
+    return handle;
+  }
+
+  cancel(handle: unknown): void {
+    this.cancelCalls += 1;
+    if (typeof handle === 'number') this.callbacks.delete(handle);
+  }
+
+  fireNext(): void {
+    const entry = this.callbacks.entries().next().value as [number, () => void] | undefined;
+    if (entry === undefined) throw new Error('No portfolio timer is scheduled.');
+    this.callbacks.delete(entry[0]);
+    entry[1]();
+  }
+}
+
+async function flushMicrotasks(): Promise<void> {
+  await Promise.resolve();
+  await Promise.resolve();
+}
 
 function activeWallets(): readonly ActivePortfolioWalletRegistration[] {
   return [
@@ -320,27 +383,181 @@ describe('PortfolioService', () => {
     expect(fixture.prices.requests).toHaveLength(3);
   });
 
-  it('binds the balance read to only the authenticated account and trusted clock', async () => {
+  it('binds every port to the account, trusted clock, and one server-owned signal', async () => {
     const fixture = service();
 
     await read(fixture.service);
 
-    expect(fixture.wallets.requests).toEqual([
-      {
-        accountId: ACCOUNT_ID,
-        evaluatedAt: EVALUATED_AT,
-        correlationId: CORRELATION_ID,
-      },
-    ]);
-    expect(fixture.balances.requests).toEqual([
-      {
-        accountId: ACCOUNT_ID,
-        evaluatedAt: EVALUATED_AT,
-        correlationId: CORRELATION_ID,
-        expectedWallets: activeWallets(),
-      },
-    ]);
+    const walletRequest = fixture.wallets.requests[0];
+    const balanceRequest = fixture.balances.requests[0];
+    if (!walletRequest || !balanceRequest) throw new Error('portfolio port request missing');
+    expect(fixture.wallets.requests).toHaveLength(1);
+    expect(walletRequest).toMatchObject({
+      accountId: ACCOUNT_ID,
+      evaluatedAt: EVALUATED_AT,
+      correlationId: CORRELATION_ID,
+    });
+    expect(fixture.balances.requests).toHaveLength(1);
+    expect(balanceRequest).toMatchObject({
+      accountId: ACCOUNT_ID,
+      evaluatedAt: EVALUATED_AT,
+      correlationId: CORRELATION_ID,
+      expectedWallets: activeWallets(),
+    });
+    expect(balanceRequest.signal).toBe(walletRequest.signal);
+    expect(fixture.prices.requests.every(({ signal }) => signal === walletRequest.signal)).toBe(
+      true,
+    );
+    expect(Object.isFrozen(walletRequest)).toBe(true);
+    expect(Object.isFrozen(balanceRequest)).toBe(true);
+    expect(fixture.prices.requests.every((request) => Object.isFrozen(request))).toBe(true);
+    expect(walletRequest.signal.aborted).toBe(true);
     expect(JSON.stringify(fixture.balances.snapshot)).not.toContain(ACCOUNT_ID);
+  });
+
+  it('aborts at the deadline but waits for the active port to drain before returning 503', async () => {
+    const gate = deferred<readonly ActivePortfolioWalletRegistration[]>();
+    const walletRequests: ReadActivePortfolioWalletRegistrationsRequest[] = [];
+    const wallets: PortfolioWalletRegistrationReader = {
+      readActiveWalletRegistrations: (request) => {
+        walletRequests.push(request);
+        return gate.promise;
+      },
+    };
+    const balances = new FakeBalanceReader();
+    const prices = new FakePriceReader();
+    const mutableClock = new MutablePortfolioClock();
+    const timers = new ManualPortfolioTimerRuntime();
+    const portfolio = new PortfolioService(wallets, balances, prices, mutableClock, timers);
+    const running = read(portfolio);
+    await flushMicrotasks();
+    let settled = false;
+    void running.then(
+      () => {
+        settled = true;
+      },
+      () => {
+        settled = true;
+      },
+    );
+
+    expect(timers.delays).toEqual([PORTFOLIO_READ_DEADLINE_MILLISECONDS]);
+    const signal = walletRequests[0]?.signal;
+    expect(signal).toBeInstanceOf(AbortSignal);
+    mutableClock.milliseconds += PORTFOLIO_READ_DEADLINE_MILLISECONDS;
+    timers.fireNext();
+    await flushMicrotasks();
+
+    expect(signal?.aborted).toBe(true);
+    expect(settled).toBe(false);
+    expect(balances.requests).toEqual([]);
+    expect(prices.requests).toEqual([]);
+
+    gate.resolve(activeWallets());
+    await expect(running).rejects.toEqual(new PortfolioUnavailableError());
+    expect(timers.cancelCalls).toBe(1);
+    expect(timers.callbacks.size).toBe(0);
+  });
+
+  it.each<[string, number]>([
+    [
+      'completion exactly at the exclusive deadline',
+      EVALUATED_AT_MILLISECONDS + PORTFOLIO_READ_DEADLINE_MILLISECONDS,
+    ],
+    ['a clock regression', EVALUATED_AT_MILLISECONDS - 1],
+  ])('fails closed on %s after a dependency drains', async (_label, completionTime) => {
+    const gate = deferred<readonly ActivePortfolioWalletRegistration[]>();
+    const walletRequests: ReadActivePortfolioWalletRegistrationsRequest[] = [];
+    const wallets: PortfolioWalletRegistrationReader = {
+      readActiveWalletRegistrations: (request) => {
+        walletRequests.push(request);
+        return gate.promise;
+      },
+    };
+    const balances = new FakeBalanceReader();
+    const prices = new FakePriceReader();
+    const mutableClock = new MutablePortfolioClock();
+    const timers = new ManualPortfolioTimerRuntime();
+    const portfolio = new PortfolioService(wallets, balances, prices, mutableClock, timers);
+    const running = read(portfolio);
+    await flushMicrotasks();
+
+    mutableClock.milliseconds = completionTime;
+    gate.resolve(activeWallets());
+
+    await expect(running).rejects.toEqual(new PortfolioUnavailableError());
+    expect(walletRequests[0]?.signal.aborted).toBe(true);
+    expect(balances.requests).toEqual([]);
+    expect(prices.requests).toEqual([]);
+    expect(timers.callbacks.size).toBe(0);
+    expect(timers.cancelCalls).toBe(1);
+  });
+
+  it('never converts a price read that drains after abort into a partial 200', async () => {
+    const gate = deferred<PortfolioPriceEvidenceSnapshot>();
+    const requests: ReadPortfolioPriceEvidenceRequest[] = [];
+    const prices: PortfolioPriceEvidenceReader = {
+      readPriceEvidence: (request) => {
+        requests.push(request);
+        return gate.promise;
+      },
+    };
+    const wallets = new FakeWalletRegistrationReader();
+    const balances = new FakeBalanceReader();
+    const mutableClock = new MutablePortfolioClock();
+    const timers = new ManualPortfolioTimerRuntime();
+    const portfolio = new PortfolioService(wallets, balances, prices, mutableClock, timers);
+    const running = read(portfolio);
+    await flushMicrotasks();
+
+    expect(requests).toHaveLength(1);
+    mutableClock.milliseconds += PORTFOLIO_READ_DEADLINE_MILLISECONDS;
+    timers.fireNext();
+    gate.reject(new Error('private late price-provider response'));
+
+    await expect(running).rejects.toEqual(new PortfolioUnavailableError());
+    await expect(running).rejects.not.toThrow('private late price-provider response');
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.signal.aborted).toBe(true);
+    expect(timers.cancelCalls).toBe(1);
+  });
+
+  it('sanitizes timer setup and cleanup failures without exposing a result', async () => {
+    const setupFailure = service();
+    const failedSetupRuntime: PortfolioTimerRuntime = Object.freeze({
+      schedule(): never {
+        throw new Error('private timer setup detail');
+      },
+      cancel(): void {},
+    });
+    const setupFailureService = new PortfolioService(
+      setupFailure.wallets,
+      setupFailure.balances,
+      setupFailure.prices,
+      clock,
+      failedSetupRuntime,
+    );
+    await expect(read(setupFailureService)).rejects.toEqual(new PortfolioUnavailableError());
+    await expect(read(setupFailureService)).rejects.not.toThrow('private timer setup detail');
+    expect(setupFailure.wallets.requests).toEqual([]);
+
+    const cleanupFailure = service();
+    const failedCleanupRuntime: PortfolioTimerRuntime = Object.freeze({
+      schedule: () => 1,
+      cancel(): never {
+        throw new Error('private timer cleanup detail');
+      },
+    });
+    const cleanupFailureService = new PortfolioService(
+      cleanupFailure.wallets,
+      cleanupFailure.balances,
+      cleanupFailure.prices,
+      clock,
+      failedCleanupRuntime,
+    );
+    await expect(read(cleanupFailureService)).rejects.toEqual(new PortfolioUnavailableError());
+    await expect(read(cleanupFailureService)).rejects.not.toThrow('private timer cleanup detail');
+    expect(cleanupFailure.wallets.requests[0]?.signal.aborted).toBe(true);
   });
 
   it('keeps stale indexed balances in reporting value while flagging every affected total', async () => {

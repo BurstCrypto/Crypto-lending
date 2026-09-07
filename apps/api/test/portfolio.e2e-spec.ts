@@ -12,7 +12,9 @@ import { configureApplication } from '../src/application';
 import { StructuredLogger } from '../src/infrastructure/logging';
 import {
   PORTFOLIO_CLOCK,
+  PORTFOLIO_TIMER_RUNTIME,
   PortfolioService,
+  SYSTEM_PORTFOLIO_TIMER_RUNTIME,
   type PortfolioClock,
 } from '../src/portfolio/application/portfolio.service';
 import {
@@ -188,6 +190,7 @@ describe('unified portfolio HTTP boundary (e2e)', () => {
           useValue: priceReader satisfies PortfolioPriceEvidenceReader,
         },
         { provide: PORTFOLIO_CLOCK, useValue: portfolioClock },
+        { provide: PORTFOLIO_TIMER_RUNTIME, useValue: SYSTEM_PORTFOLIO_TIMER_RUNTIME },
       ],
     }).compile();
 
@@ -274,6 +277,7 @@ describe('unified portfolio HTTP boundary (e2e)', () => {
       evaluatedAt: EVALUATED_AT,
       correlationId: expect.stringMatching(CORRELATION_ID),
       expectedWallets: ACTIVE_WALLETS,
+      signal: expect.any(AbortSignal),
     } satisfies ReadPortfolioBalancesRequest);
   });
 

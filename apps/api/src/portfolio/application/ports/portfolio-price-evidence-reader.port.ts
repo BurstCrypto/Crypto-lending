@@ -17,6 +17,8 @@ export interface ReadPortfolioPriceEvidenceRequest {
   readonly asset: StablecoinValuationAssetReference;
   readonly evaluatedAt: string;
   readonly correlationId: string;
+  /** Exact server-owned cancellation shared by every dependency in one portfolio read. */
+  readonly signal: AbortSignal;
 }
 
 export interface PortfolioPriceEvidenceReader {

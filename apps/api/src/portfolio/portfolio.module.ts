@@ -9,8 +9,10 @@ import { ValuationModule } from '../valuation/valuation.module';
 import { WalletsModule } from '../wallets/wallets.module';
 import {
   PORTFOLIO_CLOCK,
+  PORTFOLIO_TIMER_RUNTIME,
   PortfolioService,
   SYSTEM_PORTFOLIO_CLOCK,
+  SYSTEM_PORTFOLIO_TIMER_RUNTIME,
 } from './application/portfolio.service';
 import { PORTFOLIO_BALANCE_READER } from './application/ports/portfolio-balance-reader.port';
 import { PORTFOLIO_PRICE_EVIDENCE_READER } from './application/ports/portfolio-price-evidence-reader.port';
@@ -32,6 +34,7 @@ import { RegisteredPortfolioWalletReader } from './infrastructure/registered-por
     PortfolioService,
     PortfolioPrivacyInterceptor,
     { provide: PORTFOLIO_CLOCK, useValue: SYSTEM_PORTFOLIO_CLOCK },
+    { provide: PORTFOLIO_TIMER_RUNTIME, useValue: SYSTEM_PORTFOLIO_TIMER_RUNTIME },
     RegisteredPortfolioWalletReader,
     {
       provide: PORTFOLIO_WALLET_REGISTRATION_READER,

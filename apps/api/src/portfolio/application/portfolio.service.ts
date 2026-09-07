@@ -42,8 +42,12 @@ const CORRELATION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-
 const SAFE_SNAPSHOT_ID = /^[A-Za-z0-9](?:[A-Za-z0-9._:-]{0,126}[A-Za-z0-9])?$/u;
 const MAX_PRICE_OBSERVATIONS = 8;
 const MAX_PRICE_WATERMARKS = 8;
+const SYSTEM_SET_TIMEOUT = globalThis.setTimeout;
+const SYSTEM_CLEAR_TIMEOUT = globalThis.clearTimeout;
 
 export const PORTFOLIO_CLOCK = Symbol('PORTFOLIO_CLOCK');
+export const PORTFOLIO_TIMER_RUNTIME = Symbol('PORTFOLIO_TIMER_RUNTIME');
+export const PORTFOLIO_READ_DEADLINE_MILLISECONDS = 10_000 as const;
 
 export interface PortfolioClock {
   now(): Date;
@@ -51,6 +55,23 @@ export interface PortfolioClock {
 
 export const SYSTEM_PORTFOLIO_CLOCK: PortfolioClock = Object.freeze({
   now: (): Date => new Date(),
+});
+
+/** Injectable so the exclusive deadline and cleanup can be tested without waiting. */
+export interface PortfolioTimerRuntime {
+  schedule(callback: () => void, milliseconds: number): unknown;
+  cancel(handle: unknown): void;
+}
+
+export const SYSTEM_PORTFOLIO_TIMER_RUNTIME: PortfolioTimerRuntime = Object.freeze({
+  schedule(callback: () => void, milliseconds: number): ReturnType<typeof setTimeout> {
+    const handle = SYSTEM_SET_TIMEOUT(callback, milliseconds);
+    handle.unref?.();
+    return handle;
+  },
+  cancel(handle: unknown): void {
+    SYSTEM_CLEAR_TIMEOUT(handle as ReturnType<typeof setTimeout>);
+  },
 });
 
 export interface ReadUnifiedPortfolioRequest {
@@ -63,6 +84,18 @@ interface SupportedBalance {
   readonly registryAsset: SupportedStablecoinAsset;
   readonly asset: PortfolioAssetReference;
   readonly valuationAsset: StablecoinValuationAssetReference;
+}
+
+interface CanonicalPortfolioTime {
+  readonly timestamp: string;
+  readonly milliseconds: number;
+}
+
+interface PortfolioReadLifecycle {
+  readonly signal: AbortSignal;
+  readonly abort: () => void;
+  readonly deadlineMilliseconds: number;
+  lastObservedMilliseconds: number;
 }
 
 function unavailable(): never {
@@ -164,6 +197,8 @@ export class PortfolioService {
     private readonly prices: PortfolioPriceEvidenceReader,
     @Inject(PORTFOLIO_CLOCK)
     private readonly clock: PortfolioClock,
+    @Inject(PORTFOLIO_TIMER_RUNTIME)
+    private readonly timerRuntime: PortfolioTimerRuntime = SYSTEM_PORTFOLIO_TIMER_RUNTIME,
   ) {}
 
   async readUnifiedPortfolio(request: ReadUnifiedPortfolioRequest): Promise<UnifiedPortfolio> {
@@ -178,28 +213,88 @@ export class PortfolioService {
     }
     const accountId = requestRecord.accountId;
     const correlationId = requestRecord.correlationId;
-    const asOf = this.trustedNow();
+    const startedAt = this.trustedTime();
+    const deadlineMilliseconds = startedAt.milliseconds + PORTFOLIO_READ_DEADLINE_MILLISECONDS;
+    if (!Number.isSafeInteger(deadlineMilliseconds)) return unavailable();
+    const controller = new AbortController();
+    const lifecycle: PortfolioReadLifecycle = {
+      signal: controller.signal,
+      abort: () => controller.abort(),
+      deadlineMilliseconds,
+      lastObservedMilliseconds: startedAt.milliseconds,
+    };
+    let timerHandle: unknown;
+    let timerScheduled = false;
 
+    try {
+      try {
+        timerHandle = this.timerRuntime.schedule(
+          () => controller.abort(),
+          PORTFOLIO_READ_DEADLINE_MILLISECONDS,
+        );
+        timerScheduled = true;
+      } catch {
+        return unavailable();
+      }
+      this.assertActive(lifecycle);
+      return await this.readWithinLifecycle(
+        accountId,
+        correlationId,
+        startedAt.timestamp,
+        lifecycle,
+      );
+    } finally {
+      let cleanupFailed = false;
+      try {
+        controller.abort();
+      } catch {
+        cleanupFailed = true;
+      }
+      if (timerScheduled) {
+        try {
+          this.timerRuntime.cancel(timerHandle);
+        } catch {
+          cleanupFailed = true;
+        }
+      }
+      if (cleanupFailed) unavailable();
+    }
+  }
+
+  private async readWithinLifecycle(
+    accountId: AccountId,
+    correlationId: string,
+    asOf: string,
+    lifecycle: PortfolioReadLifecycle,
+  ): Promise<UnifiedPortfolio> {
     let expectedWallets: ReturnType<typeof parseActivePortfolioWalletRegistrations>;
     let balanceSnapshot: ReturnType<typeof parseIndexedPortfolioBalanceSnapshot>;
     try {
       expectedWallets = parseActivePortfolioWalletRegistrations(
-        await this.wallets.readActiveWalletRegistrations({
-          accountId,
-          evaluatedAt: asOf,
-          correlationId,
-        }),
+        await this.wallets.readActiveWalletRegistrations(
+          Object.freeze({
+            accountId,
+            evaluatedAt: asOf,
+            correlationId,
+            signal: lifecycle.signal,
+          }),
+        ),
       );
+      this.assertActive(lifecycle);
       balanceSnapshot = parseIndexedPortfolioBalanceSnapshot(
-        await this.balances.readCurrentBalances({
-          accountId,
-          evaluatedAt: asOf,
-          correlationId,
-          expectedWallets,
-        }),
+        await this.balances.readCurrentBalances(
+          Object.freeze({
+            accountId,
+            evaluatedAt: asOf,
+            correlationId,
+            expectedWallets,
+            signal: lifecycle.signal,
+          }),
+        ),
         asOf,
         expectedWallets,
       );
+      this.assertActive(lifecycle);
     } catch {
       return unavailable();
     }
@@ -228,7 +323,7 @@ export class PortfolioService {
     for (const asset of uniqueAssets) {
       evidenceByAsset.set(
         assetKey(asset),
-        await this.safeReadPriceEvidence(asset, asOf, correlationId),
+        await this.safeReadPriceEvidence(asset, asOf, correlationId, lifecycle),
       );
     }
 
@@ -249,8 +344,9 @@ export class PortfolioService {
       };
     });
 
+    this.assertActive(lifecycle);
     try {
-      return buildUnifiedPortfolio({
+      const result = buildUnifiedPortfolio({
         asOf,
         balanceSnapshotId: balanceSnapshot.snapshotId,
         balanceCapturedAt: balanceSnapshot.capturedAt,
@@ -259,6 +355,8 @@ export class PortfolioService {
         valuedBalances,
         excludedBalances: excluded,
       });
+      this.assertActive(lifecycle);
+      return result;
     } catch (error) {
       if (
         error instanceof PortfolioAggregationError ||
@@ -295,17 +393,44 @@ export class PortfolioService {
     asset: StablecoinValuationAssetReference,
     evaluatedAt: string,
     correlationId: string,
+    lifecycle: PortfolioReadLifecycle,
   ): Promise<PortfolioPriceEvidenceSnapshot | null> {
+    this.assertActive(lifecycle);
     try {
-      return parsePriceEvidence(
-        await this.prices.readPriceEvidence({ asset, evaluatedAt, correlationId }),
+      const value = await this.prices.readPriceEvidence(
+        Object.freeze({ asset, evaluatedAt, correlationId, signal: lifecycle.signal }),
       );
+      this.assertActive(lifecycle);
+      const result = parsePriceEvidence(value);
+      this.assertActive(lifecycle);
+      return result;
     } catch {
+      this.assertActive(lifecycle);
       return null;
     }
   }
 
-  private trustedNow(): string {
+  private assertActive(lifecycle: PortfolioReadLifecycle): void {
+    if (lifecycle.signal.aborted) return unavailable();
+    let observedAt: CanonicalPortfolioTime;
+    try {
+      observedAt = this.trustedTime();
+    } catch {
+      lifecycle.abort();
+      return unavailable();
+    }
+    if (
+      lifecycle.signal.aborted ||
+      observedAt.milliseconds < lifecycle.lastObservedMilliseconds ||
+      observedAt.milliseconds >= lifecycle.deadlineMilliseconds
+    ) {
+      lifecycle.abort();
+      return unavailable();
+    }
+    lifecycle.lastObservedMilliseconds = observedAt.milliseconds;
+  }
+
+  private trustedTime(): CanonicalPortfolioTime {
     try {
       const now = this.clock.now();
       if (
@@ -316,8 +441,11 @@ export class PortfolioService {
         return unavailable();
       }
       const milliseconds = Date.prototype.getTime.call(now);
-      if (!Number.isFinite(milliseconds)) return unavailable();
-      return Date.prototype.toISOString.call(now);
+      if (!Number.isSafeInteger(milliseconds)) return unavailable();
+      return Object.freeze({
+        timestamp: Date.prototype.toISOString.call(now),
+        milliseconds,
+      });
     } catch {
       return unavailable();
     }

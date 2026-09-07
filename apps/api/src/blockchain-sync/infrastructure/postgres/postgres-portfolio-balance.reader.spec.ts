@@ -14,12 +14,13 @@ const ETHEREUM = 'eip155:1' as const;
 const EVALUATED_AT = '2026-09-04T12:00:05.000Z';
 const OBSERVED_AT = '2026-09-04T12:00:00.000Z';
 
-function request(): ReadPortfolioBalancesRequest {
+function request(signal: AbortSignal = new AbortController().signal): ReadPortfolioBalancesRequest {
   return {
     accountId: ACCOUNT_ID as never,
     evaluatedAt: EVALUATED_AT,
     correlationId: '33333333-3333-4333-8333-333333333333',
     expectedWallets: [{ walletId: WALLET_ID, networkId: ETHEREUM }],
+    signal,
   };
 }
 
@@ -69,11 +70,20 @@ function result(rows: Record<string, unknown>[]): QueryResult {
   return { rows, rowCount: rows.length, command: 'SELECT', oid: 0, fields: [] };
 }
 
-function harness(): { readonly query: jest.Mock; readonly reader: PostgresPortfolioBalanceReader } {
+function harness(): {
+  readonly query: jest.Mock;
+  readonly queryWithCancellation: jest.Mock;
+  readonly reader: PostgresPortfolioBalanceReader;
+} {
   const query = jest.fn();
+  const queryWithCancellation = jest.fn();
   return {
     query,
-    reader: new PostgresPortfolioBalanceReader({ query } as unknown as PostgresService),
+    queryWithCancellation,
+    reader: new PostgresPortfolioBalanceReader({
+      query,
+      queryWithCancellation,
+    } as unknown as PostgresService),
   };
 }
 
@@ -86,10 +96,11 @@ function revokedProxy(): object {
 describe('Postgres portfolio balance reader', () => {
   it('returns deterministic complete observations for the exact validated roster', async () => {
     const test = harness();
-    test.query.mockResolvedValue(result(completeRows()));
+    test.queryWithCancellation.mockResolvedValue(result(completeRows()));
+    const signal = new AbortController().signal;
 
-    const first = await test.reader.readCurrentBalances(request());
-    const second = await test.reader.readCurrentBalances(request());
+    const first = await test.reader.readCurrentBalances(request(signal));
+    const second = await test.reader.readCurrentBalances(request(signal));
     expect(first).toEqual(second);
     expect(first).toMatchObject({
       capturedAt: EVALUATED_AT,
@@ -101,20 +112,22 @@ describe('Postgres portfolio balance reader', () => {
     });
     expect(first.observations).toHaveLength(3);
     expect(new Set(first.observations.map(({ observationId }) => observationId)).size).toBe(3);
-    expect(test.query.mock.calls[0]?.[0]).toMatch(
+    expect(test.queryWithCancellation.mock.calls[0]?.[0]).toMatch(
       /read_balance_sync_portfolio[\s\S]+LIMIT \$4::integer/u,
     );
-    expect(test.query.mock.calls[0]?.[1]).toEqual([
+    expect(test.queryWithCancellation.mock.calls[0]?.[1]).toEqual([
       ACCOUNT_ID,
       JSON.stringify([{ walletId: WALLET_ID, networkId: ETHEREUM }]),
       EVALUATED_AT,
       4,
     ]);
+    expect(test.queryWithCancellation.mock.calls[0]?.[2]).toBe(signal);
+    expect(test.query).not.toHaveBeenCalled();
   });
 
   it('keeps an unavailable checkpoint explicit and never invents a zero balance', async () => {
     const test = harness();
-    test.query.mockResolvedValue(result([unavailableRow()]));
+    test.queryWithCancellation.mockResolvedValue(result([unavailableRow()]));
 
     await expect(test.reader.readCurrentBalances(request())).resolves.toMatchObject({
       freshnessClass: 'STALE',
@@ -142,7 +155,7 @@ describe('Postgres portfolio balance reader', () => {
     [[{ ...unavailableRow(), checkpoint_revision: '0' }]],
   ])('fails closed on malformed or incomplete database rows', async (rows) => {
     const test = harness();
-    test.query.mockResolvedValue(result(rows as Record<string, unknown>[]));
+    test.queryWithCancellation.mockResolvedValue(result(rows as Record<string, unknown>[]));
     await expect(test.reader.readCurrentBalances(request())).rejects.toBeInstanceOf(
       PortfolioBalancePersistenceError,
     );
@@ -161,9 +174,12 @@ describe('Postgres portfolio balance reader', () => {
         message: 'Portfolio balance persistence failed',
       }),
     );
+    expect(test.queryWithCancellation).not.toHaveBeenCalled();
     expect(test.query).not.toHaveBeenCalled();
 
-    test.query.mockRejectedValue(new Error('postgres://api:secret@example.invalid/key'));
+    test.queryWithCancellation.mockRejectedValue(
+      new Error('postgres://api:secret@example.invalid/key'),
+    );
     await expect(test.reader.readCurrentBalances(request())).rejects.toEqual(
       expect.objectContaining({
         code: 'PORTFOLIO_BALANCE_PERSISTENCE_FAILED',
@@ -174,7 +190,7 @@ describe('Postgres portfolio balance reader', () => {
 
   it('rejects the bounded overflow sentinel before processing database rows', async () => {
     const test = harness();
-    test.query.mockResolvedValue(
+    test.queryWithCancellation.mockResolvedValue(
       result([
         row(),
         row(),
@@ -194,7 +210,7 @@ describe('Postgres portfolio balance reader', () => {
 
   it('sanitizes a revoked database-error proxy without reflecting on it', async () => {
     const test = harness();
-    test.query.mockRejectedValue(revokedProxy());
+    test.queryWithCancellation.mockRejectedValue(revokedProxy());
 
     await expect(test.reader.readCurrentBalances(request())).rejects.toEqual(
       new PortfolioBalancePersistenceError(),

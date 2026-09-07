@@ -217,10 +217,11 @@ function readRequest(
       typeof request !== 'object' ||
       Array.isArray(request) ||
       Object.getPrototypeOf(request) !== Object.prototype ||
-      Reflect.ownKeys(request).length !== 3 ||
+      Reflect.ownKeys(request).length !== 4 ||
       !Object.hasOwn(request, 'asset') ||
       !Object.hasOwn(request, 'evaluatedAt') ||
       !Object.hasOwn(request, 'correlationId') ||
+      !Object.hasOwn(request, 'signal') ||
       typeof request.correlationId !== 'string' ||
       !UUID_V4.test(request.correlationId)
     ) {
@@ -230,6 +231,7 @@ function readRequest(
       asset: normalizeStablecoinPriceEvidenceAsset(request.asset),
       evaluatedAt: readTimestamp(request.evaluatedAt),
       correlationId: request.correlationId,
+      signal: request.signal,
     });
   } catch (error) {
     if (error instanceof StablecoinPriceEvidencePersistenceError) throw error;
@@ -489,7 +491,7 @@ export class PostgresPortfolioPriceEvidenceReader implements PortfolioPriceEvide
     try {
       const request = readRequest(requestValue);
       const asset = request.asset;
-      const result = await this.postgres.query<EvidenceRow>(
+      const result = await this.postgres.queryWithCancellation<EvidenceRow>(
         `SELECT evidence.* FROM read_stablecoin_price_evidence(
            $1::text, $2::smallint, $3::text, $4::text, $5::text, $6::text,
            $7::smallint, $8::timestamptz
@@ -504,6 +506,7 @@ export class PostgresPortfolioPriceEvidenceReader implements PortfolioPriceEvide
           asset.decimals,
           request.evaluatedAt,
         ],
+        request.signal,
       );
       if (!Array.isArray(result.rows) || result.rows.length !== 2) return persistenceFailure();
       const mapped = result.rows.map((row) => mapEvidenceRow(row, request));

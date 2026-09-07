@@ -48,6 +48,8 @@ export interface ReadPortfolioBalancesRequest {
   readonly correlationId: string;
   /** Independently read active registrations that this balance read must cover exactly. */
   readonly expectedWallets: readonly ActivePortfolioWalletRegistration[];
+  /** Exact server-owned cancellation shared by every dependency in one portfolio read. */
+  readonly signal: AbortSignal;
 }
 
 export interface PortfolioBalanceReader {

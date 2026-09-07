@@ -578,6 +578,7 @@ describeWithPostgres('balance sync PostgreSQL read model', () => {
         accountId: accountId as never,
         evaluatedAt: databaseNow,
         correlationId: randomUUID(),
+        signal: new AbortController().signal,
         expectedWallets: [
           { walletId: ethereumWalletId, networkId: ETHEREUM },
           { walletId: solanaWalletId, networkId: SOLANA },
@@ -908,6 +909,7 @@ describeWithPostgres('balance sync PostgreSQL read model', () => {
         accountId: accountId as never,
         evaluatedAt: databaseNow,
         correlationId: randomUUID(),
+        signal: new AbortController().signal,
         expectedWallets: [{ walletId: randomUUID(), networkId: ETHEREUM }],
       }),
     ).rejects.toBeInstanceOf(PortfolioBalancePersistenceError);

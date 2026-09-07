@@ -1,8 +1,12 @@
 export {
   PORTFOLIO_CLOCK,
+  PORTFOLIO_READ_DEADLINE_MILLISECONDS,
+  PORTFOLIO_TIMER_RUNTIME,
   PortfolioService,
   SYSTEM_PORTFOLIO_CLOCK,
+  SYSTEM_PORTFOLIO_TIMER_RUNTIME,
   type PortfolioClock,
+  type PortfolioTimerRuntime,
   type ReadUnifiedPortfolioRequest,
 } from './application/portfolio.service';
 export { PortfolioUnavailableError } from './application/portfolio.errors';
