@@ -327,6 +327,11 @@ Jira.
 
 Reviewed local fixture values such as `test`, `local-emulator`, and
 `local_only_password` are non-production sentinels, not credential exceptions.
+Credentialed fixture URLs are recognized only by an exact protocol, decoded
+username, decoded password, and hostname tuple. Public protocol identifiers
+are recognized only for an exact reviewed assignment name and value. Unquoted
+source-code digest references require both identifiers to end in an explicit
+matching SHA-family suffix; quoted material and near misses remain findings.
 Allowlisting a whole file or directory is prohibited. Cryptographic object and
 artifact digests are not secrets and remain valid.
 

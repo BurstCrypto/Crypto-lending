@@ -214,6 +214,15 @@ test('detects exact secret assignment names in quoted and unquoted forms', () =>
 test('ignores source-code references and symbolic ternary branches but detects literal secrets', () => {
   const repository = createRepository();
   const sentinel = ['zQ7vN2', 'pL9xR4', 'mT8kW3', 'cF6sH1', 'yU5aD0'].join('');
+  const reviewedInstrumentationBinding = [
+    '       - { Name: OTEL_TRACES_EXPORTER, ValueFrom: ',
+    'prohibited',
+    ' }',
+  ].join('');
+  const instrumentationBindingNearMiss = reviewedInstrumentationBinding.replace(
+    'prohibited',
+    ['production', 'secret', 'material'].join('-'),
+  );
   try {
     write(
       repository,
@@ -224,6 +233,14 @@ test('ignores source-code references and symbolic ternary branches but detects l
         '  credentialId: input.successorCredentialId,',
         '  variableDebtToken: PUBLIC_DEBT_TOKEN_ADDRESS,',
         '};',
+        'record_dispatch_token_sha256 = requested_dispatch_token_sha256',
+        'api_token = requested_dispatch_token_sha256',
+        'record_dispatch_token_sha256 = requested_dispatch_token_sha256_changed',
+        'record_dispatch_token_sha256 = requested_dispatch_token_sha512',
+        `record_dispatch_token_sha256 = '${sentinel}'`,
+        `const secretBinding = '${reviewedInstrumentationBinding}';`,
+        `const apiToken = '${reviewedInstrumentationBinding}';`,
+        `const secretBinding = '${instrumentationBindingNearMiss}';`,
         `const token = '${sentinel}';`,
         '',
       ].join('\n'),
@@ -238,9 +255,14 @@ test('ignores source-code references and symbolic ternary branches but detects l
         .trim()
         .split('\n')
         .filter((line) => line.startsWith('rule=assignment.high-entropy-secret\t')).length,
-      1,
+      7,
     );
-    assertRedacted(result, sentinel);
+    assertRedacted(
+      result,
+      sentinel,
+      reviewedInstrumentationBinding,
+      instrumentationBindingNearMiss,
+    );
   } finally {
     rmSync(repository, { force: true, recursive: true });
   }
@@ -262,7 +284,9 @@ test('allows only an exact reviewed public protocol identifier', () => {
         `  TOKEN_2022: '${publicIdentifier}',`,
         `  API_TOKEN: '${publicIdentifier}',`,
         `  PUBLIC_TESTNET_TOKEN_PROGRAM: '${publicProgramIdentifier}',`,
+        `  TOKEN_2022: '${publicProgramIdentifier}',`,
         `  TOKEN_PROGRAM: '${publicProgramIdentifier}',`,
+        `  SESSION_TOKEN: '${publicProgramIdentifier}',`,
         `  aToken: '${publicContractAddress}',`,
         `  AAVE_V3_ETHEREUM_USDC_A_TOKEN: '${publicContractAddress}',`,
         `  API_TOKEN: '${publicContractAddress}',`,
@@ -283,7 +307,7 @@ test('allows only an exact reviewed public protocol identifier', () => {
         .trim()
         .split('\n')
         .filter((line) => line.startsWith('rule=assignment.high-entropy-secret\t')).length,
-      4,
+      5,
     );
     assertRedacted(
       result,
@@ -646,12 +670,22 @@ test('allows only the exact reviewed production-test URL and secret canaries', (
     'https://credential@secret-provider.example/rpc',
     'postgres://secret@example/key',
     'postgres://secret:credential@host/key',
+    'postgresql://crypto_balance_consumer_login_test:test-placeholder@localhost:5432/crypto_lending',
+    'postgresql://crypto_balance_consumer_login_a:local@127.0.0.1:5432/crypto_lending',
+    'postgresql://crypto_balance_consumer_login_blue:local@127.0.0.1:5432/crypto_lending',
+    'postgresql://credential@private-host/redaction',
+    'postgresql://crypto_api_login_a:test@localhost:5432/crypto_lending',
+    'postgresql://wrong_identity:test@localhost:5432/crypto_lending',
+    'postgresql://crypto_api_login_a@localhost:5432/crypto_lending',
+    'postgresql://crypto_api_login_a:test@database.example:5432/crypto_lending',
+    'postgresql://user:sensitive@database.invalid:5432/db',
   ];
-  const changedUrls = reviewedUrls.map((value, index) =>
-    index === 0
-      ? value.replace('worker', ['work', 'er2'].join(''))
-      : value.replace('secret', ['sec', 'ret2'].join('')),
-  );
+  const changedUrls = reviewedUrls.map((value) => {
+    const parsed = new URL(value);
+    if (parsed.password) parsed.password = `${decodeURIComponent(parsed.password)}-changed`;
+    else parsed.username = `${decodeURIComponent(parsed.username)}-changed`;
+    return parsed.href;
+  });
   const reviewedCanaries = [
     'private-key-stateful-proxy-canary',
     'wallet=0xdeadbeef provider-token=private',

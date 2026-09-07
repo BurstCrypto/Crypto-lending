@@ -93,7 +93,12 @@ const REVIEWED_DUMMY_VALUES = new Set([
 const REVIEWED_PUBLIC_IDENTIFIER_ASSIGNMENTS = new Map([
   [
     'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA',
-    new Set(['PUBLIC_TESTNET_TOKEN_PROGRAM', 'TOKEN_PROGRAM', 'legacyTokenProgramAddress']),
+    new Set([
+      'PUBLIC_TESTNET_TOKEN_PROGRAM',
+      'TOKEN_2022',
+      'TOKEN_PROGRAM',
+      'legacyTokenProgramAddress',
+    ]),
   ],
   ['TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb', new Set(['TOKEN_2022'])],
   ['BGocb4GEpbTFm8UFV2VsDSaBXHELPfAXrvd4vtt8QWrA', new Set(['TOKEN_ACCOUNT'])],
@@ -127,6 +132,13 @@ const REVIEWED_PUBLIC_IDENTIFIER_ASSIGNMENTS = new Map([
   ],
 ]);
 
+// Exact snippets used to exercise a named negative-test boundary. Keep these
+// assignment-bound so the same text cannot excuse URL credentials or another
+// secret-shaped field.
+const REVIEWED_SYNTHETIC_TEST_ASSIGNMENTS = new Map([
+  ['- { Name: OTEL_TRACES_EXPORTER, ValueFrom: prohibited }', new Set(['secretBinding'])],
+]);
+
 // These tuples are deliberately narrow: protocol, decoded username, decoded
 // password, and host must all match a reviewed local or negative-test fixture.
 const REVIEWED_DUMMY_URL_CREDENTIALS = new Set([
@@ -144,12 +156,19 @@ const REVIEWED_DUMMY_URL_CREDENTIALS = new Set([
   'postgresql|crypto_admin|local_admin_only|127.0.0.1',
   'postgresql|crypto_admin|local_admin_only|localhost',
   'postgresql|crypto_admin|secret|db.internal.example',
+  'postgresql|crypto_api_login_a||localhost',
   'postgresql|crypto_api_login_a||db.internal.example',
   'postgresql|crypto_api_login_a|local_api_database_a|127.0.0.1',
   'postgresql|crypto_api_login_a|local_api_database_a|localhost',
+  'postgresql|crypto_api_login_a|test|database.example',
+  'postgresql|crypto_api_login_a|test|localhost',
   'postgresql|crypto_api_login_blue|secret|db.internal.example',
+  'postgresql|crypto_balance_consumer_login_a|local|127.0.0.1',
+  'postgresql|crypto_balance_consumer_login_blue|local|127.0.0.1',
+  'postgresql|crypto_balance_consumer_login_test|test-placeholder|localhost',
   'postgresql|crypto_lending|local_only_password|127.0.0.1',
   'postgresql|crypto_lending|local_only_password|localhost',
+  'postgresql|credential||private-host',
   'postgresql|crypto_migration|local|127.0.0.1',
   'postgresql|crypto_migration|local_migration_only|127.0.0.1',
   'postgresql|crypto_migration|local_migration_only|localhost',
@@ -166,6 +185,8 @@ const REVIEWED_DUMMY_URL_CREDENTIALS = new Set([
   'postgresql|service user|p@ss:/word|db.internal.example',
   'postgresql|service|secret|db.internal.example',
   'postgresql|user|secret|internal',
+  'postgresql|user|sensitive|database.invalid',
+  'postgresql|wrong_identity|test|localhost',
   'rediss||\n|cache.internal.example',
   'rediss||%ZZ|cache.internal.example',
   'rediss||bad\\npassword|cache.internal.example',
@@ -635,11 +656,16 @@ function isReviewedPublicIdentifierAssignment(name, value) {
   return REVIEWED_PUBLIC_IDENTIFIER_ASSIGNMENTS.get(value)?.has(name) === true;
 }
 
+function isReviewedSyntheticTestAssignment(name, value) {
+  return REVIEWED_SYNTHETIC_TEST_ASSIGNMENTS.get(value.trim())?.has(name) === true;
+}
+
 function isHighEntropySecret(name, value) {
   const candidate = value.trim();
   if (candidate.length < 20 || candidate.length > 512) return false;
   if (
     isReviewedPublicIdentifierAssignment(name, candidate) ||
+    isReviewedSyntheticTestAssignment(name, candidate) ||
     isReviewedPlaceholder(candidate) ||
     isDigestContext(name, candidate)
   ) {
@@ -658,6 +684,18 @@ function isSourceCodeReference(value, entries) {
     entriesAreSourceCode(entries) &&
     (/^[A-Za-z_$][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*)+$/u.test(value.trim()) ||
       /^[A-Z][A-Z0-9_]{2,}$/u.test(value.trim()))
+  );
+}
+
+const SOURCE_CODE_DIGEST_REFERENCE_PATTERN = /^[a-z][a-z0-9_]{0,127}_(sha256|sha384|sha512)$/u;
+
+function isSourceCodeDigestReference(name, value, entries) {
+  const assignmentAlgorithm = SOURCE_CODE_DIGEST_REFERENCE_PATTERN.exec(name)?.[1];
+  const referenceAlgorithm = SOURCE_CODE_DIGEST_REFERENCE_PATTERN.exec(value)?.[1];
+  return (
+    entriesAreSourceCode(entries) &&
+    assignmentAlgorithm !== undefined &&
+    assignmentAlgorithm === referenceAlgorithm
   );
 }
 
@@ -863,6 +901,7 @@ function scanLine(line, lineNumber, blob, entries) {
     unquoted &&
     isSecretAssignmentName(unquoted[1]) &&
     !isSourceCodeReference(unquoted[2], entries) &&
+    !isSourceCodeDigestReference(unquoted[1], unquoted[2], entries) &&
     isHighEntropySecret(unquoted[1], unquoted[2])
   ) {
     matches.push({ rule: 'assignment.high-entropy-secret', value: unquoted[2] });
