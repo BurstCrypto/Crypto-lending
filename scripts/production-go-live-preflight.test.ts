@@ -899,7 +899,7 @@ function defaultProviderIds(): string[] {
   return Array.from({ length: 10 }, (_, index) => `provider-${index}`);
 }
 
-function readEvidence(
+function legacySummaryReadEvidence(
   directory: unknown,
   providerIds: readonly string[] = defaultProviderIds(),
 ): Record<string, unknown> {
@@ -912,6 +912,19 @@ function readEvidence(
     providerIds: [...providerIds],
     adapterBindings: 'COMPLETE',
     compositionEvidence: 'PASS',
+  };
+}
+
+function unbrandedDetailedReadEvidence(directory: unknown): Record<string, unknown> {
+  const providerIds = defaultProviderIds();
+  return {
+    schemaVersion: 2,
+    artifactType: 'PRODUCTION_LIVE_READ_EVIDENCE_INDEX',
+    status: 'ACCEPTED',
+    sourceRevision: SOURCE_REVISION,
+    directoryConfigurationSha256: productionDirectoryConfigurationSha256(directory),
+    providerIds,
+    providerEvidence: providerIds.map((providerId) => ({ providerId })),
   };
 }
 
@@ -1021,7 +1034,7 @@ function completeInput(directory: unknown): ProductionPreflightInput {
       directory,
       dormantActionBoundaryValidationPassed: true,
       sourceRevision: SOURCE_REVISION,
-      liveReadEvidenceIndex: readEvidence(directory),
+      liveReadEvidenceIndex: legacySummaryReadEvidence(directory),
       mainnetWriteEvidenceIndex: null,
     },
     publicLaunchAuthorities: {
@@ -7879,6 +7892,7 @@ test('all synthetic technical inputs remain blocked without seven signed launch 
           id !== 'BALANCE_CONSUMER' &&
           id !== 'PROVIDER_POSITION_READ_BOUNDARY' &&
           id !== 'AUTHENTICATION' &&
+          id !== 'PLATFORM_LIVE_READS' &&
           id !== 'PUBLIC_LAUNCH_AUTHORITIES' &&
           id !== 'MAINNET_WRITES',
       )
@@ -7887,6 +7901,16 @@ test('all synthetic technical inputs remain blocked without seven signed launch 
   assert.deepEqual(readOnlyReport.checks.find(({ id }) => id === 'AUTHENTICATION')?.blockerIds, [
     'RDS_MASTER_LIFECYCLE_EVIDENCE_MISSING',
   ]);
+  assert.deepEqual(
+    readOnlyReport.checks.find(({ id }) => id === 'PLATFORM_LIVE_READS')?.blockerIds,
+    [
+      'LIVE_READ_EVIDENCE_INDEX_INVALID',
+      'LIVE_READ_EVIDENCE_REVISION_MISMATCH',
+      'LIVE_READ_EVIDENCE_DIRECTORY_BINDING_MISMATCH',
+      'LIVE_PROVIDER_TARGET_NOT_MET',
+    ],
+  );
+  assert.equal(readOnlyReport.providerCounts.liveReadEvidenceBound, 0);
 
   const directory = platformDirectory('TRANSACTION_ENABLED');
   const input = completeInput(directory);
@@ -7979,6 +8003,34 @@ test('catalog status strings cannot establish live-read or write readiness witho
   assert.equal(report.selectedTargetReadiness, 'BLOCKED');
 });
 
+test('raw summary and schema-v2-shaped live-read indexes cannot mint the private applied-input brand', () => {
+  const directory = platformDirectory('LIVE_READ_ONLY');
+  const detailed = unbrandedDetailedReadEvidence(directory);
+  const candidates = [
+    legacySummaryReadEvidence(directory),
+    detailed,
+    structuredClone(detailed),
+    {
+      ...detailed,
+      providerIds: [...(detailed.providerIds as string[])],
+      providerEvidence: [...(detailed.providerEvidence as unknown[])],
+    },
+    Object.freeze(structuredClone(detailed)),
+  ];
+
+  for (const candidate of candidates) {
+    const input = completeInput(directory);
+    input.platforms.liveReadEvidenceIndex = candidate;
+    const report = evaluateProductionPreflight(input);
+    const liveReads = report.checks.find(({ id }) => id === 'PLATFORM_LIVE_READS');
+
+    assert.equal(liveReads?.localValidation, 'FAIL');
+    assert.ok(liveReads?.blockerIds.includes('LIVE_READ_EVIDENCE_INDEX_INVALID'));
+    assert.equal(report.providerCounts.liveReadEvidenceBound, 0);
+    assert.equal(report.selectedTargetReadiness, 'BLOCKED');
+  }
+});
+
 test('an evidence index cannot promote providers that remain planned', () => {
   const directory = platformDirectory('PLANNED');
   const input = completeInput(directory);
@@ -7992,12 +8044,15 @@ test('an evidence index cannot promote providers that remain planned', () => {
   assert.equal(report.selectedTargetReadiness, 'BLOCKED');
 });
 
-test('write evidence provider set must be covered by accepted live-read evidence', () => {
+test('write evidence cannot be covered by an unbranded live-read summary', () => {
   const directory = platformDirectory('TRANSACTION_ENABLED');
   const providers = directory.providers as Record<string, unknown>[];
   providers.push(platformEntry('provider-10', 'TRANSACTION_ENABLED'));
   const input = completeInput(directory);
-  input.platforms.liveReadEvidenceIndex = readEvidence(directory, defaultProviderIds());
+  input.platforms.liveReadEvidenceIndex = legacySummaryReadEvidence(
+    directory,
+    defaultProviderIds(),
+  );
   input.platforms.mainnetWriteEvidenceIndex = writeEvidence(
     directory,
     Array.from({ length: 10 }, (_, index) => `provider-${index + 1}`),
@@ -8010,7 +8065,7 @@ test('write evidence provider set must be covered by accepted live-read evidence
     writes?.blockerIds.includes('MAINNET_WRITE_PROVIDER_SET_NOT_COVERED_BY_LIVE_READ_EVIDENCE'),
   );
   assert.equal(writes?.launchReadiness, 'BLOCKED');
-  assert.equal(report.providerCounts.liveReadEvidenceBound, 10);
+  assert.equal(report.providerCounts.liveReadEvidenceBound, 0);
   assert.equal(report.providerCounts.transactionEvidenceBound, 0);
   assert.equal(report.selectedTargetReadiness, 'BLOCKED');
 });
@@ -8019,7 +8074,7 @@ test('evidence must bind the exact source revision and directory configuration',
   const directory = platformDirectory('LIVE_READ_ONLY');
   const input = completeInput(directory);
   input.platforms.liveReadEvidenceIndex = {
-    ...readEvidence(directory),
+    ...legacySummaryReadEvidence(directory),
     sourceRevision: 'b'.repeat(40),
     directoryConfigurationSha256: 'c'.repeat(64),
   };

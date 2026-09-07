@@ -104,8 +104,6 @@ export type ProductionPreflightBlockerId =
   | 'PLATFORM_DIRECTORY_PROVIDER_TARGET_NOT_MET'
   | 'PLATFORM_LIVE_CAPABILITY_NOT_EXPOSED'
   | 'LIVE_PROVIDER_TARGET_NOT_MET'
-  | 'LIVE_READ_ADAPTER_BINDING_EVIDENCE_MISSING'
-  | 'LIVE_READ_COMPOSITION_EVIDENCE_MISSING'
   | 'LIVE_READ_EVIDENCE_DIRECTORY_BINDING_MISMATCH'
   | 'LIVE_READ_EVIDENCE_INDEX_INVALID'
   | 'LIVE_READ_EVIDENCE_INDEX_MISSING'
@@ -453,8 +451,6 @@ interface PlatformDirectoryValidation {
 interface EvidenceIndexValidation {
   readonly valid: boolean;
   readonly providerIds: readonly string[];
-  readonly adapterBindingsComplete: boolean;
-  readonly compositionEvidencePassed: boolean;
   readonly actionBindingsComplete: boolean;
   readonly revisionMatches: boolean;
   readonly directoryBindingMatches: boolean;
@@ -606,16 +602,6 @@ const NETWORK_KEYS = Object.freeze(['id', 'name']);
 const NETWORKS = new Map([
   ['eip155:1', 'EVM'],
   ['solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp', 'SOLANA'],
-]);
-const READ_EVIDENCE_KEYS = Object.freeze([
-  'schemaVersion',
-  'artifactType',
-  'status',
-  'sourceRevision',
-  'directoryConfigurationSha256',
-  'providerIds',
-  'adapterBindings',
-  'compositionEvidence',
 ]);
 const WRITE_EVIDENCE_KEYS = Object.freeze([
   'schemaVersion',
@@ -1039,7 +1025,7 @@ const EVIDENCE_DERIVED_PUBLIC_LAUNCH_BINDINGS = new WeakMap<
   object,
   VerifiedEvidenceApplicationContext
 >();
-const VERIFIED_RDS_MASTER_LIFECYCLE_PREFLIGHT_INPUTS = new WeakMap<
+const VERIFIED_PRODUCTION_EVIDENCE_PREFLIGHT_INPUTS = new WeakMap<
   ProductionPreflightInput,
   VerifiedEvidenceApplicationContext
 >();
@@ -1056,6 +1042,36 @@ function exactKeys(value: Record<string, unknown>, expected: readonly string[]):
 
 function exactString(value: unknown, expected: string): boolean {
   return typeof value === 'string' && value === expected;
+}
+
+function revalidatedProductionEvidenceContext(
+  input: ProductionPreflightInput,
+): VerifiedEvidenceApplicationContext | null {
+  try {
+    const evidenceContext = VERIFIED_PRODUCTION_EVIDENCE_PREFLIGHT_INPUTS.get(input);
+    if (
+      evidenceContext === undefined ||
+      !isVerifiedProductionEvidenceBundle(evidenceContext.bundle)
+    ) {
+      return null;
+    }
+    revalidateProductionEvidenceBundleForApplication(
+      evidenceContext.bundle,
+      evidenceContext.applicationOptions,
+    );
+    if (
+      !isVerifiedProductionEvidenceBundle(evidenceContext.bundle) ||
+      input.platforms.sourceRevision !== evidenceContext.bundle.content.sourceRevision ||
+      input.platforms.liveReadEvidenceIndex !==
+        evidenceContext.bundle.content.liveReadEvidenceIndex ||
+      input.platforms.mainnetWriteEvidenceIndex !== null
+    ) {
+      return null;
+    }
+    return evidenceContext;
+  } catch {
+    return null;
+  }
 }
 
 function validText(value: unknown, maximumLength = 128): value is string {
@@ -1242,32 +1258,75 @@ function invalidEvidenceIndex(): EvidenceIndexValidation {
   return {
     valid: false,
     providerIds: [],
-    adapterBindingsComplete: false,
-    compositionEvidencePassed: false,
     actionBindingsComplete: false,
     revisionMatches: false,
     directoryBindingMatches: false,
   };
 }
 
-function validateEvidenceIndex(
+function validateAppliedLiveReadEvidenceIndex(
   value: unknown,
-  kind: 'READ' | 'WRITE',
+  sourceRevision: string | null,
+  directory: PlatformDirectoryValidation,
+  evidenceContext: VerifiedEvidenceApplicationContext | null,
+): EvidenceIndexValidation {
+  if (
+    evidenceContext === null ||
+    value !== evidenceContext.bundle.content.liveReadEvidenceIndex ||
+    !directory.valid ||
+    directory.configurationSha256 === null
+  ) {
+    return invalidEvidenceIndex();
+  }
+
+  const index = evidenceContext.bundle.content.liveReadEvidenceIndex;
+  const liveDirectoryIds = new Set(
+    directory.entries
+      .filter(({ integrationStatus }) => integrationStatus !== 'PLANNED')
+      .map(({ id }) => id),
+  );
+  const providerIds = [...index.providerIds];
+  const revisionMatches =
+    sourceRevision !== null &&
+    SOURCE_REVISION_PATTERN.test(sourceRevision) &&
+    index.sourceRevision === sourceRevision &&
+    evidenceContext.bundle.content.sourceRevision === sourceRevision;
+  const directoryBindingMatches =
+    index.directoryConfigurationSha256 === directory.configurationSha256 &&
+    evidenceContext.bundle.content.directoryConfigurationSha256 === directory.configurationSha256;
+  const exactLiveProviderSet =
+    liveDirectoryIds.size === providerIds.length &&
+    providerIds.every((providerId) => liveDirectoryIds.has(providerId));
+
+  return {
+    valid:
+      providerIds.length >= PRODUCTION_PROVIDER_TARGET &&
+      exactLiveProviderSet &&
+      revisionMatches &&
+      directoryBindingMatches,
+    providerIds,
+    actionBindingsComplete: false,
+    revisionMatches,
+    directoryBindingMatches,
+  };
+}
+
+function validateWriteEvidenceIndex(
+  value: unknown,
   sourceRevision: string | null,
   directory: PlatformDirectoryValidation,
 ): EvidenceIndexValidation {
-  if (!isRecord(value) || !directory.valid || directory.configurationSha256 === null) {
+  if (
+    !isRecord(value) ||
+    !directory.valid ||
+    directory.configurationSha256 === null ||
+    !exactKeys(value, WRITE_EVIDENCE_KEYS)
+  ) {
     return invalidEvidenceIndex();
   }
-  const expectedKeys = kind === 'READ' ? READ_EVIDENCE_KEYS : WRITE_EVIDENCE_KEYS;
-  if (!exactKeys(value, expectedKeys)) return invalidEvidenceIndex();
   const eligibleIds = new Set(
     directory.entries
-      .filter(({ integrationStatus }) =>
-        kind === 'READ'
-          ? integrationStatus !== 'PLANNED'
-          : integrationStatus === 'TRANSACTION_ENABLED',
-      )
+      .filter(({ integrationStatus }) => integrationStatus === 'TRANSACTION_ENABLED')
       .map(({ id }) => id),
   );
   const providerIds = validEvidenceProviderIds(value.providerIds, eligibleIds);
@@ -1279,42 +1338,22 @@ function validateEvidenceIndex(
     typeof value.directoryConfigurationSha256 === 'string' &&
     SHA256_PATTERN.test(value.directoryConfigurationSha256) &&
     value.directoryConfigurationSha256 === directory.configurationSha256;
-  const commonValid =
+  const actionBindingsComplete = value.actionBindings === 'COMPLETE';
+  const valid =
     value.schemaVersion === 1 &&
     value.status === 'ACCEPTED' &&
     providerIds !== null &&
     providerIds.length >= PRODUCTION_PROVIDER_TARGET &&
     revisionMatches &&
-    directoryBindingMatches;
-  if (kind === 'READ') {
-    const adapterBindingsComplete = value.adapterBindings === 'COMPLETE';
-    const compositionEvidencePassed = value.compositionEvidence === 'PASS';
-    return {
-      valid:
-        commonValid &&
-        value.artifactType === 'PRODUCTION_LIVE_READ_EVIDENCE_INDEX' &&
-        adapterBindingsComplete &&
-        compositionEvidencePassed,
-      providerIds: providerIds ?? [],
-      adapterBindingsComplete,
-      compositionEvidencePassed,
-      actionBindingsComplete: false,
-      revisionMatches,
-      directoryBindingMatches,
-    };
-  }
-  const actionBindingsComplete = value.actionBindings === 'COMPLETE';
+    directoryBindingMatches &&
+    value.artifactType === 'PRODUCTION_MAINNET_WRITE_EVIDENCE_INDEX' &&
+    actionBindingsComplete &&
+    value.simulationEvidence === 'PASS' &&
+    value.reconciliationEvidence === 'PASS' &&
+    value.independentSecurityReview === 'ACCEPTED';
   return {
-    valid:
-      commonValid &&
-      value.artifactType === 'PRODUCTION_MAINNET_WRITE_EVIDENCE_INDEX' &&
-      actionBindingsComplete &&
-      value.simulationEvidence === 'PASS' &&
-      value.reconciliationEvidence === 'PASS' &&
-      value.independentSecurityReview === 'ACCEPTED',
+    valid,
     providerIds: providerIds ?? [],
-    adapterBindingsComplete: false,
-    compositionEvidencePassed: false,
     actionBindingsComplete,
     revisionMatches,
     directoryBindingMatches,
@@ -1373,14 +1412,7 @@ function evidenceBlockers(
         : 'MAINNET_WRITE_EVIDENCE_DIRECTORY_BINDING_MISMATCH',
     );
   }
-  if (kind === 'READ') {
-    if (!validation.adapterBindingsComplete) {
-      blockers.push('LIVE_READ_ADAPTER_BINDING_EVIDENCE_MISSING');
-    }
-    if (!validation.compositionEvidencePassed) {
-      blockers.push('LIVE_READ_COMPOSITION_EVIDENCE_MISSING');
-    }
-  } else if (!validation.actionBindingsComplete) {
+  if (kind === 'WRITE' && !validation.actionBindingsComplete) {
     blockers.push('MAINNET_WRITE_ACTION_BINDING_EVIDENCE_MISSING');
   }
   return blockers;
@@ -1398,7 +1430,10 @@ function directoryExposesTransactionCapability(value: unknown): boolean {
   );
 }
 
-function publicLaunchAuthorityValidation(value: unknown): Readonly<{
+function publicLaunchAuthorityValidation(
+  value: unknown,
+  inputEvidenceContext: VerifiedEvidenceApplicationContext | null,
+): Readonly<{
   localValidation: 'PASS' | 'FAIL';
   blockers: readonly ProductionPreflightBlockerId[];
 }> {
@@ -1425,16 +1460,14 @@ function publicLaunchAuthorityValidation(value: unknown): Readonly<{
     }
     const evidenceContext = EVIDENCE_DERIVED_PUBLIC_LAUNCH_BINDINGS.get(evidenceBinding);
     if (
+      inputEvidenceContext === null ||
       evidenceContext === undefined ||
+      evidenceContext !== inputEvidenceContext ||
       !isVerifiedProductionEvidenceBundle(evidenceContext.bundle) ||
       !isVerifiedPublicLaunchAuthorityDecisionSet(decisionSet)
     ) {
       throw new PublicLaunchAuthorityDecisionInvalidError();
     }
-    revalidateProductionEvidenceBundleForApplication(
-      evidenceContext.bundle,
-      evidenceContext.applicationOptions,
-    );
     if (
       !isVerifiedProductionEvidenceBundle(evidenceContext.bundle) ||
       evidenceBinding.releaseCandidateManifestSha256 !==
@@ -1469,6 +1502,7 @@ export function evaluateProductionPreflight(
   input: ProductionPreflightInput,
   selectedTarget: ProductionPreflightTarget = 'read-only',
 ): ProductionPreflightReport {
+  const evidenceContext = revalidatedProductionEvidenceContext(input);
   const productionInfrastructureBlockers: ProductionPreflightBlockerId[] = [];
   let productionInfrastructureInspected = false;
   let productionInfrastructureEnabled = false;
@@ -1581,12 +1615,7 @@ export function evaluateProductionPreflight(
   }
   let rdsMasterLifecycleEvidenceAccepted = false;
   try {
-    const evidenceContext = VERIFIED_RDS_MASTER_LIFECYCLE_PREFLIGHT_INPUTS.get(input);
-    if (input.rdsMasterLifecycleEvidenceAccepted === true && evidenceContext !== undefined) {
-      revalidateProductionEvidenceBundleForApplication(
-        evidenceContext.bundle,
-        evidenceContext.applicationOptions,
-      );
+    if (input.rdsMasterLifecycleEvidenceAccepted === true && evidenceContext !== null) {
       rdsMasterLifecycleEvidenceAccepted =
         isVerifiedProductionEvidenceBundle(evidenceContext.bundle) &&
         evidenceContext.bundle.content.rdsMasterLifecycleEvidence.artifactType ===
@@ -1713,11 +1742,11 @@ export function evaluateProductionPreflight(
     directoryBlockers.push('PLATFORM_DIRECTORY_PROVIDER_TARGET_NOT_MET');
   }
 
-  const readEvidence = validateEvidenceIndex(
+  const readEvidence = validateAppliedLiveReadEvidenceIndex(
     input.platforms.liveReadEvidenceIndex,
-    'READ',
     input.platforms.sourceRevision,
     directory,
+    evidenceContext,
   );
   const readBlockers = evidenceBlockers(
     'READ',
@@ -1748,9 +1777,8 @@ export function evaluateProductionPreflight(
     isolationBlockers.push('READ_ONLY_TRANSACTION_CAPABILITY_EXPOSED');
   }
 
-  const writeEvidence = validateEvidenceIndex(
+  const writeEvidence = validateWriteEvidenceIndex(
     input.platforms.mainnetWriteEvidenceIndex,
-    'WRITE',
     input.platforms.sourceRevision,
     directory,
   );
@@ -1788,9 +1816,13 @@ export function evaluateProductionPreflight(
     writeBlockers.push('MAINNET_TRANSACTION_PROVIDER_TARGET_NOT_MET');
   }
 
-  // Revalidate the private decision brand, trusted-clock freshness, signatures,
-  // and exact evidence-derived binding immediately before readiness is computed.
-  const publicLaunchAuthorities = publicLaunchAuthorityValidation(input.publicLaunchAuthorities);
+  // The input-level private evidence context was revalidated before any
+  // evidence-derived readiness was computed. Require the public binding to
+  // belong to that same applied input so it cannot be grafted onto a clone.
+  const publicLaunchAuthorities = publicLaunchAuthorityValidation(
+    input.publicLaunchAuthorities,
+    evidenceContext,
+  );
 
   const checks = Object.freeze([
     check(
@@ -16980,7 +17012,7 @@ export function applyVerifiedProductionEvidenceBundle(
           input.platforms.dormantActionBoundaryValidationPassed,
         sourceRevision: bundle.content.sourceRevision,
         liveReadEvidenceIndex: bundle.content.liveReadEvidenceIndex,
-        // Evidence schema v2 is read-only and can never supplement write evidence.
+        // Evidence bundle schema v3 is read-only and can never supplement write evidence.
         mainnetWriteEvidenceIndex: null,
       }),
       publicLaunchAuthorities: Object.freeze({
@@ -16988,7 +17020,7 @@ export function applyVerifiedProductionEvidenceBundle(
         evidenceBinding,
       }),
     });
-    VERIFIED_RDS_MASTER_LIFECYCLE_PREFLIGHT_INPUTS.set(appliedInput, evidenceContext);
+    VERIFIED_PRODUCTION_EVIDENCE_PREFLIGHT_INPUTS.set(appliedInput, evidenceContext);
     return appliedInput;
   } catch {
     throw new ProductionEvidenceBundleInvalidError();
@@ -17005,7 +17037,7 @@ export function applyVerifiedPublicLaunchAuthorityDecision(
       evidenceBinding === null || evidenceBinding === undefined
         ? undefined
         : EVIDENCE_DERIVED_PUBLIC_LAUNCH_BINDINGS.get(evidenceBinding);
-    const inputEvidenceContext = VERIFIED_RDS_MASTER_LIFECYCLE_PREFLIGHT_INPUTS.get(input);
+    const inputEvidenceContext = VERIFIED_PRODUCTION_EVIDENCE_PREFLIGHT_INPUTS.get(input);
     if (
       evidenceBinding === null ||
       evidenceBinding === undefined ||
@@ -17031,7 +17063,7 @@ export function applyVerifiedPublicLaunchAuthorityDecision(
       ...input,
       publicLaunchAuthorities: Object.freeze({ decisionSet, evidenceBinding }),
     });
-    VERIFIED_RDS_MASTER_LIFECYCLE_PREFLIGHT_INPUTS.set(appliedInput, evidenceContext);
+    VERIFIED_PRODUCTION_EVIDENCE_PREFLIGHT_INPUTS.set(appliedInput, evidenceContext);
     return appliedInput;
   } catch {
     throw new PublicLaunchAuthorityDecisionInvalidError();
