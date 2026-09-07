@@ -409,6 +409,30 @@ describe('Solana Ed25519 wallet ownership verification', () => {
     });
   });
 
+  it('rejects an identity address/public key with the forged R=identity, S=0 signature', async () => {
+    const identityPublicKey = new Uint8Array(32);
+    identityPublicKey[0] = 1;
+    const identityAddress = encodeBase58(identityPublicKey);
+    expect(identityAddress).toBe('4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM');
+    const created = solanaChallenge(identityAddress);
+    const signedMessage = new TextEncoder().encode(created.publicChallenge.message);
+    const forgedSignature = new Uint8Array(64);
+    forgedSignature[0] = 1;
+
+    await expect(
+      verifyWalletOwnershipProof(
+        request(created, {
+          kind: 'SOLANA_ED25519',
+          challengeId: CHALLENGE_ID,
+          address: parseSolanaWalletAddress(identityAddress),
+          publicKey: identityPublicKey,
+          signedMessage,
+          signature: forgedSignature,
+        }),
+      ),
+    ).resolves.toEqual({ status: 'REJECTED', reason: 'SIGNATURE_INVALID' });
+  });
+
   it('snapshots byte inputs and rejects key, message, and signature substitution', async () => {
     const account = createSolanaAccount();
     const wrongAccount = createSolanaAccount();

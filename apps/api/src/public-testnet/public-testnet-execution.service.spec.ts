@@ -3,9 +3,9 @@ jest.mock('rpc-websockets', () => ({ CommonClient: class {}, WebSocket: jest.fn(
 import {
   ComputeBudgetProgram,
   Keypair,
+  PublicKey,
   SystemInstruction,
   Transaction,
-  type PublicKey,
 } from '@solana/web3.js';
 
 import { parseAccountId } from '../accounts/domain/account-profile';
@@ -156,7 +156,7 @@ function deferred<T>(): {
   return { promise, resolve };
 }
 
-function request(): PublicTestnetIntentRequest {
+function request(wallet: PublicKey = WALLET): PublicTestnetIntentRequest {
   return Object.freeze({
     portfolioSnapshotId: SNAPSHOT,
     selection: Object.freeze({
@@ -165,7 +165,7 @@ function request(): PublicTestnetIntentRequest {
       liquidReserveBasisPoints: 0,
     }),
     chainId: PUBLIC_TESTNET_CHAIN_ID,
-    account: WALLET.toBase58(),
+    account: wallet.toBase58(),
   });
 }
 
@@ -374,6 +374,25 @@ describe('PublicTestnetExecutionService', () => {
     ]);
     expect(Date.parse(result.evidenceExpiresAt) - Date.parse(result.expiresAt)).toBe(540_000);
     expect(JSON.stringify(result)).not.toMatch(/private.?key|mnemonic|seed phrase/iu);
+  });
+
+  it('rejects an identity wallet address with the forged R=identity, S=0 signature', async () => {
+    const identityPublicKey = Buffer.alloc(32);
+    identityPublicKey[0] = 1;
+    const identityWallet = new PublicKey(identityPublicKey);
+    expect(identityWallet.toBase58()).toBe('4uQeVj5tqViQh7yWWGStvkEG1Zmhx6uasJtWCJziofM');
+    const forgedSignature = Buffer.alloc(64);
+    forgedSignature[0] = 1;
+    const { service, rpc } = fixture();
+    const intent = await service.createIntent(ACCOUNT_ID, CORRELATION, request(identityWallet));
+
+    await expect(
+      service.verifySubmission(ACCOUNT_ID, intent.intentId, {
+        signature: base58(forgedSignature),
+      }),
+    ).rejects.toBeInstanceOf(PublicTestnetEvidenceMismatchError);
+    expect(rpc.verifyFinalizedDeposit).not.toHaveBeenCalled();
+    expect(rpc.broadcastSignedTransaction).not.toHaveBeenCalled();
   });
 
   it('reports conservative Devnet SOL funding readiness', async () => {

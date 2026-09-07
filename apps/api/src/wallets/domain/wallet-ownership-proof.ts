@@ -7,6 +7,7 @@ import {
 
 import { hashMessage, recoverMessageAddress, type Hex } from 'viem';
 
+import { validateEd25519PublicKeyBytes } from '../../infrastructure/security/ed25519-public-key';
 import {
   formatWalletAccountId,
   parseEvmWalletAddress,
@@ -799,6 +800,7 @@ function verifySolanaSignature(
     if (proof.address !== record.address) return false;
     const expectedPublicKey = solanaWalletAddressBytes(proof.address);
     if (!timingSafeEqual(expectedPublicKey, proof.publicKey)) return false;
+    validateEd25519PublicKeyBytes(proof.publicKey);
     const publicKey = createPublicKey({
       key: Buffer.concat([ED25519_SPKI_PREFIX, Buffer.from(proof.publicKey)]),
       format: 'der',

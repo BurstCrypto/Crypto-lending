@@ -1,10 +1,11 @@
-import { createPublicKey, randomUUID, verify as verifyEd25519 } from 'node:crypto';
+import { createPublicKey, randomUUID, verify as verifyEd25519, type KeyObject } from 'node:crypto';
 
 import { Inject, Injectable } from '@nestjs/common';
 import { PublicKey, SystemProgram, Transaction, TransactionInstruction } from '@solana/web3.js';
 
 import type { AccountId } from '../accounts/domain/account-profile';
 import type { JobCorrelationContext } from '../infrastructure/outbox/job-envelope';
+import { validateEd25519PublicKeyBytes } from '../infrastructure/security/ed25519-public-key';
 import {
   LocalDemoAllocationService,
   type LocalDemoAllocationSelection,
@@ -336,23 +337,38 @@ function decodeSignature(value: string): Buffer | undefined {
   return decoded;
 }
 
-function verifiesIntentSignature(intent: StoredIntent, encodedSignature: string): boolean {
+type IntentSignatureVerification =
+  'VERIFIED' | 'MALFORMED_SIGNATURE' | 'INVALID_SIGNATURE' | 'INVALID_PUBLIC_KEY';
+
+function verifiesIntentSignature(
+  intent: StoredIntent,
+  encodedSignature: string,
+): IntentSignatureVerification {
   const signature = decodeSignature(encodedSignature);
-  if (signature === undefined) return false;
+  if (signature === undefined) return 'MALFORMED_SIGNATURE';
+  let publicKey: KeyObject;
   try {
-    const publicKey = createPublicKey({
-      key: Buffer.concat([ED25519_SPKI_PREFIX, intent.wallet.toBuffer()]),
+    const publicKeyBytes = intent.wallet.toBuffer();
+    validateEd25519PublicKeyBytes(publicKeyBytes);
+    publicKey = createPublicKey({
+      key: Buffer.concat([ED25519_SPKI_PREFIX, publicKeyBytes]),
       format: 'der',
       type: 'spki',
     });
+  } catch {
+    return 'INVALID_PUBLIC_KEY';
+  }
+  try {
     return verifyEd25519(
       null,
       Buffer.from(intent.expectedMessageBase64, 'base64'),
       publicKey,
       signature,
-    );
+    )
+      ? 'VERIFIED'
+      : 'INVALID_SIGNATURE';
   } catch {
-    return false;
+    return 'INVALID_SIGNATURE';
   }
 }
 
@@ -582,10 +598,14 @@ export class PublicTestnetExecutionService {
       // Authenticate the intent-bound transaction message before reserving this
       // globally unique signature. A signature for another intent must not be
       // able to squat this intent's binding.
-      if (!verifiesIntentSignature(intent, submission.signature)) {
-        if (decodeSignature(submission.signature) === undefined) {
-          throw new PublicTestnetEvidenceMismatchError();
-        }
+      const signatureVerification = verifiesIntentSignature(intent, submission.signature);
+      if (
+        signatureVerification === 'MALFORMED_SIGNATURE' ||
+        signatureVerification === 'INVALID_PUBLIC_KEY'
+      ) {
+        throw new PublicTestnetEvidenceMismatchError();
+      }
+      if (signatureVerification === 'INVALID_SIGNATURE') {
         return this.verifyUnboundWalletModifiedSubmission(accountId, intentId, intent, submission);
       }
       intent.submission = Object.freeze({ ...submission });
