@@ -94,6 +94,37 @@ Every accepted result states:
 
 Repeated finalized-slot, block, and genesis checks detect internal transcript inconsistency. They do not make one injected RPC independent, Byzantine-resistant, or authentic. `minContextSlot` is a node constraint rather than an account-state proof. Block time is an estimate and is used only as a bounded freshness signal.
 
+## Dormant account-position semantics foundation
+
+The 2026-09-06 account-position slice separately pins the exact content SHA-256
+of the program's `Obligation`, `Reserve`, state constants, Decimal math, and WAD
+definitions, plus the corresponding public SDK layouts. It implements only a
+pure evaluator over caller-supplied bytes; it owns no RPC endpoint or client and
+is not exported or registered at runtime.
+
+The reviewed obligation layout is exactly 1,300 bytes. It binds the lending
+market at offset 10 and owner at offset 42, reads declared deposit and borrow
+counts at offsets 202 and 203, rejects entries beyond the 1,096-byte packed
+region, and inspects every declared entry. For the selected USDC reserve it:
+
+- converts deposited collateral to underlying liquidity using the pinned
+  reserve total-supply and collateral-exchange-rate sequence, excluding accrued
+  protocol fees and flooring exactly where the program floors;
+- accrues each stored borrow from its obligation cumulative rate to the
+  same-context reserve cumulative rate using the pinned two-step WAD math, then
+  ceilings the atomic debt as the program's repay path does; and
+- rejects negative interest, noncanonical booleans/base64, duplicate accounts
+  or reserve entries, wrong owner/market/program, digest or context mismatch,
+  stale reserve state, and every checked U192/U128/U64 overflow.
+
+The discovery plan applies exact `dataSize`, market, and owner filters and uses
+finalized `withContext` plus an authenticated durable `minContextSlot`. Standard
+Solana JSON-RPC does not authenticate that `getProgramAccounts` was exhaustive
+or untruncated, however, and independently issued reserve and obligation calls
+do not by themselves prove one atomic state view. Consequently every result is
+explicitly `INCOMPLETE_UNVERIFIED_DISCOVERY`, with persistence, complete-position
+authority, and financial-action authority all hard-coded false.
+
 ## Residual production gates
 
 Before any runtime export or persistence path is considered, all of the following remain required:
@@ -103,7 +134,7 @@ Before any runtime export or persistence path is considered, all of the followin
 3. Derive and verify the ProgramData PDA, and reproduce the deployed binary from reviewed source and toolchain inputs or approve a documented equivalent provenance control.
 4. Obtain the same snapshot from independently operated, allowlisted Solana sources or verify cryptographic account proofs against an independently trusted root. Multiple URLs operated by one vendor are not independent.
 5. Review Save's upgrade governance, administrative authorities, incident controls, oracle configuration, price freshness, withdrawal mechanics, utilization, rate limiters, reserve type, caps, bad debt, and asset-specific risk.
-6. Specify and test provider-native deposit/share accounting, withdrawal semantics, capacity, and APR-to-APY methodology using exact protocol rules plus independent price evidence.
+6. Extend the now-pinned deposit/debt accounting with independently reviewed withdrawal semantics, capacity, and APR-to-APY methodology plus independent price evidence.
 7. Define durable observations, replay/idempotency, monitoring, alerting, circuit breakers, and rollback before adding a writer or recommendation consumer.
 8. Complete legal/compliance, security, finance, operational, and product approval. Only then may a separately reviewed change add DI registration, an allowlisted endpoint, egress, or transaction capability.
 
