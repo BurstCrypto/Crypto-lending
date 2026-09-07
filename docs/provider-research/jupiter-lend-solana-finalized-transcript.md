@@ -66,6 +66,100 @@ The IDL calls `liquidity_exchange_price` the underlying asset's liquidity-protoc
 
 That distinction is especially important because Jupiter publishes a [Lend Liquidity security assessment](https://dev.jup.ag/assets/files/lend-liquidity-offside-e7263e513a28a25f7430215e7fb987fb.pdf) that includes exchange-price/update-time findings. A successful decode is not a risk approval or proof that a stored price is economically current.
 
+## Account-position semantics audit: blocked
+
+The 2026-09-06 offline audit did **not** add an account-position semantics
+artifact. The immutable material currently captured is sufficient to prove that
+Jupiter Earn supply and Jupiter Vaults Borrow debt are different state machines,
+but it is not sufficient to prove a complete wallet position at one finalized
+Solana state. Returning a partial balance as a complete position would be a
+false production claim.
+
+### What the pinned evidence proves
+
+- Earn represents a user's supply as fToken shares held in SPL token accounts.
+  The captured `@jup-ag/lend` `0.2.0` client's
+  `getUserLendingPositionByAsset` derives one associated token account, reads
+  that one balance, and converts the shares through a current exchange-price
+  path. It catches any read failure and returns zero. That helper is useful for
+  its documented UI path, but one ATA is not an exhaustive set of token accounts
+  and its zero fallback is not evidence that the wallet has no Earn supply.
+- Vaults Borrow uses a separate mainnet program,
+  `jupr81YtYssSyPt8jbnGuiWon5f6x9TcDEFxYe3Bdzi`. The official repository's
+  `target/idl/vaults.json` at commit
+  `33a22cf7a5bfdd32ab1712dda4adfbeb9b348ad9` is 185,475 bytes, has SHA-256
+  `97c519cfa0ce17fe9c270de102e0e4a0b56117b4bd5d2c9ad6bed601231a6351`,
+  identifies IDL version `0.1.5`, and has Git blob
+  `ac68f58fd11678fe3a6c94a23b3cc04bf8daba0f`.
+- The packed Vaults `Position` account contains `vault_id`, `nft_id`,
+  `position_mint`, `is_supply_only_position`, `tick`, `tick_id`,
+  `supply_amount`, and `dust_debt_amount`; it does not contain a wallet owner.
+  The pinned Borrow SDK and CPI guide instead identify ownership through the
+  position NFT token account and require the signer to own that NFT for a
+  withdraw or borrow. Therefore an fToken account cannot establish Vaults debt,
+  and a position NFT account alone cannot establish the collateral or debt
+  amount.
+- For an ordinary, non-liquidated Vaults position, the captured SDK derives debt
+  from the position tick and collateral with fixed-point ratio math, then
+  accounts for dust. A possibly liquidated position additionally requires the
+  exact Tick, optional TickIdLiquidation, VaultMetadata, VaultState, and complete
+  Branch lineage. Smart-collateral or smart-debt vault types additionally depend
+  on DEX positions, reserves, exchange prices, and oracle state. Reading only
+  the packed Position account would omit state that can change the result.
+
+The captured `@jup-ag/lend` `0.2.0` tarball is 209,931 bytes with SHA-256
+`3d4289b774b8e5b315c950f105ff8685019b67a4af3b4932e289970bae14badd`.
+It contains the client-side Earn and Vaults math reviewed above, but its
+`package.json` has no source-repository or commit binding. The pinned
+`jup-ag/jupiter-lend` repository contains generated IDLs, generated types,
+documentation, and CPI examples, but not the Vaults on-chain program source.
+The tarball therefore cannot yet serve as independently reproducible proof that
+the reviewed client math and ownership checks match the deployed program.
+
+### Exact blockers to a safe artifact
+
+1. **No closed Vaults universe.** The captured Borrow client obtains the vault
+   list from the mutable `/v1/borrow/vaults` HTTP API. Neither the pinned
+   repository nor the transcript pins an exhaustive mainnet vault ID, type,
+   supply asset, borrow asset, oracle, or DEX allowlist.
+2. **No exhaustive wallet discovery.** The captured Borrow SDK accepts a known
+   `vaultId` and `positionId`; it does not enumerate every position NFT owned by
+   a wallet. Safe discovery must account for every token account that can hold a
+   position mint, prove the corresponding Position PDA and mint relationship,
+   and reject duplicate, delegated, frozen, closed, wrong-program, wrong-amount,
+   or otherwise ambiguous ownership evidence. Likewise, Earn discovery must
+   aggregate every wallet-owned token account for the exact fToken mint instead
+   of assuming the ATA is the only possible account.
+3. **No one-root exhaustive account graph.** The current adapter's one
+   `getMultipleAccounts` snapshot contains only the Earn Program, ProgramData,
+   Lending account, underlying mint, and fToken mint. It contains no wallet
+   token accounts, Vaults positions, position mints, NFT token accounts, vault
+   configuration/state, ticks, liquidation lineage, DEX state, or oracle state.
+   Standard RPC list responses also provide no authenticated non-truncation
+   proof, and separate discovery calls cannot be assumed to describe the same
+   finalized root merely because each uses `finalized` commitment.
+4. **No deployed Vaults implementation binding.** The Vaults ProgramData
+   address, exact runtime binary hash, deployment slot, upgrade authority, and
+   reviewed on-chain source revision are not pinned. The IDL proves a serialized
+   shape, not the program's internal NFT authority checks or calculation rules.
+5. **No complete conservative math proof.** Earn needs the complete current
+   exchange-price inputs and an explicitly conservative share-to-asset rounding
+   rule; the existing raw stored price is intentionally insufficient. The
+   captured helper converts the token account's decimal `u64` amount to a
+   JavaScript `Number` before reconstructing a big integer and uses `divRound`
+   for the share conversion, so it is neither losslessly bounded above 2^53 nor
+   the required supply-side floor. Vaults needs cross-language vectors for tick
+   ratio, dust, liquidation lineage, and every admitted vault type, including
+   overflow bounds. The compiled SDK alone is not that proof.
+
+Until all five blockers are closed, Jupiter account-position status remains
+`UNAVAILABLE`. No Earn balance may be netted against or relabeled as Vaults
+Borrow debt, an ATA or fToken receipt may not be labeled a complete Earn
+position, and an NFT token account may not be labeled a complete Vaults
+position. The existing transcript remains raw Earn market corroboration with
+no complete-position claim and with `mayPersist`, recommendation eligibility,
+and financial-action authority all false.
+
 ## Remaining live gates
 
 Before this code can be registered or its result persisted, all of the following remain required:
