@@ -505,7 +505,7 @@ deployment manifests and identity-verifier implementations. Both checked-in
 manifests remain empty and `NOT_APPROVED`, and neither concrete verifier is
 registered or composed into a runtime. Separately, one reviewed aggregate
 SHA-256 binds the exact API build configuration, the one resolved local JSON
-runtime input, and all 397 current lowercase TypeScript/TSX sources not excluded
+runtime input, and all 398 current lowercase TypeScript/TSX sources not excluded
 by the pinned `*.spec.ts` / `*.e2e-spec.ts` build exclusions, including the
 outbox-worker health CLI. The secure loader applies canonical-path, link,
 hardlink-on-covered-input, covered-source duplicate, size/count/depth, repeated-
@@ -513,10 +513,11 @@ topology, double-read, and TOCTOU checks before it can mint a private point-in-
 time attestation. Recognizable test-named module imports, unreviewed local JSON
 imports, escaping local module paths, dynamic loaders, or concrete identity
 references outside the four owned verifier/manifest files fail as defense in
-depth. After the migration-`0033` binding correction in `5976d32` and the
-direct-import-only durable port and PostgreSQL adapter in `b7289ac`, the current
-source total is 6,363,882 bytes and the reviewed aggregate pins SHA-256
-`799cca6719776545c28e8e0febc9b6e3cf237ab4883abe3fdd9d4e8b51ec9855`.
+depth. After the migration-`0033` binding correction in `5976d32`, the
+direct-import-only durable port and PostgreSQL adapter in `b7289ac`, and the
+address-bound migration/adapter updates in `9af00ef` and `79c4b71`, the current
+source total is 6,389,629 bytes and the reviewed aggregate pins SHA-256
+`15858ec81b7be55d312fe13e6cb969b3a34e8fcea25c3c735eac52888b7e875a`.
 The existing byte-pinned balance-consumer artifact count is 73. Any covered runtime
 input change requires review and an aggregate-fingerprint rebaseline; this
 cached source attestation is not permanent runtime or launch evidence. This
@@ -1087,11 +1088,12 @@ Morpho/Euler source commits `5910ebf` and `d478f3b`, inventory commit `a77a57e`,
 and preflight commit `5550fbf` bring the current boundary to 45 artifacts and
 85 passing focused cases. A dedicated inventory validator covers Gearbox
 commits `5fcc7ca` and `040e93a`, while the dormant-action validator covers
-`ee9204d` and `a387124`; `a61bb57` supplies separate disposable PostgreSQL
-integration coverage. None enlarges that provider slice. Preflight rebaseline
-`667b112` was the prior runtime pin. After `5976d32` and `b7289ac`, the reviewed
-whole-API runtime snapshot is 397 files and 6,363,882 bytes with SHA-256
-`799cca6719776545c28e8e0febc9b6e3cf237ab4883abe3fdd9d4e8b51ec9855`.
+`ee9204d`, `a387124`, `6ef71ff`, and the `0034`/adapter attestation in `51967aa`;
+`a61bb57`, `b0b39d9`, `9af00ef`, and `79c4b71` supply separate disposable
+PostgreSQL integration coverage. None enlarges that provider slice. Preflight
+rebaseline `d51f85e` pins the reviewed whole-API runtime snapshot at 398 files
+and 6,389,629 bytes with SHA-256
+`15858ec81b7be55d312fe13e6cb969b3a34e8fcea25c3c735eac52888b7e875a`.
 Six focused integration cases also passed
 against a disposable local PostgreSQL 16 instance for the cumulative migration
 verifier, both launch chains' intent preparation, one-shot and idempotent
@@ -1114,6 +1116,17 @@ without a broadcast record, result review, readback, and the absence of resend,
 broadcast, and ledger authority. They use digest-only private evidence, do not
 run the production-principal verifier, and must not be represented as provider,
 signature, deployment, mainnet transaction, or write-authorization evidence.
+
+Address-bound migration `0034` separately passed eight focused unit cases, the
+78-case impacted migration-order set, and five guarded loopback PostgreSQL 16
+cases covering Ethereum, Solana, hostile/cross-wallet candidates,
+v1-parent/v2-current rotation, revoked replay, ACLs, rollback refusal, and a
+forced two-client intent-before-wallet lock interleaving. The updated durable
+adapter passed 19 focused unit cases and one PostgreSQL 16 lifecycle case. The
+24-case validator in `51967aa` pins those artifacts and rejects grants,
+registration, V1 fallback, caller-authored or logged HMAC candidates, retries,
+and added authority. Preflight `d51f85e` passes all 85 focused cases but remains
+correctly `BLOCKED` at 10 planned, 0 live-read, and 0 transaction providers.
 
 These bootstrap commands must exit `1` today because they deliberately do not
 ingest controlled production evidence. They identify local structure and named

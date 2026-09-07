@@ -162,11 +162,12 @@ exact extension inventory, and reviewed mutable-field window policy exist.
 Separately from that 73-artifact byte-pinned contract, the repository loader
 derives a private runtime-absence attestation from every lowercase `.ts` and
 `.tsx` file under `apps/api/src` that is not excluded by the exact pinned build
-exclusions (`*.spec.ts` and `*.e2e-spec.ts`): currently 397 files and 6,363,882
-bytes. After the migration-`0033` binding correction in `5976d32` and the
-direct-import-only durable port and PostgreSQL adapter in `b7289ac`, the current
+exclusions (`*.spec.ts` and `*.e2e-spec.ts`): currently 398 files and 6,389,629
+bytes. After the migration-`0033` binding correction in `5976d32`, the
+direct-import-only durable port and PostgreSQL adapter in `b7289ac`, and the
+address-bound migration/adapter updates in `9af00ef` and `79c4b71`, the current
 aggregate SHA-256 is
-`799cca6719776545c28e8e0febc9b6e3cf237ab4883abe3fdd9d4e8b51ec9855`.
+`15858ec81b7be55d312fe13e6cb969b3a34e8fcea25c3c735eac52888b7e875a`.
 The aggregate also binds the exact `nest-cli.json`, `tsconfig.json`, and
 `tsconfig.build.json` build inputs and the resolved
 `src/blockchain/domain/local-evm-development-manifest.json` runtime data input.
@@ -1132,11 +1133,12 @@ source commits `5910ebf` and `d478f3b`, inventory commit `a77a57e`, and prefligh
 commit `5550fbf` bring the current provider-position boundary to 45 artifacts and
 85 passing focused cases. A dedicated inventory validator covers Gearbox
 commits `5fcc7ca` and `040e93a`, while the dormant-action validator covers
-`ee9204d` and `a387124`; `a61bb57` supplies separate disposable PostgreSQL
-integration coverage. None enlarges that slice. Preflight rebaseline `667b112`
-was the prior runtime pin. After `5976d32` and `b7289ac`, the reviewed whole-API
-runtime snapshot is 397 files and 6,363,882 bytes with SHA-256
-`799cca6719776545c28e8e0febc9b6e3cf237ab4883abe3fdd9d4e8b51ec9855`.
+`ee9204d`, `a387124`, `6ef71ff`, and the `0034`/adapter attestation in `51967aa`;
+`a61bb57`, `b0b39d9`, `9af00ef`, and `79c4b71` supply separate disposable
+PostgreSQL integration coverage. None enlarges that slice. Preflight rebaseline
+`d51f85e` pins the reviewed whole-API runtime snapshot at 398 files and
+6,389,629 bytes with SHA-256
+`15858ec81b7be55d312fe13e6cb969b3a34e8fcea25c3c735eac52888b7e875a`.
 The record-intent migration was also exercised
 in a disposable local PostgreSQL 16 instance: all six focused integration cases
 passed, covering clean up/down/up migration verification, Ethereum and Solana
@@ -1159,6 +1161,18 @@ shipped adapter. These use unique disposable schemas on loopback PostgreSQL 16
 and digest-only private evidence. They do not run the production-principal
 verifier or prove a provider, signature, mainnet transaction, deployment, or
 write authorization.
+
+Migration `0034` additionally passed eight focused unit cases, the 78-case
+impacted migration-order set, and five guarded loopback PostgreSQL 16 cases.
+Those cases cover both launch chains, hostile and cross-wallet digest arrays,
+v1-parent/v2-current key rotation, revoked replay, exact owner-only ACLs,
+history-safe rollback refusal, and forced two-client intent-before-wallet lock
+ordering. The address-bound adapter passed 19 focused unit cases and one
+separate PostgreSQL 16 lifecycle case. Validator `51967aa` passes 24 focused
+mutation cases, and preflight `d51f85e` passes all 85 focused cases while its CLI
+correctly remains `BLOCKED` with 10 planned, 0 live-read, and 0 transaction
+providers. This is local safety evidence only and creates no runtime grant,
+provider call, signing, broadcast, settlement, deployment, or mainnet authority.
 
 These checks are also part of the root `lint`, `typecheck`, and `test` scripts
 used by CI.
