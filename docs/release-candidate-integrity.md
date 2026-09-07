@@ -27,7 +27,8 @@ component set:
 - the application, observability child, nested workload-boundary, and
   migration-task CloudFormation templates;
 - the canonical offline production deployment-target and prospective-destination
-  runtime, deployment-intent validator, and inert intent example; and
+  runtime, target-identity enrollment verifier, deployment-intent validator,
+  shared Ed25519 public-key validator, and inert intent example; and
 - every repository decision artifact directly inspected by production
   preflight: the authentication/application template, egress policy, RPC
   decision and its SHA-256 sidecar, the dated exact-byte active-scope provider
@@ -49,16 +50,25 @@ a nonzero epoch intended for single use; it rejects duplicate IDs, epochs, or
 account/Region/stack tuples and is empty in production. The separately branded
 deployed-target registry remains an empty, fail-closed legacy evidence boundary.
 It cannot be populated safely by a release-bound source edit because generated
-resource and image identities do not exist until after provisioning. A future
-independently signed post-deploy enrollment protocol is still required; this
-runtime performs no I/O, provisioning, enrollment, or deployment.
+resource and image identities do not exist until after provisioning. The
+dedicated post-provision enrollment verifier accepts only a short-lived,
+two-role-signed target-identity claim bound to the exact prospective destination,
+provision intent, reservation, result, source revision, release manifest, and
+generated target. Its production authority registry is empty, and its accepted
+report keeps external-state verification and execution authority false. It
+performs no I/O, provisioning, enrollment mutation, live-state observation, or
+deployment; a later consumer must independently establish live state and
+atomically consume the destination epoch and chain head.
 
-The deployment-intent validator is staged with its exact recursive local module
-closure. CI parses that closure, permits only its reviewed Node built-ins and
-named imports, rejects direct dynamic-loading, network, cloud, subprocess,
-filesystem-write, and environment access, and proves that native Node can import
-the validator from the sealed stage. This is a static capability boundary, not
-deployment authorization; the validator remains offline and non-executing.
+The deployment-intent and target-identity enrollment validators are staged with
+their exact recursive local module closures. CI parses both closures, permits
+only their reviewed Node built-ins and named imports, rejects direct
+dynamic-loading, network I/O, cloud, subprocess, filesystem-write, and
+environment access, and proves that native Node can import both entry points
+from the sealed stage. The target runtime's `node:net` use is limited to the
+pure `isIP` parser. This is a static direct-capability drift guard, not a
+JavaScript sandbox or deployment authorization; both validators remain offline
+and non-executing.
 
 Generation additionally requires `HEAD` to equal the requested revision and
 rejects any staged, unstaged, non-ignored untracked, sparse, skip-worktree, or

@@ -54,12 +54,16 @@ const BUILDER = Object.freeze({
   nodeVersion: 'v22.22.0',
   platform: 'linux',
 });
-const DEPLOYMENT_INTENT_ENTRY = 'infra/aws/validate-production-deployment-intent.mjs';
-const DEPLOYMENT_INTENT_MODULE_POLICY = Object.freeze({
-  [DEPLOYMENT_INTENT_ENTRY]: Object.freeze({
+const DEPLOYMENT_RUNTIME_ENTRIES = Object.freeze([
+  'infra/aws/validate-production-deployment-intent.mjs',
+  'scripts/production-deployment-enrollment.mjs',
+]);
+const DEPLOYMENT_RUNTIME_MODULE_POLICY = Object.freeze({
+  [DEPLOYMENT_RUNTIME_ENTRIES[0]]: Object.freeze({
     imports: Object.freeze([
       '../shared/parse-strict-json.mjs|parseStrictJsonBytes',
       '../shared/read-secure-local-file.mjs|readSecureLocalFile',
+      '../shared/validate-ed25519-public-key.mjs|validateEd25519PublicKeyBytes',
       'node:crypto|createHash,createPublicKey,verify as verifySignature',
       'node:path|dirname,isAbsolute,join,relative,resolve',
       'node:perf_hooks|performance',
@@ -67,6 +71,17 @@ const DEPLOYMENT_INTENT_MODULE_POLICY = Object.freeze({
       'node:util|TextDecoder,types as utilTypes',
     ]),
     processMembers: Object.freeze(['argv', 'exitCode', 'platform', 'stderr', 'stdout']),
+  }),
+  [DEPLOYMENT_RUNTIME_ENTRIES[1]]: Object.freeze({
+    imports: Object.freeze([
+      '../infra/shared/parse-strict-json.mjs|parseStrictJsonBytes',
+      '../infra/shared/validate-ed25519-public-key.mjs|validateEd25519PublicKeyBytes',
+      './production-deployment-target.mjs|isVerifiedProductionDeploymentDestination,productionDeploymentTargetSha256,resolveProductionDeploymentDestination,resolveProductionDeploymentDestinationWithTestRegistry',
+      'node:crypto|createHash,createPublicKey,verify as verifySignature',
+      'node:perf_hooks|performance',
+      'node:util|TextDecoder,types as utilTypes',
+    ]),
+    processMembers: Object.freeze([]),
   }),
   'infra/shared/parse-strict-json.mjs': Object.freeze({
     imports: Object.freeze(['node:util|TextDecoder']),
@@ -78,6 +93,14 @@ const DEPLOYMENT_INTENT_MODULE_POLICY = Object.freeze({
       'node:path|isAbsolute,join,normalize,parse,relative,resolve',
     ]),
     processMembers: Object.freeze(['platform']),
+  }),
+  'infra/shared/validate-ed25519-public-key.mjs': Object.freeze({
+    imports: Object.freeze(['node:util|types as utilTypes']),
+    processMembers: Object.freeze([]),
+  }),
+  'scripts/production-deployment-target.mjs': Object.freeze({
+    imports: Object.freeze(['node:crypto|createHash', 'node:net|isIP']),
+    processMembers: Object.freeze([]),
   }),
 });
 const FORBIDDEN_DIRECT_CAPABILITIES = new Set([
@@ -91,6 +114,7 @@ const FORBIDDEN_DIRECT_CAPABILITIES = new Set([
   'navigator',
   'require',
 ]);
+const FORBIDDEN_REFLECTIVE_PROPERTIES = new Set(['__proto__', 'constructor']);
 const temporaryDirectories = [];
 
 function makeRemovable(path) {
@@ -175,7 +199,10 @@ function importDescriptor(node) {
   assert.equal(node.attributes, undefined);
   const bindings = [];
   const clause = node.importClause;
-  assert.ok(clause, 'Side-effect-only imports are not permitted in the offline intent closure.');
+  assert.ok(
+    clause,
+    'Side-effect-only imports are not permitted in the offline deployment closure.',
+  );
   if (clause.name) bindings.push(`default as ${clause.name.text}`);
   if (clause.namedBindings) {
     if (ts.isNamespaceImport(clause.namedBindings)) {
@@ -201,6 +228,18 @@ function processMember(node) {
     ts.isStringLiteral(parent.argumentExpression)
   ) {
     return parent.argumentExpression.text;
+  }
+  return undefined;
+}
+
+function accessedStaticProperty(node) {
+  if (ts.isPropertyAccessExpression(node)) return node.name.text;
+  if (
+    ts.isElementAccessExpression(node) &&
+    (ts.isStringLiteral(node.argumentExpression) ||
+      ts.isNoSubstitutionTemplateLiteral(node.argumentExpression))
+  ) {
+    return node.argumentExpression.text;
   }
   return undefined;
 }
@@ -262,9 +301,9 @@ function isReadOnlyOpenFlags(node, safeNoFollowBinding) {
   );
 }
 
-function inspectDeploymentIntentModule(modulePath, source) {
-  const policy = DEPLOYMENT_INTENT_MODULE_POLICY[modulePath];
-  assert.ok(policy, `Unreviewed local module in deployment-intent closure: ${modulePath}`);
+function inspectDeploymentRuntimeModule(modulePath, source) {
+  const policy = DEPLOYMENT_RUNTIME_MODULE_POLICY[modulePath];
+  assert.ok(policy, `Unreviewed local module in deployment-runtime closure: ${modulePath}`);
   const parsed = ts.createSourceFile(
     modulePath,
     source,
@@ -313,6 +352,12 @@ function inspectDeploymentIntentModule(modulePath, source) {
     }
     if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword) {
       assert.fail(`Dynamic import is not permitted in ${modulePath}`);
+    }
+    if (
+      (ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)) &&
+      FORBIDDEN_REFLECTIVE_PROPERTIES.has(accessedStaticProperty(node))
+    ) {
+      assert.fail(`Direct reflective capability access is not permitted in ${modulePath}`);
     }
     if (
       ts.isIdentifier(node) &&
@@ -375,8 +420,8 @@ function inspectDeploymentIntentModule(modulePath, source) {
   return localImports;
 }
 
-function deploymentIntentLocalClosure(root = REPOSITORY_ROOT) {
-  const pending = [DEPLOYMENT_INTENT_ENTRY];
+function deploymentRuntimeLocalClosure(entries, root = REPOSITORY_ROOT) {
+  const pending = [...entries];
   const inspected = new Set();
   while (pending.length > 0) {
     const modulePath = pending.pop();
@@ -384,7 +429,7 @@ function deploymentIntentLocalClosure(root = REPOSITORY_ROOT) {
     inspected.add(modulePath);
     const absolutePath = resolve(root, ...modulePath.split('/'));
     const source = readFileSync(absolutePath, 'utf8');
-    for (const specifier of inspectDeploymentIntentModule(modulePath, source)) {
+    for (const specifier of inspectDeploymentRuntimeModule(modulePath, source)) {
       assert.match(specifier, /^\.\.?\/.+\.mjs$/u);
       const dependencyPath = relative(root, resolve(dirname(absolutePath), specifier)).replaceAll(
         '\\',
@@ -637,11 +682,17 @@ test('binds the inert production infrastructure contract as an exact release com
   assert.throws(() => verifyReleaseManifest(root, manifest), ReleaseManifestError);
 });
 
-test('binds the production deployment-target and deployment-intent runtimes exactly', () => {
+test('binds the production deployment runtimes and inert intent example exactly', () => {
   const specifications = [
     {
       name: 'production-deployment-target-validator',
       path: 'scripts/production-deployment-target.mjs',
+      kind: 'file',
+      requiredFiles: ['.'],
+    },
+    {
+      name: 'production-deployment-target-identity-enrollment-validator',
+      path: 'scripts/production-deployment-enrollment.mjs',
       kind: 'file',
       requiredFiles: ['.'],
     },
@@ -660,6 +711,12 @@ test('binds the production deployment-target and deployment-intent runtimes exac
     {
       name: 'production-deployment-intent-secure-file-runtime',
       path: 'infra/shared/read-secure-local-file.mjs',
+      kind: 'file',
+      requiredFiles: ['.'],
+    },
+    {
+      name: 'production-ed25519-public-key-validator',
+      path: 'infra/shared/validate-ed25519-public-key.mjs',
       kind: 'file',
       requiredFiles: ['.'],
     },
@@ -695,9 +752,26 @@ test('binds the production deployment-target and deployment-intent runtimes exac
   }
 });
 
-test('stages the exact offline deployment-intent module closure with no unreviewed capabilities', () => {
-  const expectedClosure = Object.keys(DEPLOYMENT_INTENT_MODULE_POLICY).sort();
-  assert.deepEqual(deploymentIntentLocalClosure(), expectedClosure);
+test('stages both exact offline deployment module closures with reviewed direct capabilities', () => {
+  const expectedClosures = Object.freeze({
+    [DEPLOYMENT_RUNTIME_ENTRIES[0]]: Object.freeze([
+      'infra/aws/validate-production-deployment-intent.mjs',
+      'infra/shared/parse-strict-json.mjs',
+      'infra/shared/read-secure-local-file.mjs',
+      'infra/shared/validate-ed25519-public-key.mjs',
+    ]),
+    [DEPLOYMENT_RUNTIME_ENTRIES[1]]: Object.freeze([
+      'infra/shared/parse-strict-json.mjs',
+      'infra/shared/validate-ed25519-public-key.mjs',
+      'scripts/production-deployment-enrollment.mjs',
+      'scripts/production-deployment-target.mjs',
+    ]),
+  });
+  for (const entry of DEPLOYMENT_RUNTIME_ENTRIES) {
+    assert.deepEqual(deploymentRuntimeLocalClosure([entry]), expectedClosures[entry], entry);
+  }
+  const expectedClosure = Object.keys(DEPLOYMENT_RUNTIME_MODULE_POLICY).sort();
+  assert.deepEqual(deploymentRuntimeLocalClosure(DEPLOYMENT_RUNTIME_ENTRIES), expectedClosure);
   for (const modulePath of expectedClosure) {
     const components = RELEASE_COMPONENTS.filter(({ path }) => path === modulePath);
     assert.equal(components.length, 1, modulePath);
@@ -706,43 +780,63 @@ test('stages the exact offline deployment-intent module closure with no unreview
     assert.deepEqual(component.requiredFiles, ['.']);
   }
 
-  const validatorSource = readFileSync(resolve(REPOSITORY_ROOT, DEPLOYMENT_INTENT_ENTRY), 'utf8');
-  for (const forbiddenSource of [
-    "import('node:https');",
-    "require('node:child_process');",
-    'const loadBuiltin = require; void loadBuiltin;',
-    "fetch('https://example.invalid');",
-    'const sendNetworkRequest = fetch; void sendNetworkRequest;',
-    'const DynamicFunction = Function; void DynamicFunction;',
-    "process.getBuiltinModule('node:child_process');",
-    'process.env.AWS_PROFILE;',
-    "import { writeFileSync } from 'node:fs';",
-    "import { spawnSync } from 'node:child_process';",
-    "import { CloudFormationClient } from '@aws-sdk/client-cloudformation';",
-    "export * from '../shared/read-secure-local-file.mjs';",
-  ]) {
-    assert.throws(
-      () =>
-        inspectDeploymentIntentModule(
-          DEPLOYMENT_INTENT_ENTRY,
-          `${validatorSource}\n${forbiddenSource}\n`,
-        ),
-      undefined,
-      forbiddenSource,
-    );
+  for (const entry of DEPLOYMENT_RUNTIME_ENTRIES) {
+    const entrySource = readFileSync(resolve(REPOSITORY_ROOT, entry), 'utf8');
+    for (const forbiddenSource of [
+      "import('node:https');",
+      "require('node:child_process');",
+      'const loadBuiltin = require; void loadBuiltin;',
+      "fetch('https://example.invalid');",
+      'const sendNetworkRequest = fetch; void sendNetworkRequest;',
+      'const DynamicFunction = Function; void DynamicFunction;',
+      "process.getBuiltinModule('node:child_process');",
+      'process.env.AWS_PROFILE;',
+      "import { writeFileSync } from 'node:fs';",
+      "import { spawnSync } from 'node:child_process';",
+      "import { CloudFormationClient } from '@aws-sdk/client-cloudformation';",
+      "export * from '../infra/shared/parse-strict-json.mjs';",
+    ]) {
+      assert.throws(
+        () => inspectDeploymentRuntimeModule(entry, `${entrySource}\n${forbiddenSource}\n`),
+        undefined,
+        `${entry}: ${forbiddenSource}`,
+      );
+    }
   }
   const secureFileModule = 'infra/shared/read-secure-local-file.mjs';
   const secureFileSource = readFileSync(resolve(REPOSITORY_ROOT, secureFileModule), 'utf8');
   assert.throws(() =>
-    inspectDeploymentIntentModule(
+    inspectDeploymentRuntimeModule(
       secureFileModule,
       secureFileSource.replace('fsConstants.O_RDONLY | noFollow', "'w'"),
     ),
   );
   assert.throws(() =>
-    inspectDeploymentIntentModule(
+    inspectDeploymentRuntimeModule(
       secureFileModule,
       `${secureFileSource}\nfunction shadowed(noFollow) { openSync('unsafe', noFollow); }\n`,
+    ),
+  );
+  const publicKeyModule = 'infra/shared/validate-ed25519-public-key.mjs';
+  const publicKeySource = readFileSync(resolve(REPOSITORY_ROOT, publicKeyModule), 'utf8');
+  assert.throws(() =>
+    inspectDeploymentRuntimeModule(
+      publicKeyModule,
+      `${publicKeySource}\nimport { randomBytes } from 'node:crypto';\n`,
+    ),
+  );
+  const targetModule = 'scripts/production-deployment-target.mjs';
+  const targetSource = readFileSync(resolve(REPOSITORY_ROOT, targetModule), 'utf8');
+  assert.throws(() =>
+    inspectDeploymentRuntimeModule(
+      targetModule,
+      `${targetSource}\nimport { connect } from 'node:net';\n`,
+    ),
+  );
+  assert.throws(() =>
+    inspectDeploymentRuntimeModule(
+      targetModule,
+      `${targetSource}\nisIP.constructor("process.getBuiltinModule('node:fs').writeFileSync('escaped', 'x')")();\n`,
     ),
   );
 
@@ -757,25 +851,25 @@ test('stages the exact offline deployment-intent module closure with no unreview
   runCli(['create', '--source-revision', source.revision], root);
   runCli(['stage', '--source-revision', source.revision], root);
   const stageRoot = resolve(root, ...RELEASE_STAGE_PATH.split('/'));
-  const stagedValidatorUrl = pathToFileURL(
-    resolve(stageRoot, ...DEPLOYMENT_INTENT_ENTRY.split('/')),
-  ).href;
-  const nativeImport = spawnSync(
-    process.execPath,
-    ['--input-type=module', '--eval', 'await import(process.argv[1]);', stagedValidatorUrl],
-    {
-      cwd: stageRoot,
-      encoding: 'utf8',
-      env: Object.fromEntries(
-        ['SystemRoot', 'TEMP', 'TMP', 'WINDIR'].flatMap((name) =>
-          typeof process.env[name] === 'string' ? [[name, process.env[name]]] : [],
+  for (const entry of DEPLOYMENT_RUNTIME_ENTRIES) {
+    const stagedEntryUrl = pathToFileURL(resolve(stageRoot, ...entry.split('/'))).href;
+    const nativeImport = spawnSync(
+      process.execPath,
+      ['--input-type=module', '--eval', 'await import(process.argv[1]);', stagedEntryUrl],
+      {
+        cwd: stageRoot,
+        encoding: 'utf8',
+        env: Object.fromEntries(
+          ['SystemRoot', 'TEMP', 'TMP', 'WINDIR'].flatMap((name) =>
+            typeof process.env[name] === 'string' ? [[name, process.env[name]]] : [],
+          ),
         ),
-      ),
-      windowsHide: true,
-    },
-  );
-  assert.equal(nativeImport.status, 0, nativeImport.stderr);
-  assert.equal(nativeImport.stdout, '');
+        windowsHide: true,
+      },
+    );
+    assert.equal(nativeImport.status, 0, `${entry}: ${nativeImport.stderr}`);
+    assert.equal(nativeImport.stdout, '', entry);
+  }
 });
 
 test('detects drift in build output and every preflight decision binding', () => {

@@ -198,6 +198,12 @@ export const RELEASE_COMPONENTS = Object.freeze([
     requiredFiles: Object.freeze(['.']),
   }),
   Object.freeze({
+    name: 'production-deployment-target-identity-enrollment-validator',
+    path: 'scripts/production-deployment-enrollment.mjs',
+    kind: 'file',
+    requiredFiles: Object.freeze(['.']),
+  }),
+  Object.freeze({
     name: 'production-deployment-intent-validator',
     path: 'infra/aws/validate-production-deployment-intent.mjs',
     kind: 'file',
@@ -212,6 +218,12 @@ export const RELEASE_COMPONENTS = Object.freeze([
   Object.freeze({
     name: 'production-deployment-intent-secure-file-runtime',
     path: 'infra/shared/read-secure-local-file.mjs',
+    kind: 'file',
+    requiredFiles: Object.freeze(['.']),
+  }),
+  Object.freeze({
+    name: 'production-ed25519-public-key-validator',
+    path: 'infra/shared/validate-ed25519-public-key.mjs',
     kind: 'file',
     requiredFiles: Object.freeze(['.']),
   }),

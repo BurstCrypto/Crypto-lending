@@ -49,10 +49,15 @@ Metadata:
       AuthorityStatus: NOT_APPROVED
       DeploymentDestinationRegistryStatus: EMPTY
       DeploymentTargetRegistryStatus: EMPTY
+      DeploymentIntentAuthorityRegistryStatus: EMPTY
+      DeploymentEnrollmentAuthorityRegistryStatus: EMPTY
       ExactReleaseBindingRequired: true
       IndependentApprovalRequired: true
       DeploymentGuard: infra/aws/invoke-application-baseline.ps1
       DeploymentTargetValidator: scripts/production-deployment-target.mjs
+      DeploymentIntentValidator: infra/aws/validate-production-deployment-intent.mjs
+      DeploymentEnrollmentValidator: scripts/production-deployment-enrollment.mjs
+      Ed25519PublicKeyValidator: infra/shared/validate-ed25519-public-key.mjs
 
 Parameters:
   ActivationMode:

@@ -133,6 +133,9 @@ const PRODUCTION_INFRASTRUCTURE_CONTRACT_ARTIFACT_PATHS = Object.freeze({
   redisOperatorTransitionValidatorSource:
     'infra/aws/validate-redis-operator-secret-version-transition.mjs',
   deploymentTargetValidatorSource: 'scripts/production-deployment-target.mjs',
+  deploymentIntentValidatorSource: 'infra/aws/validate-production-deployment-intent.mjs',
+  deploymentEnrollmentValidatorSource: 'scripts/production-deployment-enrollment.mjs',
+  ed25519PublicKeyValidatorSource: 'infra/shared/validate-ed25519-public-key.mjs',
 });
 const PRODUCTION_INFRASTRUCTURE_CONTRACT_ARTIFACTS = Object.freeze(
   Object.fromEntries(
@@ -435,6 +438,10 @@ const BALANCE_CONSUMER_ARTIFACTS = Object.freeze({
       __dirname,
       '../infra/aws/validate-balance-consumer-metadata-secret-version-transition.mjs',
     ),
+    'utf8',
+  ),
+  ed25519PublicKeyValidatorSource: readFileSync(
+    resolve(__dirname, '../infra/shared/validate-ed25519-public-key.mjs'),
     'utf8',
   ),
   bootstrapPrincipalsSource: readFileSync(
@@ -4565,8 +4572,28 @@ test('production contract rejects representative cost, network, credential, reco
       'DeploymentDestinationRegistryStatus: POPULATED',
     ],
     ['DeploymentTargetRegistryStatus: EMPTY', 'DeploymentTargetRegistryStatus: POPULATED'],
+    [
+      'DeploymentIntentAuthorityRegistryStatus: EMPTY',
+      'DeploymentIntentAuthorityRegistryStatus: POPULATED',
+    ],
+    [
+      'DeploymentEnrollmentAuthorityRegistryStatus: EMPTY',
+      'DeploymentEnrollmentAuthorityRegistryStatus: POPULATED',
+    ],
     ['ExactReleaseBindingRequired: true', 'ExactReleaseBindingRequired: false'],
     ['IndependentApprovalRequired: true', 'IndependentApprovalRequired: false'],
+    [
+      'DeploymentIntentValidator: infra/aws/validate-production-deployment-intent.mjs',
+      'DeploymentIntentValidator: infra/aws/validate-production-deployment-intent.disabled.mjs',
+    ],
+    [
+      'DeploymentEnrollmentValidator: scripts/production-deployment-enrollment.mjs',
+      'DeploymentEnrollmentValidator: scripts/production-deployment-enrollment.disabled.mjs',
+    ],
+    [
+      'Ed25519PublicKeyValidator: infra/shared/validate-ed25519-public-key.mjs',
+      'Ed25519PublicKeyValidator: infra/shared/validate-ed25519-public-key.disabled.mjs',
+    ],
     ['AllowedValues: [DISABLED]', 'AllowedValues: [DISABLED, ENABLED]'],
     ['Resources: {}', 'Resources: {UnreviewedResource: {Type: AWS::S3::Bucket}}'],
   ] as const;
@@ -6544,7 +6571,7 @@ test('balance-consumer inspection pins dormant mainnet deployment manifests and 
 });
 
 test('balance-consumer inspection brands and freezes only the exact dormant local contract', () => {
-  assert.equal(Object.keys(BALANCE_CONSUMER_ARTIFACTS).length, 72);
+  assert.equal(Object.keys(BALANCE_CONSUMER_ARTIFACTS).length, 73);
   const inspected = inspectBalanceConsumerDeploymentArtifacts(BALANCE_CONSUMER_ARTIFACTS);
   assert.deepEqual(inspected, EXPECTED_DORMANT_BALANCE_CONSUMER_DEPLOYMENT);
   assert.equal(Object.isFrozen(inspected), true);
@@ -6578,14 +6605,14 @@ test('repository loader brands the bounded full API runtime absence attestation'
   assert.equal(Object.isFrozen(attestation), true);
   assert.deepEqual(attestation, {
     inspected: true,
-    sourceFileCount: 389,
-    sourceBytes: 5_869_308,
+    sourceFileCount: 390,
+    sourceBytes: 5_875_048,
     repositorySnapshotSha256: attestation?.repositorySnapshotSha256,
     concreteDeploymentIdentityRegistration: 'ABSENT',
   });
   assert.equal(
     attestation?.repositorySnapshotSha256,
-    'a1479da28d229c2add6e07a9f4de88d74c6fceeac99e108bf558e47326ffe4c4',
+    'fb14a434a4feb6d71ff4853b7038556059768ab2d8a93f2f85428e885ec1cbc7',
   );
 });
 

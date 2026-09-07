@@ -178,6 +178,9 @@ interface ProductionInfrastructureContractArtifactSources {
   readonly authWalletTransitionValidatorSource: string;
   readonly redisOperatorTransitionValidatorSource: string;
   readonly deploymentTargetValidatorSource: string;
+  readonly deploymentIntentValidatorSource: string;
+  readonly deploymentEnrollmentValidatorSource: string;
+  readonly ed25519PublicKeyValidatorSource: string;
 }
 
 export interface ProductionInfrastructureDeploymentInput {
@@ -253,6 +256,7 @@ export interface BalanceConsumerArtifactSources {
   readonly balanceConsumerEnvelopeSource: string;
   readonly balanceConsumerEnvelopeValidatorSource: string;
   readonly balanceConsumerMetadataTransitionValidatorSource: string;
+  readonly ed25519PublicKeyValidatorSource: string;
   readonly bootstrapPrincipalsSource: string;
   readonly bootstrapPrincipalsValidatorSource: string;
   readonly databasePrincipalBoundariesMigrationSource: string;
@@ -656,11 +660,14 @@ const PRODUCTION_INFRASTRUCTURE_CONTRACT_ARTIFACT_PATHS = Object.freeze({
   redisOperatorTransitionValidatorSource:
     'infra/aws/validate-redis-operator-secret-version-transition.mjs',
   deploymentTargetValidatorSource: 'scripts/production-deployment-target.mjs',
+  deploymentIntentValidatorSource: 'infra/aws/validate-production-deployment-intent.mjs',
+  deploymentEnrollmentValidatorSource: 'scripts/production-deployment-enrollment.mjs',
+  ed25519PublicKeyValidatorSource: 'infra/shared/validate-ed25519-public-key.mjs',
 } as const satisfies Readonly<
   Record<keyof ProductionInfrastructureContractArtifactSources, string>
 >);
 const PRODUCTION_INFRASTRUCTURE_CONTRACT_ARTIFACT_SHA256 = Object.freeze({
-  contractTemplateSource: '2df10dee0d16dfbe7443c2e86f07d88b70a9c6d4b89991c4c1f698c8aee43a10',
+  contractTemplateSource: '6f25a0753d4af5d0cce51b3d309cbbfc8bad58857e21914e7da0e754d3372ddc',
   applicationDeploymentGuardSource:
     '327a5a640fb946a5c07ec0381166112008e6fa8f805c4fca764bcaed4727512b',
   billingControlValidatorSource: 'ea30979bfeb5166c2c51b33b0fad28e92ba03f8cebad9b475ca9f8c4654006cc',
@@ -668,11 +675,17 @@ const PRODUCTION_INFRASTRUCTURE_CONTRACT_ARTIFACT_SHA256 = Object.freeze({
   fixedSlotTransitionValidatorSource:
     '4a25cd1d921b24e506515ba875dfa7fb059f00065af18934d4b64a6b90ed49d8',
   authWalletTransitionValidatorSource:
-    '51c07fea3b76bd82619ccd863b39d3a4cc6b57000b8b2e01aa0cd0f2ea196b6f',
+    '1b298aa152d842985244809de81d303aee47f0db26488bafe307b98138dbf4fe',
   redisOperatorTransitionValidatorSource:
-    '41f40f195042707204de5da07d4ef288fe134f3d91303262ed3bf73763d5c56b',
+    '89b6abdaa3ab079ef285236ea4eab1c70ca399e74223173e0b182683c7b79045',
   deploymentTargetValidatorSource:
     '54fb72f7f71d0faf101978d5c54f397dbc403024b25926523bc8bc4b5c1c0dd9',
+  deploymentIntentValidatorSource:
+    '77a2ed1218bb9f814a239524e8daea0d467d8bda92865625482652daf3492035',
+  deploymentEnrollmentValidatorSource:
+    'e7455fb4f63afb93aba9cb56472792d64cbc924f2738f7b27545ff196efac9ec',
+  ed25519PublicKeyValidatorSource:
+    '816b638bf28797a1e999f07aac84e2778605572fdc0fedcf081782890879c185',
 } as const satisfies Readonly<
   Record<keyof ProductionInfrastructureContractArtifactSources, string>
 >);
@@ -872,6 +885,7 @@ const BALANCE_CONSUMER_ARTIFACT_KEYS = Object.freeze([
   'balanceConsumerEnvelopeSource',
   'balanceConsumerEnvelopeValidatorSource',
   'balanceConsumerMetadataTransitionValidatorSource',
+  'ed25519PublicKeyValidatorSource',
   'bootstrapPrincipalsSource',
   'bootstrapPrincipalsValidatorSource',
   'databasePrincipalBoundariesMigrationSource',
@@ -955,7 +969,7 @@ const REVIEWED_BALANCE_CONSUMER_ARTIFACT_SHA256 = Object.freeze({
   sqsModuleSource: 'dc958100bd372500a9428c28cc6219a4cb00db61314a63478368d0b0cf95221b',
   sqsTokensSource: REVIEWED_SQS_TOKENS_SOURCE_SHA256,
   apiPackageSource: 'c911e7171be6ff64908d1c15fc1d240f51ace8e8b90d6bcad4c605c994439774',
-  rootPackageSource: '4fd74323a78fdf2983e1482142de801aefd699bd4062052467733b33f7841f78',
+  rootPackageSource: '9f7583096273eef7a9d1e90ce7914977353d3dfeb610d2514f80b4f53baf39b5',
   rootPackageLockSource: 'ac745baf70f2e70b3ba779612f0a3cc2b10692860a47c54c927a1e4805b2e6a6',
   applicationTemplateSource: '58b040eea3858661d45ab0f1334457c0b937cfb8179bad665aa3bb649171807c',
   applicationValidatorSource: '3da9441a8d3c5de0b47b88fd0c11d489c940234702f768ea9774279f7fab3e00',
@@ -965,7 +979,9 @@ const REVIEWED_BALANCE_CONSUMER_ARTIFACT_SHA256 = Object.freeze({
   balanceConsumerEnvelopeValidatorSource:
     'ecceab597ba2c2930c59f443606249252c4931279ad99e9d29590c4324ab55ce',
   balanceConsumerMetadataTransitionValidatorSource:
-    '79abdc329df3fe3275cf1c4d14a4256a2a334ec78efece9fefb92b9e461755e0',
+    '5c258e0927621a6ae8fd39769eb56149163cb07d60c29987b23023ba31d2d5e9',
+  ed25519PublicKeyValidatorSource:
+    '816b638bf28797a1e999f07aac84e2778605572fdc0fedcf081782890879c185',
   bootstrapPrincipalsSource: 'da3793b00efbfe12baa64446912376a85d2c6d7095f84dfb14c6e173dbefb9ac',
   bootstrapPrincipalsValidatorSource:
     '6731fee433acae8f7c240995c6ffe64247c7f4ef730be2b7367c3fa10ad40681',
@@ -981,7 +997,7 @@ const REVIEWED_BALANCE_CONSUMER_ARTIFACT_SHA256 = Object.freeze({
   mainnetBalanceAgreementEvidenceV2MigrationSource:
     'c9afef59a9101d568597eb37845d6d2a997edf63f1496d3d04296075fcc61fff',
   migrationIndexSource: '58a83e45c98c5e2d99b5fe982aef0770c11e55cc037341c45d1b60cd4d8edd78',
-  releaseManifestSource: '366fcfcdc28a0046284f79e5cfc59b2db3835e70ea57d61d634667f65d6baf94',
+  releaseManifestSource: '58360de320d25008034d273e9bdafadd9722e1b39991ce31b6d548a52946a620',
   productionContainerValidatorSource:
     'a9fbc9e638f4a33266e823ff8c07a9b53703e1bc8f1f4f46eab30c7b50a9b0b0',
 } satisfies Readonly<Record<keyof BalanceConsumerArtifactSources, string>>);
@@ -2284,10 +2300,15 @@ const PRODUCTION_INFRASTRUCTURE_CONTRACT_REQUIRED_LINES = Object.freeze([
   'AuthorityStatus: NOT_APPROVED',
   'DeploymentDestinationRegistryStatus: EMPTY',
   'DeploymentTargetRegistryStatus: EMPTY',
+  'DeploymentIntentAuthorityRegistryStatus: EMPTY',
+  'DeploymentEnrollmentAuthorityRegistryStatus: EMPTY',
   'ExactReleaseBindingRequired: true',
   'IndependentApprovalRequired: true',
   'DeploymentGuard: infra/aws/invoke-application-baseline.ps1',
   'DeploymentTargetValidator: scripts/production-deployment-target.mjs',
+  'DeploymentIntentValidator: infra/aws/validate-production-deployment-intent.mjs',
+  'DeploymentEnrollmentValidator: scripts/production-deployment-enrollment.mjs',
+  'Ed25519PublicKeyValidator: infra/shared/validate-ed25519-public-key.mjs',
   'Default: DISABLED',
   'AllowedValues: [DISABLED]',
   'Resources: {}',
@@ -2353,7 +2374,20 @@ function hasExactProductionInfrastructureContract(
     sources.deploymentTargetValidatorSource.includes(
       'export const PRODUCTION_DEPLOYMENT_DESTINATION_REGISTRY = Object.freeze({',
     ) &&
-    sources.deploymentTargetValidatorSource.includes('destinations: Object.freeze([]),')
+    sources.deploymentTargetValidatorSource.includes('destinations: Object.freeze([]),') &&
+    sources.deploymentIntentValidatorSource.includes(
+      'export const PRODUCTION_DEPLOYMENT_INTENT_AUTHORITY_KEY_REGISTRY = Object.freeze({',
+    ) &&
+    sources.deploymentIntentValidatorSource.includes('keys: Object.freeze([]),') &&
+    sources.deploymentIntentValidatorSource.includes('validateEd25519PublicKeyBytes(') &&
+    sources.deploymentEnrollmentValidatorSource.includes(
+      'export const PRODUCTION_DEPLOYMENT_TARGET_IDENTITY_ENROLLMENT_AUTHORITY_KEY_REGISTRY =',
+    ) &&
+    sources.deploymentEnrollmentValidatorSource.includes('keys: Object.freeze([]),') &&
+    sources.deploymentEnrollmentValidatorSource.includes('validateEd25519PublicKeyBytes(') &&
+    sources.ed25519PublicKeyValidatorSource.includes(
+      'export function validateEd25519PublicKeyBytes(value)',
+    )
   );
 }
 
@@ -8960,7 +8994,7 @@ const API_RUNTIME_PINNED_INPUT_PATHS = Object.freeze([
   'tsconfig.json',
 ]);
 const REVIEWED_API_RUNTIME_REPOSITORY_SNAPSHOT_SHA256 =
-  'a1479da28d229c2add6e07a9f4de88d74c6fceeac99e108bf558e47326ffe4c4';
+  'fb14a434a4feb6d71ff4853b7038556059768ab2d8a93f2f85428e885ec1cbc7';
 const API_RUNTIME_OWNED_DEPLOYMENT_IDENTITY_PATHS = new Set([
   'blockchain-sync/infrastructure/rpc/ethereum-mainnet-balance-deployment-identity.verifier.ts',
   'blockchain-sync/infrastructure/rpc/ethereum-mainnet-balance-deployment.manifest.ts',
@@ -10816,6 +10850,7 @@ function hasExactBalanceDeploymentIdentityBindingContract(
     sources.balanceConsumerEnvelopeSource,
     sources.balanceConsumerEnvelopeValidatorSource,
     sources.balanceConsumerMetadataTransitionValidatorSource,
+    sources.ed25519PublicKeyValidatorSource,
     sources.releaseManifestSource,
     sources.apiPackageSource,
     sources.rootPackageSource,
@@ -11026,6 +11061,7 @@ function hasDormantMainnetBalanceDeploymentIdentityArtifactContract(
     sources.balanceConsumerEnvelopeSource,
     sources.balanceConsumerEnvelopeValidatorSource,
     sources.balanceConsumerMetadataTransitionValidatorSource,
+    sources.ed25519PublicKeyValidatorSource,
     sources.releaseManifestSource,
     sources.apiPackageSource,
     sources.rootPackageSource,
@@ -14712,6 +14748,13 @@ function hasExactBalanceConsumerMetadataTransitionValidatorContract(
       validator,
       `const ENVIRONMENT_PATTERN = ${PRODUCTION_AWARE_ENVIRONMENT_PATTERN_SOURCE};`,
     ) === 1 &&
+    exactExecutableLineCount(
+      validator,
+      "import { validateEd25519PublicKeyBytes } from '../shared/validate-ed25519-public-key.mjs';",
+    ) === 1 &&
+    sources.ed25519PublicKeyValidatorSource.includes(
+      'export function validateEd25519PublicKeyBytes(value)',
+    ) &&
     exactExecutableLineCount(validator, "'BALANCE_CONSUMER_WALLET_METADATA_KEY_RING_JSON';") ===
       1 &&
     registry.join('\n') ===
@@ -16428,6 +16471,10 @@ export function loadRepositoryProductionPreflightInput(
           repositoryRoot,
           'infra/aws/validate-balance-consumer-metadata-secret-version-transition.mjs',
         ),
+        'utf8',
+      ),
+      ed25519PublicKeyValidatorSource: readFileSync(
+        resolve(repositoryRoot, 'infra/shared/validate-ed25519-public-key.mjs'),
         'utf8',
       ),
       bootstrapPrincipalsSource: readFileSync(
