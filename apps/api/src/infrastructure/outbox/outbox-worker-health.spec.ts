@@ -12,6 +12,10 @@ function healthService(result: OutboxWorkerHealth): Pick<OutboxWorkerHealthServi
 }
 
 describe('OutboxWorkerHealthService', () => {
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
   it('checks only PostgreSQL, migrations, and SQS', async () => {
     const postgres = { healthCheck: jest.fn().mockResolvedValue(undefined) };
     const migrations = { assertUpToDate: jest.fn().mockResolvedValue(undefined) };
@@ -29,6 +33,56 @@ describe('OutboxWorkerHealthService', () => {
     expect(postgres.healthCheck).toHaveBeenCalledTimes(1);
     expect(migrations.assertUpToDate).toHaveBeenCalledTimes(1);
     expect(sqs.healthCheck).toHaveBeenCalledTimes(1);
+    const postgresSignal = postgres.healthCheck.mock.calls[0]?.[0] as AbortSignal | undefined;
+    const migrationSignal = migrations.assertUpToDate.mock.calls[0]?.[0] as
+      | AbortSignal
+      | undefined;
+    expect(postgresSignal).toBeInstanceOf(AbortSignal);
+    expect(migrationSignal).toBe(postgresSignal);
+    expect(postgresSignal?.aborted).toBe(false);
+  });
+
+  it('aborts a timed-out PostgreSQL step and never starts migration readiness after drain', async () => {
+    jest.useFakeTimers();
+    let finishDrain: (() => void) | undefined;
+    const drain = new Promise<void>((resolve) => {
+      finishDrain = resolve;
+    });
+    let postgresSignal: AbortSignal | undefined;
+    const postgres = {
+      healthCheck: jest.fn((signal?: AbortSignal) => {
+        postgresSignal = signal;
+        return new Promise<void>((_resolve, reject) => {
+          signal?.addEventListener(
+            'abort',
+            () => {
+              void drain.then(() => reject(new Error('PostgreSQL health query aborted')));
+            },
+            { once: true },
+          );
+        });
+      }),
+    };
+    const migrations = { assertUpToDate: jest.fn().mockResolvedValue(undefined) };
+    const health = new OutboxWorkerHealthService(
+      postgres as unknown as PostgresService,
+      migrations as unknown as MigrationRunner,
+      { healthCheck: jest.fn().mockResolvedValue(undefined) },
+    );
+
+    const pending = health.check(25);
+    await jest.advanceTimersByTimeAsync(25);
+    await expect(pending).resolves.toEqual({
+      status: 'degraded',
+      checks: { postgres: { status: 'down' }, sqs: { status: 'up' } },
+    });
+    expect(postgresSignal?.aborted).toBe(true);
+    expect(migrations.assertUpToDate).not.toHaveBeenCalled();
+
+    finishDrain?.();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(migrations.assertUpToDate).not.toHaveBeenCalled();
   });
 
   it('reports dependency names without exposing raw failures', async () => {

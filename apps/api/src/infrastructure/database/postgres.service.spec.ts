@@ -47,11 +47,13 @@ function poolFixture(connect: jest.Mock): Readonly<{
   pool: Pool;
   events: EventEmitter;
   end: jest.Mock;
+  query: jest.Mock;
 }> {
   const events = new EventEmitter();
   const end = jest.fn().mockResolvedValue(undefined);
-  Object.assign(events, { connect, end, query: jest.fn() });
-  return Object.freeze({ pool: events as unknown as Pool, events, end });
+  const query = jest.fn().mockResolvedValue(queryResult());
+  Object.assign(events, { connect, end, query });
+  return Object.freeze({ pool: events as unknown as Pool, events, end, query });
 }
 
 async function flushMicrotasks(): Promise<void> {
@@ -75,6 +77,52 @@ async function rejection(operation: Promise<unknown>): Promise<Error & { readonl
 describe('PostgresService cancellable queries', () => {
   afterEach(() => {
     jest.useRealTimers();
+  });
+
+  it('preserves the direct pooled health query when no signal is supplied', async () => {
+    const connect = jest.fn();
+    const testPool = poolFixture(connect);
+    const service = new PostgresService(testPool.pool);
+
+    await expect(service.healthCheck()).resolves.toBeUndefined();
+
+    expect(testPool.query).toHaveBeenCalledWith('SELECT 1 AS healthy');
+    expect(connect).not.toHaveBeenCalled();
+  });
+
+  it('cancels signaled health SQL and settles only after wire and client removal drain', async () => {
+    const wireQuery = deferred<QueryResult>();
+    const testClient = clientFixture();
+    testClient.query.mockReturnValue(wireQuery.promise);
+    const testPool = poolFixture(jest.fn().mockResolvedValue(testClient.client));
+    const service = new PostgresService(testPool.pool);
+    const controller = new AbortController();
+    const operation = service.healthCheck(controller.signal);
+    await flushMicrotasks();
+
+    expect(testClient.query).toHaveBeenCalledWith('SELECT 1 AS healthy', undefined);
+    expect(testPool.query).not.toHaveBeenCalled();
+    controller.abort();
+    await flushMicrotasks();
+    expect(testClient.release).toHaveBeenCalledTimes(1);
+
+    let settled = false;
+    void operation.then(
+      () => {
+        settled = true;
+      },
+      () => {
+        settled = true;
+      },
+    );
+    wireQuery.reject(new Error('wire terminated'));
+    await flushMicrotasks();
+    expect(settled).toBe(false);
+
+    testPool.events.emit('remove', testClient.client);
+    await expect(operation).rejects.toMatchObject({
+      code: 'POSTGRES_CANCELLABLE_QUERY_ABORTED',
+    });
   });
 
   it('rejects a pre-abort before acquisition and never issues SQL', async () => {

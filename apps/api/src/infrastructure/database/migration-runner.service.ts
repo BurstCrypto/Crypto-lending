@@ -1,9 +1,10 @@
 import { createHash } from 'node:crypto';
 
-import { Inject, Injectable } from '@nestjs/common';
-import type { Pool, PoolClient, QueryResult } from 'pg';
+import { Inject, Injectable, Optional } from '@nestjs/common';
+import type { Pool, PoolClient, QueryConfig, QueryResult, QueryResultRow } from 'pg';
 
 import type { DatabaseMigration } from './migrations';
+import { PostgresService } from './postgres.service';
 import { DATABASE_MIGRATIONS, POSTGRES_POOL } from './postgres.tokens';
 
 const MIGRATION_LOCK_KEY = 1_923_307_433;
@@ -36,6 +37,16 @@ interface AdvisoryLockAttempt {
 interface AdvisoryLockRelease {
   released: boolean;
 }
+
+interface MigrationQueryExecutor {
+  query<Row extends QueryResultRow = QueryResultRow>(
+    queryTextOrConfig: string | QueryConfig,
+    values?: unknown[],
+  ): Promise<QueryResult<Row>>;
+}
+
+const CANCELLABLE_MIGRATION_READINESS_UNAVAILABLE =
+  'Cancellable database migration readiness is unavailable';
 
 function checksum(migration: DatabaseMigration): string {
   const checksumSql = (sql: string | readonly string[]): string =>
@@ -84,6 +95,7 @@ export class MigrationRunner {
   constructor(
     @Inject(POSTGRES_POOL) private readonly pool: Pool,
     @Inject(DATABASE_MIGRATIONS) migrations: readonly DatabaseMigration[],
+    @Optional() private readonly postgres?: PostgresService,
   ) {
     this.migrations = Object.freeze(migrations.map(snapshotMigration));
     const identifiers = new Set<string>();
@@ -260,39 +272,59 @@ export class MigrationRunner {
   }
 
   /** Read-only readiness check; migrations remain an explicit deployment step. */
-  async assertUpToDate(): Promise<void> {
+  async assertUpToDate(signal?: AbortSignal): Promise<void> {
+    if (signal !== undefined) {
+      const postgres = this.postgres;
+      if (postgres === undefined) {
+        throw new Error(CANCELLABLE_MIGRATION_READINESS_UNAVAILABLE);
+      }
+      const executor: MigrationQueryExecutor = {
+        query: <Row extends QueryResultRow = QueryResultRow>(
+          queryTextOrConfig: string | QueryConfig,
+          values?: unknown[],
+        ): Promise<QueryResult<Row>> =>
+          postgres.queryWithCancellation<Row>(queryTextOrConfig, values, signal),
+      };
+      await this.assertUpToDateWithExecutor(executor);
+      return;
+    }
+
     const client = await this.pool.connect();
     try {
-      const table = await client.query<MigrationTableLookup>(
-        "SELECT to_regclass('schema_migrations')::text AS table_name",
-      );
-      if (!table.rows[0]?.table_name) {
-        throw new Error('Database migrations have not been initialized');
-      }
-
-      const appliedById = new Map(
-        (await this.appliedMigrations(client)).map((migration) => [
-          migration.id,
-          migration.checksum,
-        ]),
-      );
-      for (const migration of this.migrations) {
-        const appliedChecksum = appliedById.get(migration.id);
-        if (!appliedChecksum) {
-          throw new Error(`Database migration ${migration.id} has not been applied`);
-        }
-        if (appliedChecksum !== this.expectedChecksum(migration.id)) {
-          throw new Error(`Database migration ${migration.id} checksum does not match`);
-        }
-      }
-      const supersededVerificationIds = this.supersededVerificationIds(appliedById);
-      for (const migration of this.migrations) {
-        if (!supersededVerificationIds.has(migration.id)) {
-          await this.assertMigrationVerified(client, migration);
-        }
-      }
+      await this.assertUpToDateWithExecutor(client);
     } finally {
       client.release();
+    }
+  }
+
+  private async assertUpToDateWithExecutor(executor: MigrationQueryExecutor): Promise<void> {
+    const table = await executor.query<MigrationTableLookup>(
+      "SELECT to_regclass('schema_migrations')::text AS table_name",
+    );
+    if (!table.rows[0]?.table_name) {
+      throw new Error('Database migrations have not been initialized');
+    }
+
+    const appliedById = new Map(
+      (await this.appliedMigrations(executor)).map((migration) => [
+        migration.id,
+        migration.checksum,
+      ]),
+    );
+    for (const migration of this.migrations) {
+      const appliedChecksum = appliedById.get(migration.id);
+      if (!appliedChecksum) {
+        throw new Error(`Database migration ${migration.id} has not been applied`);
+      }
+      if (appliedChecksum !== this.expectedChecksum(migration.id)) {
+        throw new Error(`Database migration ${migration.id} checksum does not match`);
+      }
+    }
+    const supersededVerificationIds = this.supersededVerificationIds(appliedById);
+    for (const migration of this.migrations) {
+      if (!supersededVerificationIds.has(migration.id)) {
+        await this.assertMigrationVerified(executor, migration);
+      }
     }
   }
 
@@ -380,7 +412,7 @@ export class MigrationRunner {
   }
 
   private async appliedMigrations(
-    client: PoolClient,
+    client: MigrationQueryExecutor,
     descending = false,
   ): Promise<AppliedMigration[]> {
     const direction = descending ? 'DESC' : 'ASC';
@@ -421,7 +453,7 @@ export class MigrationRunner {
   }
 
   private async assertMigrationVerified(
-    client: PoolClient,
+    client: MigrationQueryExecutor,
     migration: DatabaseMigration,
   ): Promise<void> {
     if (!migration.verifySql) {

@@ -1,7 +1,8 @@
-import type { Pool, PoolClient, QueryResult, QueryResultRow } from 'pg';
+import type { Pool, PoolClient, QueryConfig, QueryResult, QueryResultRow } from 'pg';
 
 import { MigrationRunner } from '../../src/infrastructure/database/migration-runner.service';
 import { DATABASE_MIGRATION_LIST } from '../../src/infrastructure/database/migrations';
+import type { PostgresService } from '../../src/infrastructure/database/postgres.service';
 
 const REVERSIBLE_DATABASE_MIGRATION_LIST = DATABASE_MIGRATION_LIST.filter(({ id }) => id <= '0025');
 
@@ -18,6 +19,12 @@ function result<Row extends QueryResultRow>(rows: Row[] = []): QueryResult<Row> 
     fields: [],
     rows,
   };
+}
+
+function cancelledQueryError(): Error & { readonly code: string } {
+  return Object.assign(new Error('POSTGRES_CANCELLABLE_QUERY_ABORTED'), {
+    code: 'POSTGRES_CANCELLABLE_QUERY_ABORTED',
+  });
 }
 
 class InMemoryMigrationDatabase {
@@ -509,6 +516,97 @@ class InMemoryMigrationDatabase {
 }
 
 describe('MigrationRunner', () => {
+  it('fails closed before pool acquisition when signaled readiness lacks cancellation support', async () => {
+    const database = new InMemoryMigrationDatabase();
+    const connect = jest.spyOn(database.pool, 'connect');
+    const runner = new MigrationRunner(database.pool, []);
+
+    await expect(runner.assertUpToDate(new AbortController().signal)).rejects.toThrow(
+      'Cancellable database migration readiness is unavailable',
+    );
+    expect(connect).not.toHaveBeenCalled();
+  });
+
+  it('rejects pre-aborted readiness through the cancellable executor without issuing SQL', async () => {
+    const database = new InMemoryMigrationDatabase();
+    const issuedSql: string[] = [];
+    const queryWithCancellation = jest.fn(
+      async (
+        queryTextOrConfig: string | QueryConfig,
+        values: unknown[] | undefined,
+        signal: AbortSignal,
+      ): Promise<QueryResult> => {
+        if (signal.aborted) throw cancelledQueryError();
+        const queryText =
+          typeof queryTextOrConfig === 'string' ? queryTextOrConfig : queryTextOrConfig.text;
+        issuedSql.push(queryText);
+        return database.client.query(queryText, values);
+      },
+    );
+    const runner = new MigrationRunner(database.pool, [], {
+      queryWithCancellation,
+    } as unknown as PostgresService);
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(runner.assertUpToDate(controller.signal)).rejects.toMatchObject({
+      code: 'POSTGRES_CANCELLABLE_QUERY_ABORTED',
+    });
+    expect(queryWithCancellation).toHaveBeenCalledWith(
+      "SELECT to_regclass('schema_migrations')::text AS table_name",
+      undefined,
+      controller.signal,
+    );
+    expect(issuedSql).toEqual([]);
+  });
+
+  it('stops signaled readiness before later verifier SQL when aborted between queries', async () => {
+    const database = new InMemoryMigrationDatabase();
+    const migrations = [
+      {
+        id: '1000',
+        description: 'abortable readiness fixture',
+        upSql: 'SELECT 1000',
+        downSql: 'SELECT -1000',
+        verifySql: "SELECT 'old-verifier' AS verifier",
+      },
+    ] as const;
+    await new MigrationRunner(database.pool, migrations).up();
+    const issuedSql: string[] = [];
+    const controller = new AbortController();
+    const queryWithCancellation = jest.fn(
+      async (
+        queryTextOrConfig: string | QueryConfig,
+        values: unknown[] | undefined,
+        signal: AbortSignal,
+      ): Promise<QueryResult> => {
+        if (signal.aborted) throw cancelledQueryError();
+        const queryText =
+          typeof queryTextOrConfig === 'string' ? queryTextOrConfig : queryTextOrConfig.text;
+        const normalized = queryText.replace(/\s+/g, ' ').trim();
+        issuedSql.push(normalized);
+        const queryResult = await database.client.query(queryText, values);
+        if (normalized.startsWith('SELECT id, checksum')) controller.abort();
+        return queryResult;
+      },
+    );
+    const runner = new MigrationRunner(database.pool, migrations, {
+      queryWithCancellation,
+    } as unknown as PostgresService);
+
+    await expect(runner.assertUpToDate(controller.signal)).rejects.toMatchObject({
+      code: 'POSTGRES_CANCELLABLE_QUERY_ABORTED',
+    });
+    expect(issuedSql).toEqual([
+      "SELECT to_regclass('schema_migrations')::text AS table_name",
+      'SELECT id, checksum FROM schema_migrations ORDER BY id ASC',
+    ]);
+    expect(queryWithCancellation).toHaveBeenCalledTimes(3);
+    expect(
+      queryWithCancellation.mock.calls.every(([, , signal]) => signal === controller.signal),
+    ).toBe(true);
+  });
+
   it('retries the global session lock without holding a blocking probe transaction open', async () => {
     const database = new InMemoryMigrationDatabase();
     database.advisoryLockFailuresRemaining = 1;

@@ -108,9 +108,9 @@ export class InfrastructureHealthService {
     const [postgres, redis, sqs] = await Promise.all([
       this.checkDependency(
         'postgres',
-        async () => {
-          await this.postgres.healthCheck();
-          await this.migrations.assertUpToDate();
+        async (signal) => {
+          await this.postgres.healthCheck(signal);
+          await this.migrations.assertUpToDate(signal);
         },
         timeoutMs,
       ),

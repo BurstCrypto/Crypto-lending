@@ -288,8 +288,12 @@ export class PostgresService implements OnApplicationShutdown {
     }
   }
 
-  async healthCheck(): Promise<void> {
-    await this.pool.query('SELECT 1 AS healthy');
+  async healthCheck(signal?: AbortSignal): Promise<void> {
+    if (signal === undefined) {
+      await this.pool.query('SELECT 1 AS healthy');
+      return;
+    }
+    await this.queryWithCancellation('SELECT 1 AS healthy', undefined, signal);
   }
 
   async onApplicationShutdown(): Promise<void> {

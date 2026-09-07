@@ -36,6 +36,15 @@ describe('InfrastructureHealthService', () => {
         sqs: { status: 'up' },
       },
     });
+    const postgresSignal = (postgres.healthCheck as jest.Mock).mock.calls[0]?.[0] as
+      | AbortSignal
+      | undefined;
+    const migrationSignal = (migrations.assertUpToDate as jest.Mock).mock.calls[0]?.[0] as
+      | AbortSignal
+      | undefined;
+    expect(postgresSignal).toBeInstanceOf(AbortSignal);
+    expect(migrationSignal).toBe(postgresSignal);
+    expect(postgresSignal?.aborted).toBe(false);
   });
 
   it('reports degraded without hiding which dependency failed', async () => {
@@ -325,7 +334,84 @@ describe('InfrastructureHealthService', () => {
       },
     });
     const sqsSignal = (sqs.healthCheck as jest.Mock).mock.calls[0]?.[0] as AbortSignal | undefined;
+    const postgresSignal = (postgres.healthCheck as jest.Mock).mock.calls[0]?.[0] as
+      | AbortSignal
+      | undefined;
     expect(sqsSignal?.aborted).toBe(true);
+    expect(postgresSignal?.aborted).toBe(true);
+    expect(migrations.assertUpToDate).not.toHaveBeenCalled();
+  });
+
+  it('retries timed-out PostgreSQL work only after its aborted operation drains', async () => {
+    jest.useFakeTimers();
+    let monotonicNow = 0;
+    let finishDrain: (() => void) | undefined;
+    const drain = new Promise<void>((resolve) => {
+      finishDrain = resolve;
+    });
+    let postgresAttempts = 0;
+    let firstSignal: AbortSignal | undefined;
+    const postgres = {
+      healthCheck: jest.fn((signal?: AbortSignal): Promise<void> => {
+        postgresAttempts += 1;
+        if (postgresAttempts > 1) return Promise.resolve();
+        firstSignal = signal;
+        return new Promise<void>((_resolve, reject) => {
+          signal?.addEventListener(
+            'abort',
+            () => {
+              void drain.then(() => reject(new Error('PostgreSQL health query aborted')));
+            },
+            { once: true },
+          );
+        });
+      }),
+    } as unknown as PostgresService;
+    const migrations = {
+      assertUpToDate: jest.fn().mockResolvedValue(undefined),
+    } as unknown as MigrationRunner;
+    const redis = {
+      healthCheck: jest.fn().mockResolvedValue(undefined),
+    } as unknown as RedisService;
+    const sqs = {
+      healthCheck: jest.fn().mockResolvedValue(undefined),
+    } as unknown as SqsService;
+    const health = new InfrastructureHealthService(postgres, migrations, redis, sqs, {
+      nowMilliseconds: () => monotonicNow,
+    });
+
+    const first = health.check(25);
+    await jest.advanceTimersByTimeAsync(25);
+    await expect(first).resolves.toMatchObject({
+      status: 'degraded',
+      checks: { postgres: { status: 'down' } },
+    });
+    expect(firstSignal?.aborted).toBe(true);
+    expect(migrations.assertUpToDate).not.toHaveBeenCalled();
+
+    monotonicNow = 5_001;
+    const whileDraining = health.check(25);
+    expect(postgres.healthCheck).toHaveBeenCalledTimes(1);
+    await jest.advanceTimersByTimeAsync(25);
+    await expect(whileDraining).resolves.toMatchObject({ status: 'degraded' });
+
+    finishDrain?.();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(migrations.assertUpToDate).not.toHaveBeenCalled();
+
+    monotonicNow = 10_002;
+    await expect(health.check(25)).resolves.toMatchObject({ status: 'ok' });
+    expect(postgres.healthCheck).toHaveBeenCalledTimes(2);
+    expect(migrations.assertUpToDate).toHaveBeenCalledTimes(1);
+    const retriedPostgresSignal = (postgres.healthCheck as jest.Mock).mock.calls[1]?.[0] as
+      | AbortSignal
+      | undefined;
+    const retriedMigrationSignal = (migrations.assertUpToDate as jest.Mock).mock.calls[0]?.[0] as
+      | AbortSignal
+      | undefined;
+    expect(retriedMigrationSignal).toBe(retriedPostgresSignal);
   });
 
   it('does not overlap dependency work that outlives its readiness timeout', async () => {

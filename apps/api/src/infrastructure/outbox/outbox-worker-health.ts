@@ -21,9 +21,9 @@ export class OutboxWorkerHealthService {
 
   async check(timeoutMs = 3_000): Promise<OutboxWorkerHealth> {
     const [postgres, sqs] = await Promise.all([
-      this.checkDependency(async () => {
-        await this.postgres.healthCheck();
-        await this.migrations.assertUpToDate();
+      this.checkDependency(async (signal) => {
+        await this.postgres.healthCheck(signal);
+        await this.migrations.assertUpToDate(signal);
       }, timeoutMs),
       this.checkDependency((signal) => this.sqs.healthCheck(signal), timeoutMs),
     ]);
