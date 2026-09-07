@@ -1,6 +1,6 @@
-import { Inject, Injectable, Module } from '@nestjs/common';
+import { Inject, Injectable, Module, type INestApplication } from '@nestjs/common';
 import { MODULE_METADATA } from '@nestjs/common/constants';
-import { Test } from '@nestjs/testing';
+import { Test, type TestingModule } from '@nestjs/testing';
 
 import { AccountsModule } from '../accounts/accounts.module';
 import { AccountAuthGuard } from '../accounts/auth/account-auth.guard';
@@ -87,17 +87,6 @@ describe('MainnetPlatformsModule', () => {
   });
 
   it('exports one inert reader singleton to a consumer and lets Nest shut its owner down once', async () => {
-    const moduleRef = await Test.createTestingModule({
-      imports: [ProviderPositionReaderConsumerModule],
-    })
-      .overrideModule(AccountsModule)
-      .useModule(InertAccountsModule)
-      .overrideModule(AuthenticationModule)
-      .useModule(InertAuthenticationModule)
-      .overrideGuard(AccountAuthGuard)
-      .useValue(INERT_ACCOUNT_GUARD)
-      .compile();
-    const app = moduleRef.createNestApplication();
     const shutdown = jest.spyOn(
       ProviderPositionReadRuntimeRegistration.prototype,
       'onApplicationShutdown',
@@ -107,15 +96,23 @@ describe('MainnetPlatformsModule', () => {
     const scheduleImmediate = jest.spyOn(globalThis, 'setImmediate');
     const scheduleMicrotask = jest.spyOn(globalThis, 'queueMicrotask');
     const networkFetch = jest.spyOn(globalThis, 'fetch');
+    let moduleRef: TestingModule | undefined;
+    let app: INestApplication | undefined;
     let closed = false;
 
     try {
+      moduleRef = await Test.createTestingModule({
+        imports: [ProviderPositionReaderConsumerModule],
+      })
+        .overrideModule(AccountsModule)
+        .useModule(InertAccountsModule)
+        .overrideModule(AuthenticationModule)
+        .useModule(InertAuthenticationModule)
+        .overrideGuard(AccountAuthGuard)
+        .useValue(INERT_ACCOUNT_GUARD)
+        .compile();
+      app = moduleRef.createNestApplication();
       await app.init();
-      scheduleTimeout.mockClear();
-      scheduleInterval.mockClear();
-      scheduleImmediate.mockClear();
-      scheduleMicrotask.mockClear();
-      networkFetch.mockClear();
 
       const consumer = app.get(ProviderPositionReaderConsumer);
       const reader = app.get<MainnetProviderPositionReaderV3>(MAINNET_PROVIDER_POSITION_READER);
@@ -145,13 +142,14 @@ describe('MainnetPlatformsModule', () => {
       expect(scheduleMicrotask).not.toHaveBeenCalled();
       expect(networkFetch).not.toHaveBeenCalled();
     } finally {
-      if (!closed) await app.close();
-      shutdown.mockRestore();
-      scheduleTimeout.mockRestore();
-      scheduleInterval.mockRestore();
-      scheduleImmediate.mockRestore();
-      scheduleMicrotask.mockRestore();
-      networkFetch.mockRestore();
+      try {
+        if (!closed) {
+          if (app !== undefined) await app.close();
+          else if (moduleRef !== undefined) await moduleRef.close();
+        }
+      } finally {
+        jest.restoreAllMocks();
+      }
     }
   });
 });

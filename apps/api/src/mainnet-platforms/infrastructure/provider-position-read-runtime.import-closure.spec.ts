@@ -26,51 +26,31 @@ const EXPECTED_RUNTIME_CLOSURE = Object.freeze([
   'wallets/domain/wallet-registration-launch-policy.ts',
 ] as const);
 const EXPECTED_EXTERNAL_RUNTIME_IMPORTS = Object.freeze(['@nestjs/common', 'node:crypto']);
-const FORBIDDEN_AMBIENT_CALLS = new Set([
-  'Bun.connect',
-  'Bun.file',
-  'Bun.serve',
-  'Bun.spawn',
-  'Bun.write',
-  'Deno.connect',
-  'Deno.createHttpClient',
-  'Deno.listen',
-  'Deno.open',
-  'Deno.openKv',
-  'Deno.serve',
-  'Deno.writeFile',
-  'Deno.writeTextFile',
-  'eval',
-  'fetch',
-  'Function',
-  'globalThis.eval',
-  'globalThis.fetch',
-  'globalThis.Function',
-  'globalThis.queueMicrotask',
-  'globalThis.setImmediate',
-  'globalThis.setInterval',
-  'globalThis.setTimeout',
-  'module.require',
-  'navigator.sendBeacon',
-  'process.getBuiltinModule',
-  'queueMicrotask',
-  'require',
-  'setImmediate',
-  'setInterval',
-  'setTimeout',
-]);
-const FORBIDDEN_AMBIENT_CONSTRUCTORS = new Set([
+const FORBIDDEN_AMBIENT_VALUE_REFERENCES = new Set([
+  'BroadcastChannel',
+  'Bun',
+  'Deno',
   'EventSource',
   'Function',
+  'SharedWorker',
   'WebSocket',
   'WebTransport',
   'Worker',
-  'globalThis.EventSource',
-  'globalThis.WebSocket',
-  'globalThis.WebTransport',
-  'globalThis.Worker',
-  'globalThis.XMLHttpRequest',
   'XMLHttpRequest',
+  'eval',
+  'fetch',
+  'global',
+  'globalThis',
+  'module',
+  'navigator',
+  'process',
+  'queueMicrotask',
+  'require',
+  'self',
+  'setImmediate',
+  'setInterval',
+  'setTimeout',
+  'window',
 ]);
 
 interface ClosureAudit {
@@ -87,23 +67,6 @@ interface RuntimeDependency {
 
 function portableRelative(filePath: string): string {
   return relative(API_SOURCE_ROOT, filePath).split(sep).join('/');
-}
-
-function expressionPath(expression: ts.Expression): string | null {
-  if (ts.isIdentifier(expression)) return expression.text;
-  if (ts.isPropertyAccessExpression(expression)) {
-    const receiver = expressionPath(expression.expression);
-    return receiver === null ? null : `${receiver}.${expression.name.text}`;
-  }
-  if (
-    ts.isElementAccessExpression(expression) &&
-    expression.argumentExpression !== undefined &&
-    ts.isStringLiteralLike(expression.argumentExpression)
-  ) {
-    const receiver = expressionPath(expression.expression);
-    return receiver === null ? null : `${receiver}.${expression.argumentExpression.text}`;
-  }
-  return null;
 }
 
 function importDeclarationIsRuntime(statement: ts.ImportDeclaration): boolean {
@@ -125,13 +88,40 @@ function exportDeclarationIsRuntime(statement: ts.ExportDeclaration): boolean {
   return statement.exportClause.elements.some((element) => !element.isTypeOnly);
 }
 
-function inspectTypeScriptSource(filePath: string): {
+/**
+ * Property and declaration names do not read an ambient capability. Shorthand
+ * properties are the exception because `{ fetch }` evaluates the identifier.
+ * All other value references to reserved ambient roots are rejected, even
+ * when a local binding shadows the global, so this source-only audit cannot be
+ * bypassed by rebinding a dangerous global before use.
+ */
+function identifierIsValueReference(identifier: ts.Identifier): boolean {
+  const parent = identifier.parent;
+  if (ts.isShorthandPropertyAssignment(parent) && parent.name === identifier) return true;
+  if (ts.isPropertyAccessExpression(parent) && parent.name === identifier) return false;
+  if (ts.isQualifiedName(parent) && parent.right === identifier) return false;
+  if (ts.isBindingElement(parent)) return false;
+  if (ts.isImportSpecifier(parent) || ts.isExportSpecifier(parent)) return false;
+  if (
+    (ts.isLabeledStatement(parent) ||
+      ts.isBreakStatement(parent) ||
+      ts.isContinueStatement(parent)) &&
+    parent.label === identifier
+  ) {
+    return false;
+  }
+  return !('name' in parent && parent.name === identifier);
+}
+
+function inspectTypeScriptText(
+  sourceText: string,
+  sourceName: string,
+): {
   readonly ambientViolations: readonly string[];
   readonly dependencies: readonly RuntimeDependency[];
 } {
-  const sourceText = readFileSync(filePath, 'utf8');
   const sourceFile = ts.createSourceFile(
-    filePath,
+    sourceName,
     sourceText,
     ts.ScriptTarget.ESNext,
     true,
@@ -163,38 +153,33 @@ function inspectTypeScriptSource(filePath: string): {
       });
     }
     if (ts.isImportEqualsDeclaration(statement) && !statement.isTypeOnly) {
-      ambientViolations.push(`${portableRelative(filePath)}: import-equals`);
+      ambientViolations.push(`${sourceName}: import-equals`);
     }
   }
 
   function inspectNode(node: ts.Node): void {
-    if (ts.isCallExpression(node)) {
-      if (node.expression.kind === ts.SyntaxKind.ImportKeyword) {
-        ambientViolations.push(`${portableRelative(filePath)}: dynamic-import`);
-      } else {
-        const callPath = expressionPath(node.expression);
-        if (callPath !== null && FORBIDDEN_AMBIENT_CALLS.has(callPath)) {
-          ambientViolations.push(`${portableRelative(filePath)}: call ${callPath}`);
-        }
-      }
+    if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword) {
+      ambientViolations.push(`${sourceName}: dynamic-import`);
     }
-    if (ts.isNewExpression(node)) {
-      const constructorPath = expressionPath(node.expression);
-      if (constructorPath !== null && FORBIDDEN_AMBIENT_CONSTRUCTORS.has(constructorPath)) {
-        ambientViolations.push(`${portableRelative(filePath)}: construct ${constructorPath}`);
-      }
-    }
-    if (ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)) {
-      const accessPath = expressionPath(node);
-      if (accessPath === 'process.env' || accessPath === 'Deno.env' || accessPath === 'Bun.env') {
-        ambientViolations.push(`${portableRelative(filePath)}: access ${accessPath}`);
-      }
+    if (
+      ts.isIdentifier(node) &&
+      FORBIDDEN_AMBIENT_VALUE_REFERENCES.has(node.text) &&
+      identifierIsValueReference(node)
+    ) {
+      ambientViolations.push(`${sourceName}: reference ${node.text}`);
     }
     ts.forEachChild(node, inspectNode);
   }
 
   inspectNode(sourceFile);
   return { ambientViolations, dependencies };
+}
+
+function inspectTypeScriptSource(filePath: string): {
+  readonly ambientViolations: readonly string[];
+  readonly dependencies: readonly RuntimeDependency[];
+} {
+  return inspectTypeScriptText(readFileSync(filePath, 'utf8'), portableRelative(filePath));
 }
 
 function resolveLocalRuntimeImport(importer: string, specifier: string): string {
@@ -277,5 +262,45 @@ describe('provider-position read runtime import closure', () => {
     expect(audit.externalRuntimeImports).toEqual(EXPECTED_EXTERNAL_RUNTIME_IMPORTS);
     expect(audit.sideEffectImports).toEqual([]);
     expect(audit.ambientViolations).toEqual([]);
+  });
+
+  it('rejects indirect references that can alias ambient I/O and scheduling capabilities', () => {
+    const inspection = inspectTypeScriptText(
+      [
+        'const request = globalThis.fetch;',
+        'const delay = setTimeout;',
+        'const runtime = process;',
+        'const denoRuntime = Deno;',
+        'const bunRuntime = Bun;',
+        'const Socket = WebSocket;',
+        'const beacon = navigator.sendBeacon;',
+      ].join('\n'),
+      'ambient-alias-fixture.ts',
+    );
+
+    expect(inspection.ambientViolations).toEqual([
+      'ambient-alias-fixture.ts: reference globalThis',
+      'ambient-alias-fixture.ts: reference setTimeout',
+      'ambient-alias-fixture.ts: reference process',
+      'ambient-alias-fixture.ts: reference Deno',
+      'ambient-alias-fixture.ts: reference Bun',
+      'ambient-alias-fixture.ts: reference WebSocket',
+      'ambient-alias-fixture.ts: reference navigator',
+    ]);
+  });
+
+  it('does not confuse inert property-name declarations with ambient references', () => {
+    const inspection = inspectTypeScriptText(
+      [
+        'interface CapabilityLabels { readonly fetch: string; readonly process: string }',
+        "const labels = { fetch: 'read', setTimeout: 'deferred', WebSocket: 'socket' };",
+        'class NamesOnly { process(): string { return labels.fetch; } }',
+        'const { fetch: readLabel, WebSocket: socketLabel } = labels;',
+        'void [readLabel, socketLabel, NamesOnly];',
+      ].join('\n'),
+      'property-name-fixture.ts',
+    );
+
+    expect(inspection.ambientViolations).toEqual([]);
   });
 });
