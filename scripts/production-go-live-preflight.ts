@@ -855,7 +855,7 @@ const REVIEWED_BALANCE_CONSUMER_ARTIFACT_SHA256 = Object.freeze({
   migrationIndexSource: 'be2a50819fec7ec86a4eb67867f8a79ee97579b132d6527ab125de34c6946ace',
   releaseManifestSource: '234f2e397055af0884b45a599b7767fe9e24952b7978b769af4a46c73c1653ea',
   productionContainerValidatorSource:
-    '56e219a54c8deeb08b287098915b78ec777303fa2df8bb076e046e26bbf4ce8c',
+    'a9fbc9e638f4a33266e823ff8c07a9b53703e1bc8f1f4f46eab30c7b50a9b0b0',
 } satisfies Readonly<Record<keyof BalanceConsumerArtifactSources, string>>);
 const MAX_BALANCE_CONSUMER_ARTIFACT_BYTES = 256 * 1024;
 const MAX_BALANCE_CONSUMER_PACKAGE_LOCK_BYTES = 768 * 1024;
