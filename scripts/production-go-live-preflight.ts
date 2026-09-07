@@ -229,9 +229,12 @@ export interface BalanceConsumerArtifactSources {
   readonly balanceConsumerMetadataTransitionValidatorSource: string;
   readonly bootstrapPrincipalsSource: string;
   readonly bootstrapPrincipalsValidatorSource: string;
+  readonly databasePrincipalBoundariesMigrationSource: string;
   readonly walletAddressMigrationSource: string;
   readonly workerAuthoritySuspensionMigrationSource: string;
   readonly providerPositionChainAnchorEvidenceMigrationSource: string;
+  readonly mainnetBalanceAgreementEvidenceV1MigrationSource: string;
+  readonly mainnetBalanceAgreementEvidenceV2MigrationSource: string;
   readonly migrationIndexSource: string;
   readonly releaseManifestSource: string;
   readonly productionContainerValidatorSource: string;
@@ -688,7 +691,7 @@ const REVIEWED_PROVIDER_POSITION_READ_ARTIFACT_SHA256 = Object.freeze({
   providerPositionChainAnchorRecordIntentReconciliationLifecycleSource:
     '4b0bd742fe5508c2c18b07c10ae7feb4c5a2d888c1498fde8ee01a784fc040dc',
   providerPositionMigrationIndexSource:
-    'be2a50819fec7ec86a4eb67867f8a79ee97579b132d6527ab125de34c6946ace',
+    '58a83e45c98c5e2d99b5fe982aef0770c11e55cc037341c45d1b60cd4d8edd78',
   providerPositionAdmissionCoordinatorSource:
     'bcd6324695359cd3ef43ac6620da2b756c379c75fe5c0e99897791996b3312eb',
   providerPositionDeadlineRunnerSource:
@@ -790,9 +793,12 @@ const BALANCE_CONSUMER_ARTIFACT_KEYS = Object.freeze([
   'balanceConsumerMetadataTransitionValidatorSource',
   'bootstrapPrincipalsSource',
   'bootstrapPrincipalsValidatorSource',
+  'databasePrincipalBoundariesMigrationSource',
   'walletAddressMigrationSource',
   'workerAuthoritySuspensionMigrationSource',
   'providerPositionChainAnchorEvidenceMigrationSource',
+  'mainnetBalanceAgreementEvidenceV1MigrationSource',
+  'mainnetBalanceAgreementEvidenceV2MigrationSource',
   'migrationIndexSource',
   'releaseManifestSource',
   'productionContainerValidatorSource',
@@ -817,7 +823,7 @@ const REVIEWED_BALANCE_CONSUMER_ARTIFACT_SHA256 = Object.freeze({
     '1565ac2215fd495359ad128c0945ea0b170a1c546ce27469a1c828da24c3d4d2',
   balanceJsonRpcSource: 'f8fdf7f1e292824a8041e37455022103b6e54720dde125bcf6e055285d1bec75',
   nodeHttpsBalanceJsonRpcTransportSource:
-    '78973ab23f864efb045ae5d8b43cc93e0e43a336dedac8e463bd62666e3e6cb0',
+    '429f008baa77c7e6791171d7cfd300e795c093d9c7eebb12d0bdd15e6301741f',
   ethereumBalanceIndexerSource: 'd5fb11f282817206bbdb7e054962f1830f4a0f6122ffa3786094a65e7c4cb353',
   solanaBalanceIndexerSource: '1958e16a9878b0df9328d912a7bc855b102cda643818cb97d52d5ee521387d9e',
   supportedAssetRegistrySource: '025ef9ebffc0a2e676394bca110ee203274e00d0d95b5fb4fe239953d235fc54',
@@ -874,12 +880,18 @@ const REVIEWED_BALANCE_CONSUMER_ARTIFACT_SHA256 = Object.freeze({
   bootstrapPrincipalsSource: 'da3793b00efbfe12baa64446912376a85d2c6d7095f84dfb14c6e173dbefb9ac',
   bootstrapPrincipalsValidatorSource:
     '6731fee433acae8f7c240995c6ffe64247c7f4ef730be2b7367c3fa10ad40681',
+  databasePrincipalBoundariesMigrationSource:
+    'd1f8b0339550e923c806f68646b4b3201f40751df756c2325d60b2e40f33cd30',
   walletAddressMigrationSource: '74e32999fe3ac3b5791365c5a55129296cf68cb5b3d5697f2ffe462012029a84',
   workerAuthoritySuspensionMigrationSource:
     'f61ff9f4ad74e6067203ee1078502955c82af0acde164ff783970e5bc27949b0',
   providerPositionChainAnchorEvidenceMigrationSource:
     '23c8f554ab82675871e84466e8acceb12cc1b465bf09d65f2b84de4951be24f1',
-  migrationIndexSource: 'be2a50819fec7ec86a4eb67867f8a79ee97579b132d6527ab125de34c6946ace',
+  mainnetBalanceAgreementEvidenceV1MigrationSource:
+    '9ff329c1ce601cc2b830036239b2f16f34ebe6163aca57e033714d2e8718010f',
+  mainnetBalanceAgreementEvidenceV2MigrationSource:
+    '5220d3dad09e5ddaf24825f40913482616c81954e919afe3fb421513f7d9b09d',
+  migrationIndexSource: '58a83e45c98c5e2d99b5fe982aef0770c11e55cc037341c45d1b60cd4d8edd78',
   releaseManifestSource: '234f2e397055af0884b45a599b7767fe9e24952b7978b769af4a46c73c1653ea',
   productionContainerValidatorSource:
     'a9fbc9e638f4a33266e823ff8c07a9b53703e1bc8f1f4f46eab30c7b50a9b0b0',
@@ -9634,8 +9646,18 @@ function hasDormantNodeHttpsBalanceRpcTransportContract(
     'const MAX_JSON_DEPTH = 32;',
     'const MAX_JSON_NODES = 200_000;',
     'const MAX_RESPONSE_CHUNKS = 4_096;',
-    "[ETHEREUM_MAINNET]: new Set(['eth_chainId', 'eth_getBlockByNumber', 'eth_getCode', 'eth_call']),",
-    "[SOLANA_MAINNET]: new Set(['getGenesisHash', 'getSlot', 'getBlock', 'getTokenAccountsByOwner']),",
+    '[ETHEREUM_MAINNET]: new Set([',
+    "'eth_chainId',",
+    "'eth_getBlockByNumber',",
+    "'eth_getCode',",
+    "'eth_getStorageAt',",
+    "'eth_call',",
+    '[SOLANA_MAINNET]: new Set([',
+    "'getGenesisHash',",
+    "'getSlot',",
+    "'getBlock',",
+    "'getMultipleAccounts',",
+    "'getTokenAccountsByOwner',",
     'export type NodeHttpsBalanceRpcNetworkId = typeof ETHEREUM_MAINNET | typeof SOLANA_MAINNET;',
     'export type NodeHttpsBalanceRpcCredential =',
     'export interface NodeHttpsBalanceJsonRpcTransportConfig {',
@@ -13027,6 +13049,394 @@ function hasExactBalanceConsumerMetadataTransitionValidatorContract(
   );
 }
 
+function hasDormantMainnetBalanceAgreementEvidenceV2MigrationContract(
+  sources: BalanceConsumerArtifactSources,
+): boolean {
+  const v1Migration = sources.mainnetBalanceAgreementEvidenceV1MigrationSource.replace(
+    /\r\n/gu,
+    '\n',
+  );
+  const migration = sources.mainnetBalanceAgreementEvidenceV2MigrationSource.replace(
+    /\r\n/gu,
+    '\n',
+  );
+  const migrationIndex = sources.migrationIndexSource.replace(/\r\n/gu, '\n');
+  const importSources = Array.from(
+    migration.matchAll(/\bfrom\s+['"]([^'"]+)['"]/gu),
+    (match) => match[1],
+  );
+  const importDeclarationCount = migration.match(/^[\t ]*import\b/gmu)?.length ?? 0;
+  const forbiddenCapability =
+    /(?:\bimport\s*\(|\brequire\s*\(|(?:\bfrom\s+|\bimport\s*(?:\(\s*)?)['"](?:node:)?(?:child_process|cluster|dgram|dns|fs|http|http2|https|net|tls|worker_threads)(?:\/[^'"]*)?['"]|(?:\bfrom\s+|\bimport\s*(?:\(\s*)?)['"](?:axios|ethers|got|superagent|undici|web3|@solana\/web3\.js)['"]|\b(?:fetch|setTimeout|setInterval|setImmediate|queueMicrotask|WebSocket|EventSource|XMLHttpRequest|readFileSync|writeFileSync)\s*\(|\b(?:process|Deno|Bun)\s*\.\s*env\b|\bimport\s*\.\s*meta\s*\.\s*env\b|['"]https?:\/\/|(?:^|\n)[\t ]*@[A-Za-z_$])/iu;
+  const upStart = migration.indexOf(
+    'function createUpSql(names: BalanceConsumerPrincipalNames, parts: V2SqlParts): string {',
+  );
+  const downStart = migration.indexOf(
+    'function createDownSql(names: BalanceConsumerPrincipalNames): string {',
+    upStart,
+  );
+  const verifierStart = migration.indexOf('function createVerifierSql(', downStart);
+  const factoryStart = migration.indexOf(
+    'export function createMainnetBalanceAgreementEvidenceV2Migration(',
+    verifierStart,
+  );
+  if (
+    upStart < 0 ||
+    downStart <= upStart ||
+    verifierStart <= downStart ||
+    factoryStart <= verifierStart
+  ) {
+    return false;
+  }
+  const upSource = migration.slice(upStart, downStart);
+  const downSource = migration.slice(downStart, verifierStart);
+  const verifierSource = migration.slice(verifierStart, factoryStart);
+  const testListStart = migrationIndex.indexOf('export const DATABASE_TEST_SCHEMA_MIGRATION_LIST:');
+  const productionListStart = migrationIndex.indexOf(
+    'export const DATABASE_MIGRATION_LIST:',
+    testListStart,
+  );
+  const exportStart = migrationIndex.indexOf(
+    "export type { DatabaseMigration } from './migration';",
+    productionListStart,
+  );
+  if (
+    testListStart < 0 ||
+    productionListStart <= testListStart ||
+    exportStart <= productionListStart
+  ) {
+    return false;
+  }
+  const testList = migrationIndex.slice(testListStart, productionListStart);
+  const productionList = migrationIndex.slice(productionListStart, exportStart);
+  const migrationModule = './0032-upgrade-mainnet-balance-agreement-evidence-v2.migration';
+  const launchSources = [
+    sources.activationSource,
+    sources.cliSource,
+    sources.cliModeSource,
+    sources.runtimeSource,
+    sources.compositionSource,
+    sources.balanceSyncConsumerServiceSource,
+    sources.balanceConsumerResourceSource,
+    sources.balanceConsumerLifecycleSource,
+    sources.balanceConsumerPersistenceResourceSource,
+    sources.balanceConsumerConfigSource,
+    sources.blockchainSyncIndexSource,
+    sources.blockchainSyncModuleSource,
+    sources.appModuleSource,
+    sources.applicationRootSource,
+    sources.localDevelopmentAppModuleSource,
+    sources.mainSource,
+    sources.outboxWorkerCliSource,
+    sources.redisSessionRevocationCliSource,
+    sources.applicationTemplateSource,
+    sources.workloadTemplateSource,
+    sources.balanceConsumerEnvelopeSource,
+    sources.releaseManifestSource,
+    sources.apiPackageSource,
+    sources.rootPackageSource,
+  ];
+  const agreementPersistenceRuntimeIdentity =
+    /\b(?:mainnet_balance_financial_agreement_envelope(?:_v2)?_valid|record_balance_sync_financial_agreement_evidence(?:_v2)?|createMainnetBalanceAgreementEvidence(?:V2)?Migration)\b/u;
+  const v2JsonStringTypeChecks = Array.from(
+    migration.matchAll(/pg_catalog\.jsonb_typeof\(\s*([a-z_]+) -> '([^']+)'\s*\) <> 'string'/gu),
+    (match) => `${match[1]}.${match[2]}`,
+  );
+  const expectedV2JsonStringTypeChecks = [
+    'requested_envelope.use',
+    'requested_envelope.accountId',
+    'observation.walletId',
+    'observation.networkId',
+    'observation.tier',
+    'source_point.position',
+    'source_point.hash',
+    'source_point.parentHash',
+    'source_point.selector',
+    'source_point.retrievedAt',
+    'source_point.approvedManifestFingerprintSha256',
+    'source_point.observedIdentityFingerprintSha256',
+    'position_entry.amountAtomic',
+    'position_entry.positionId',
+    'position_entry.stablecoin',
+    'position_entry.assetIdentity',
+    'agreement.status',
+    'agreement.sourcePairRegistryFingerprintSha256',
+    'agreement.sourcePairApprovalExpiresAt',
+    'agreement.positionSetFingerprintSha256',
+    'agreement.agreementFingerprintSha256',
+    'agreement.approvedManifestFingerprintSha256',
+    'agreement.observedIdentityFingerprintSha256',
+    'checkpoint.kind',
+    'checkpoint.blockNumber',
+    'checkpoint.blockHash',
+    'checkpoint.parentBlockHash',
+    'checkpoint.finalizedSlot',
+    'checkpoint.blockIdentity',
+    'checkpoint.parentBlockIdentity',
+    'checkpoint.rootSlot',
+    'checkpoint.rootDerivation',
+    'primary_attestation.role',
+    'primary_attestation.sourceFamilyId',
+    'primary_attestation.sourceId',
+    'primary_attestation.networkId',
+    'primary_attestation.retrievedAt',
+    'primary_attestation.positionSetFingerprintSha256',
+    'primary_attestation.candidateFingerprintSha256',
+    'primary_attestation.approvedManifestFingerprintSha256',
+    'primary_attestation.observedIdentityFingerprintSha256',
+    'corroborating_attestation.role',
+    'corroborating_attestation.sourceFamilyId',
+    'corroborating_attestation.sourceId',
+    'corroborating_attestation.networkId',
+    'corroborating_attestation.retrievedAt',
+    'corroborating_attestation.positionSetFingerprintSha256',
+    'corroborating_attestation.candidateFingerprintSha256',
+    'corroborating_attestation.approvedManifestFingerprintSha256',
+    'corroborating_attestation.observedIdentityFingerprintSha256',
+  ] as const;
+
+  return (
+    exactExecutableLineCount(v1Migration, "id: '0027',") === 1 &&
+    v1Migration.includes('export function createMainnetBalanceAgreementEvidenceMigration(') &&
+    v1Migration.includes("'crypto-lending:balance-position:v1' || pg_catalog.chr(0)") &&
+    v1Migration.includes('|| account_id || pg_catalog.chr(0) || wallet_id || pg_catalog.chr(0)') &&
+    v1Migration.includes('|| network_id || pg_catalog.chr(0) || expected_asset,') &&
+    importDeclarationCount === 5 &&
+    importSources.length === 5 &&
+    importSources[0] === 'node:crypto' &&
+    importSources[1] === './0027-create-mainnet-balance-agreement-evidence.migration' &&
+    importSources[2] === './0028-suspend-generic-worker-balance-authority.migration' &&
+    importSources[3] === './0031-create-provider-position-chain-anchor-record-intents.migration' &&
+    importSources[4] === './migration' &&
+    exactExecutableLineCount(migration, 'function replaceExactly(') === 1 &&
+    exactExecutableLineCount(migration, 'const parts = source.split(target);') === 1 &&
+    migration.includes('if (parts.length - 1 !== expectedCount) {') &&
+    exactExecutableLineCount(migration, 'return parts.join(replacement);') === 1 &&
+    migration.split('function betweenExactly(').length - 1 === 1 &&
+    migration.includes('Migration 0032 predecessor boundaries must occur exactly once') &&
+    exactExecutableLineCount(
+      migration,
+      'const v1 = createMainnetBalanceAgreementEvidenceMigration(names);',
+    ) === 1 &&
+    migration.match(/validateEnvelopeBody = replaceExactly\(/gu)?.length === 20 &&
+    v2JsonStringTypeChecks.length === 52 &&
+    new Set(v2JsonStringTypeChecks).size === expectedV2JsonStringTypeChecks.length &&
+    expectedV2JsonStringTypeChecks.every((check) => v2JsonStringTypeChecks.includes(check)) &&
+    v2JsonStringTypeChecks.filter((check) => check === 'position_entry.amountAtomic').length ===
+      2 &&
+    v2JsonStringTypeChecks.filter((check) => check === 'checkpoint.kind').length === 2 &&
+    exactExecutableLineCount(
+      v1Migration,
+      "OR pg_catalog.jsonb_typeof(position_entry -> 'amountAtomic') <> 'string'",
+    ) === 1 &&
+    !forbiddenCapability.test(migration) &&
+    exactExecutableLineCount(
+      migration,
+      "const V1_TABLE = 'balance_sync_financial_agreement_evidence';",
+    ) === 1 &&
+    exactExecutableLineCount(
+      migration,
+      "const TABLE = 'balance_sync_financial_agreement_evidence_v2';",
+    ) === 1 &&
+    migration.includes(
+      'crypto-lending:mainnet-balance-two-source-agreement-evidence:v2;owner-only;append-only;runtime-unregistered;v1-preserved',
+    ) &&
+    exactExecutableLineCount(
+      migration,
+      "const HISTORY_GUARD = 'reject_mainnet_balance_financial_agreement_mutation()';",
+    ) === 1 &&
+    migration.includes(
+      "'mainnet_balance_financial_agreement_envelope_v2_valid(jsonb,timestamp with time zone)'",
+    ) &&
+    migration.includes("'record_balance_sync_financial_agreement_evidence_v2(jsonb)'") &&
+    exactExecutableLineCount(
+      migration,
+      "'crypto-lending:mainnet-balance-source-attestation:v2',",
+    ) === 1 &&
+    exactExecutableLineCount(
+      migration,
+      "`            'crypto-lending:mainnet-balance-two-source-agreement:v2', 2,",
+    ) === 1 &&
+    migration.includes('EXACT_CHECKPOINT_BALANCE_AND_DEPLOYMENT_IDENTITY_MATCH') &&
+    migration.includes("source_point -> 'deploymentIdentityValidated' <> 'true'::jsonb") &&
+    migration.includes("primary_attestation -> 'deploymentIdentityValidated' <> 'true'::jsonb") &&
+    migration.includes(
+      "corroborating_attestation -> 'deploymentIdentityValidated' <> 'true'::jsonb",
+    ) &&
+    migration.includes(
+      "primary_attestation ->> 'approvedManifestFingerprintSha256'\n          <> agreement ->> 'approvedManifestFingerprintSha256'",
+    ) &&
+    migration.includes(
+      "corroborating_attestation ->> 'observedIdentityFingerprintSha256'\n          <> agreement ->> 'observedIdentityFingerprintSha256'",
+    ) &&
+    migration.includes('NOT mainnet_balance_solana_block_identity_v2_valid(source_hash)') &&
+    migration.includes('RETURN leading_zero_bytes + decoded_bytes = 32 AND numeric_value <> 0;') &&
+    exactExecutableLineCount(
+      migration,
+      "pg_catalog.convert_to('crypto-lending:balance-position:v1', 'UTF8')",
+    ) === 1 &&
+    exactExecutableLineCount(migration, "|| pg_catalog.decode('00', 'hex')") === 4 &&
+    exactExecutableLineCount(migration, "|| pg_catalog.convert_to(account_id, 'UTF8')") === 1 &&
+    exactExecutableLineCount(migration, "|| pg_catalog.convert_to(wallet_id, 'UTF8')") === 1 &&
+    exactExecutableLineCount(migration, "|| pg_catalog.convert_to(network_id, 'UTF8')") === 1 &&
+    exactExecutableLineCount(migration, "|| pg_catalog.convert_to(expected_asset, 'UTF8')") === 1 &&
+    migration.includes('approved_manifest_fingerprint_sha256 text NOT NULL,') &&
+    migration.includes('observed_identity_fingerprint_sha256 text NOT NULL,') &&
+    exactExecutableLineCount(
+      migration,
+      'createTableSql: `CREATE TABLE ${TABLE} (\\n${createTableBody}\\n    )`,',
+    ) === 1 &&
+    !migration.includes('ALTER TABLE ${V1_TABLE}') &&
+    !migration.includes('DROP TABLE ${V1_TABLE}') &&
+    !migration.includes('COMMENT ON TABLE ${V1_TABLE}') &&
+    exactExecutableLineCount(migration, 'FROM ${V1_TABLE} AS evidence') === 1 &&
+    exactExecutableLineCount(
+      migration,
+      "RAISE EXCEPTION 'mainnet balance agreement fingerprint collides with v1 evidence'",
+    ) === 1 &&
+    exactExecutableLineCount(migration, "USING ERRCODE = '23505';") === 1 &&
+    migration.includes(
+      'IF prior.agreement_version <> 2 OR prior.agreement_envelope <> requested_envelope THEN',
+    ) &&
+    migration.includes(
+      'IF prior.agreement_version = 2 AND prior.agreement_envelope = requested_envelope THEN',
+    ) &&
+    upSource.includes('CREATE FUNCTION mainnet_balance_solana_block_identity_v2_valid(') &&
+    exactExecutableLineCount(
+      upSource,
+      'CREATE TRIGGER balance_sync_financial_agreement_v2_append_only_row',
+    ) === 1 &&
+    exactExecutableLineCount(
+      upSource,
+      'CREATE TRIGGER balance_sync_financial_agreement_v2_append_only_truncate',
+    ) === 1 &&
+    exactExecutableLineCount(upSource, 'BEFORE UPDATE OR DELETE ON ${TABLE}') === 1 &&
+    exactExecutableLineCount(upSource, 'BEFORE TRUNCATE ON ${TABLE}') === 1 &&
+    upSource.split('ALTER TABLE ${TABLE} ENABLE ALWAYS TRIGGER').length - 1 === 2 &&
+    exactExecutableLineCount(
+      upSource,
+      'CREATE FUNCTION mainnet_balance_financial_agreement_envelope_v2_valid(',
+    ) === 1 &&
+    exactExecutableLineCount(
+      upSource,
+      'CREATE FUNCTION record_balance_sync_financial_agreement_evidence_v2(',
+    ) === 1 &&
+    upSource.includes('LANGUAGE plpgsql SECURITY DEFINER VOLATILE STRICT PARALLEL UNSAFE') &&
+    exactExecutableLineCount(
+      upSource,
+      'REVOKE ALL PRIVILEGES ON TABLE ${TABLE} FROM ${guardedRoles};',
+    ) === 1 &&
+    exactExecutableLineCount(
+      upSource,
+      'REVOKE ALL PRIVILEGES ON TYPE ${TABLE} FROM ${guardedRoles};',
+    ) === 1 &&
+    upSource.includes('`REVOKE ALL ON FUNCTION ${functionIdentity} FROM ${guardedRoles};`') &&
+    !/\bGRANT\b/iu.test(upSource) &&
+    exactExecutableLineCount(
+      downSource,
+      "RAISE EXCEPTION 'cannot roll back deployment-aware mainnet balance agreement evidence after use'",
+    ) === 1 &&
+    exactExecutableLineCount(downSource, "USING ERRCODE = '55000';") === 1 &&
+    exactExecutableLineCount(downSource, 'IF EXISTS (SELECT 1 FROM ${TABLE}) THEN') === 1 &&
+    exactExecutableLineCount(downSource, 'DROP TABLE ${TABLE};') === 1 &&
+    !/DROP FUNCTION\s+(?:mainnet_balance_financial_agreement_envelope_valid\(|record_balance_sync_financial_agreement_evidence\()/iu.test(
+      downSource,
+    ) &&
+    !/\bGRANT\b/iu.test(downSource) &&
+    verifierSource.includes('createProviderPositionChainAnchorRecordIntentMigration(names, {') &&
+    verifierSource.includes('Migration 0031 must expose verification SQL') &&
+    verifierSource.includes('FROM (${previous.verifySql}) AS prior') &&
+    exactExecutableLineCount(
+      verifierSource,
+      "AND pg_catalog.bool_and(relation.relpersistence = 'p')",
+    ) === 1 &&
+    exactExecutableLineCount(
+      verifierSource,
+      'AND pg_catalog.bool_and(NOT relation.relrowsecurity)',
+    ) === 1 &&
+    exactExecutableLineCount(
+      verifierSource,
+      'AND pg_catalog.bool_and(NOT relation.relforcerowsecurity)',
+    ) === 1 &&
+    exactExecutableLineCount(
+      verifierSource,
+      'AND pg_catalog.bool_and(NOT relation.relispartition)',
+    ) === 1 &&
+    verifierSource.includes('FROM pg_catalog.pg_policy AS policy') &&
+    verifierSource.includes('WHERE policy.polrelid = relation.oid') &&
+    verifierSource.includes('FROM pg_catalog.pg_rewrite AS rewrite') &&
+    verifierSource.includes(
+      "WHERE rewrite.ev_class = relation.oid AND rewrite.rulename <> '_RETURN'",
+    ) &&
+    exactExecutableLineCount(verifierSource, 'SELECT pg_catalog.count(*) = 32') === 2 &&
+    exactExecutableLineCount(verifierSource, 'AND attribute.attnotnull') === 1 &&
+    exactExecutableLineCount(verifierSource, "AND attribute.attidentity = ''") === 1 &&
+    exactExecutableLineCount(verifierSource, "AND attribute.attgenerated = ''") === 1 &&
+    exactExecutableLineCount(verifierSource, 'AND attribute.attcollation = CASE') === 1 &&
+    verifierSource.includes("WHEN expected.data_type = 'text' THEN (") &&
+    verifierSource.includes('SELECT string_type.typcollation') &&
+    exactExecutableLineCount(verifierSource, 'AND attribute_default.adbin IS NULL') === 1 &&
+    exactExecutableLineCount(verifierSource, "procedure.prokind = 'f'") === 1 &&
+    exactExecutableLineCount(verifierSource, 'AND procedure.pronargdefaults = 0') === 1 &&
+    exactExecutableLineCount(verifierSource, 'AND procedure.proargdefaults IS NULL') === 1 &&
+    exactExecutableLineCount(verifierSource, 'AND procedure.provariadic = 0::oid') === 1 &&
+    verifierSource.includes(
+      "SELECT language.oid FROM pg_catalog.pg_language AS language\n            WHERE language.lanname = 'plpgsql'",
+    ) &&
+    exactExecutableLineCount(verifierSource, 'procedure.pronargs = 1') === 2 &&
+    exactExecutableLineCount(verifierSource, 'procedure.pronargs = 2') === 1 &&
+    exactExecutableLineCount(verifierSource, 'AND procedure.proallargtypes IS NULL') === 2 &&
+    exactExecutableLineCount(verifierSource, 'AND procedure.proargmodes IS NULL') === 2 &&
+    verifierSource.includes("procedure.proargnames = ARRAY['requested_identity']::text[]") &&
+    verifierSource.includes(
+      "'requested_envelope', 'requested_recorded_at'\n              ]::text[]",
+    ) &&
+    verifierSource.includes('\'i\'::"char", \'t\'::"char", \'t\'::"char", \'t\'::"char"') &&
+    verifierSource.includes(
+      `procedure.proallargtypes = ARRAY[
+                pg_catalog.to_regtype('jsonb')::oid,
+                pg_catalog.to_regtype('text')::oid,
+                pg_catalog.to_regtype('text')::oid,
+                pg_catalog.to_regtype('timestamp with time zone')::oid
+              ]::oid[]`,
+    ) &&
+    verifierSource.includes(
+      "'requested_envelope', 'record_outcome',\n                'recorded_agreement_fingerprint_sha256', 'evidence_recorded_at'",
+    ) &&
+    exactExecutableLineCount(verifierSource, 'AND procedure.proretset') === 1 &&
+    exactExecutableLineCount(verifierSource, 'AND NOT procedure.proretset') === 2 &&
+    exactExecutableLineCount(verifierSource, "AND trigger.tgenabled = 'A'") === 1 &&
+    exactExecutableLineCount(verifierSource, 'SELECT pg_catalog.count(*) = 6') === 2 &&
+    verifierSource.includes(
+      'CROSS JOIN LATERAL pg_catalog.aclexplode(guarded_attribute.attacl) AS acl',
+    ) &&
+    verifierSource.includes('AND guarded_attribute.attnum > 0') &&
+    verifierSource.includes('AND NOT guarded_attribute.attisdropped') &&
+    verifierSource.includes('AND acl.grantee <> guarded_table.relowner') &&
+    verifierSource.includes(
+      "`NOT pg_catalog.has_table_privilege(${role}, '${TABLE}', 'SELECT')`",
+    ) &&
+    verifierSource.includes(
+      "`NOT pg_catalog.has_function_privilege(${role}, '${functionIdentity}', 'EXECUTE')`",
+    ) &&
+    exactExecutableLineCount(migration, "id: '0032',") === 1 &&
+    exactExecutableLineCount(migration, "supersedesVerificationOf: ['0031'],") === 1 &&
+    migrationIndex.split(`from '${migrationModule}';`).length - 1 === 2 &&
+    migrationIndex.includes('createMainnetBalanceAgreementEvidenceV2Migration,') &&
+    exactExecutableLineCount(
+      testList,
+      'createMainnetBalanceAgreementEvidenceV2TestSchemaMigrationV0032,',
+    ) === 1 &&
+    !testList.includes('createMainnetBalanceAgreementEvidenceV2MigrationV0032,') &&
+    exactExecutableLineCount(
+      productionList,
+      'createMainnetBalanceAgreementEvidenceV2MigrationV0032,',
+    ) === 1 &&
+    !productionList.includes('createMainnetBalanceAgreementEvidenceV2TestSchemaMigrationV0032,') &&
+    launchSources.every((source) => !agreementPersistenceRuntimeIdentity.test(source))
+  );
+}
+
 function hasDormantBalanceConsumerDatabaseCapability(
   sources: BalanceConsumerArtifactSources,
 ): boolean {
@@ -13094,7 +13504,8 @@ function hasDormantBalanceConsumerDatabaseCapability(
     hasDormantProviderPositionChainAnchorEvidenceMigrationContract(
       sources.providerPositionChainAnchorEvidenceMigrationSource,
       sources.migrationIndexSource,
-    )
+    ) &&
+    hasDormantMainnetBalanceAgreementEvidenceV2MigrationContract(sources)
   );
 }
 
@@ -14208,6 +14619,13 @@ export function loadRepositoryProductionPreflightInput(
         resolve(repositoryRoot, 'infra/postgres/validate-bootstrap-principals.mjs'),
         'utf8',
       ),
+      databasePrincipalBoundariesMigrationSource: readFileSync(
+        resolve(
+          repositoryRoot,
+          'apps/api/src/infrastructure/database/migrations/0005-enforce-database-principal-boundaries.migration.ts',
+        ),
+        'utf8',
+      ),
       walletAddressMigrationSource: readFileSync(
         resolve(
           repositoryRoot,
@@ -14226,6 +14644,20 @@ export function loadRepositoryProductionPreflightInput(
         resolve(
           repositoryRoot,
           'apps/api/src/infrastructure/database/migrations/0029-create-provider-position-chain-anchor-evidence.migration.ts',
+        ),
+        'utf8',
+      ),
+      mainnetBalanceAgreementEvidenceV1MigrationSource: readFileSync(
+        resolve(
+          repositoryRoot,
+          'apps/api/src/infrastructure/database/migrations/0027-create-mainnet-balance-agreement-evidence.migration.ts',
+        ),
+        'utf8',
+      ),
+      mainnetBalanceAgreementEvidenceV2MigrationSource: readFileSync(
+        resolve(
+          repositoryRoot,
+          'apps/api/src/infrastructure/database/migrations/0032-upgrade-mainnet-balance-agreement-evidence-v2.migration.ts',
         ),
         'utf8',
       ),

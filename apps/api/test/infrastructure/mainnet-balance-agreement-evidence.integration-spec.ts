@@ -28,7 +28,8 @@ import {
 import { canonicalPositionId } from '../../src/blockchain-sync/infrastructure/rpc/balance-json-rpc';
 import { MigrationRunner } from '../../src/infrastructure/database/migration-runner.service';
 import { PRODUCTION_DATABASE_PRINCIPALS } from '../../src/infrastructure/database/migrations/0005-enforce-database-principal-boundaries.migration';
-import { createMainnetBalanceAgreementEvidenceTestSchemaMigrationV0027 } from '../../src/infrastructure/database/migrations/0027-create-mainnet-balance-agreement-evidence.migration';
+import { PRODUCTION_BALANCE_CONSUMER_PRINCIPALS } from '../../src/infrastructure/database/migrations/0028-suspend-generic-worker-balance-authority.migration';
+import { createMainnetBalanceAgreementEvidenceV2TestSchemaMigrationV0032 } from '../../src/infrastructure/database/migrations/0032-upgrade-mainnet-balance-agreement-evidence-v2.migration';
 import { DATABASE_TEST_SCHEMA_MIGRATION_LIST } from '../../src/infrastructure/database/migrations';
 import { assertLocalPrincipalFixture } from './local-principal-fixture-guard';
 
@@ -44,6 +45,11 @@ const SOLANA_BLOCK_IDENTITY = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
 const SOLANA_PARENT_BLOCK_IDENTITY = '2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo';
 const APPROVED_MANIFEST_FINGERPRINT = 'a'.repeat(64);
 const OBSERVED_IDENTITY_FINGERPRINT = 'b'.repeat(64);
+const RAW_NUMERIC_FINGERPRINT_MARKER = '__raw_numeric_deployment_fingerprint__';
+const NUMERIC_DEPLOYMENT_FINGERPRINT = '1'.repeat(64);
+const MIGRATIONS_THROUGH_0031 = DATABASE_TEST_SCHEMA_MIGRATION_LIST.filter(
+  ({ id }) => id <= '0031',
+);
 
 function quoteIdentifier(value: string): string {
   if (!IDENTIFIER.test(value)) throw new Error(`Unsafe test identifier: ${value}`);
@@ -193,6 +199,106 @@ function fingerprint(value: unknown): string {
   return createHash('sha256').update(canonicalJson(value), 'utf8').digest('hex');
 }
 
+function fingerprintWithRawNumericDeploymentFields(value: unknown): string {
+  const canonical = canonicalJson(value).replaceAll(
+    JSON.stringify(RAW_NUMERIC_FINGERPRINT_MARKER),
+    NUMERIC_DEPLOYMENT_FINGERPRINT,
+  );
+  return createHash('sha256').update(canonical, 'utf8').digest('hex');
+}
+
+function numericDeploymentFingerprintEnvelope(
+  envelope: MainnetBalanceTwoSourceAgreementCandidateV2,
+): string {
+  interface MutableSource {
+    approvedManifestFingerprintSha256: string;
+    observedIdentityFingerprintSha256: string;
+    retrievedAt: string;
+    selector: string;
+    [key: string]: unknown;
+  }
+  interface MutableAttestation {
+    approvedManifestFingerprintSha256: string;
+    observedIdentityFingerprintSha256: string;
+    retrievedAt: string;
+    role: string;
+    sourceFamilyId: string;
+    sourceId: string;
+    checkpoint: unknown;
+    positionSetFingerprintSha256: string;
+    candidateFingerprintSha256: string;
+    [key: string]: unknown;
+  }
+  interface MutableEnvelope {
+    agreementVersion: number;
+    use: string;
+    accountId: string;
+    observationCandidate: {
+      walletId: string;
+      networkId: string;
+      tier: string;
+      source: MutableSource;
+      [key: string]: unknown;
+    };
+    agreement: {
+      sourcePairRegistryFingerprintSha256: string;
+      approvedManifestFingerprintSha256: string;
+      observedIdentityFingerprintSha256: string;
+      sourceAttestations: MutableAttestation[];
+      agreementFingerprintSha256: string;
+      [key: string]: unknown;
+    };
+    [key: string]: unknown;
+  }
+
+  const value = structuredClone(envelope) as unknown as MutableEnvelope;
+  const source = value.observationCandidate.source;
+  source.approvedManifestFingerprintSha256 = RAW_NUMERIC_FINGERPRINT_MARKER;
+  source.observedIdentityFingerprintSha256 = RAW_NUMERIC_FINGERPRINT_MARKER;
+  value.agreement.approvedManifestFingerprintSha256 = RAW_NUMERIC_FINGERPRINT_MARKER;
+  value.agreement.observedIdentityFingerprintSha256 = RAW_NUMERIC_FINGERPRINT_MARKER;
+
+  for (const attestation of value.agreement.sourceAttestations) {
+    attestation.approvedManifestFingerprintSha256 = RAW_NUMERIC_FINGERPRINT_MARKER;
+    attestation.observedIdentityFingerprintSha256 = RAW_NUMERIC_FINGERPRINT_MARKER;
+    const attestedSource = { ...source, retrievedAt: attestation.retrievedAt };
+    attestation.candidateFingerprintSha256 = fingerprintWithRawNumericDeploymentFields([
+      'crypto-lending:mainnet-balance-source-attestation:v2',
+      value.agreement.sourcePairRegistryFingerprintSha256,
+      value.accountId,
+      value.observationCandidate.walletId,
+      value.observationCandidate.networkId,
+      value.observationCandidate.tier,
+      source.selector,
+      attestation.role,
+      attestation.sourceFamilyId,
+      attestation.sourceId,
+      NUMERIC_DEPLOYMENT_FINGERPRINT,
+      NUMERIC_DEPLOYMENT_FINGERPRINT,
+      attestedSource,
+      attestation.checkpoint,
+      attestation.positionSetFingerprintSha256,
+    ]);
+  }
+
+  const agreementWithoutFingerprint = structuredClone(value.agreement);
+  Reflect.deleteProperty(agreementWithoutFingerprint, 'agreementFingerprintSha256');
+  value.agreement.agreementFingerprintSha256 = fingerprintWithRawNumericDeploymentFields([
+    'crypto-lending:mainnet-balance-two-source-agreement:v2',
+    value.agreementVersion,
+    value.use,
+    value.accountId,
+    NUMERIC_DEPLOYMENT_FINGERPRINT,
+    NUMERIC_DEPLOYMENT_FINGERPRINT,
+    value.observationCandidate,
+    agreementWithoutFingerprint,
+  ]);
+  return JSON.stringify(value).replaceAll(
+    JSON.stringify(RAW_NUMERIC_FINGERPRINT_MARKER),
+    NUMERIC_DEPLOYMENT_FINGERPRINT,
+  );
+}
+
 function legacySource(source: MainnetBalanceIndexerSourceCandidate): BalanceIndexerSourceCandidate {
   return {
     position: source.position,
@@ -255,10 +361,43 @@ function legacyRegistryFingerprint(now: string): string {
   ]);
 }
 
+interface LegacyMainnetBalanceSourceAttestationV1 {
+  readonly role: 'PRIMARY' | 'CORROBORATING';
+  readonly sourceFamilyId: string;
+  readonly sourceId: string;
+  readonly networkId: MainnetBalanceAgreementNetworkId;
+  readonly retrievedAt: string;
+  readonly chainIdentityValidated: true;
+  readonly checkpoint: ReturnType<typeof legacyCheckpoint>;
+  readonly positionSetFingerprintSha256: string;
+  readonly candidateFingerprintSha256: string;
+}
+
+interface LegacyMainnetBalanceAgreementEnvelopeV1 {
+  readonly agreementVersion: 1;
+  readonly use: 'DORMANT_MAINNET_BALANCE_OBSERVATION_CANDIDATE_ONLY';
+  readonly mayPersist: false;
+  readonly mayAuthorizeFinancialAction: false;
+  readonly accountId: string;
+  readonly observationCandidate: BalanceIndexerCandidate;
+  readonly agreement: Readonly<{
+    status: 'EXACT_CHECKPOINT_AND_BALANCE_MATCH';
+    checkpoint: ReturnType<typeof legacyCheckpoint>;
+    sourcePairRegistryFingerprintSha256: string;
+    sourcePairApprovalExpiresAt: string;
+    positionSetFingerprintSha256: string;
+    sourceAttestations: readonly [
+      LegacyMainnetBalanceSourceAttestationV1,
+      LegacyMainnetBalanceSourceAttestationV1,
+    ];
+    agreementFingerprintSha256: string;
+  }>;
+}
+
 function legacyAgreementEnvelopeV1(
   request: BalanceIndexerReadRequest & { networkId: MainnetBalanceAgreementNetworkId },
   now: string,
-) {
+): LegacyMainnetBalanceAgreementEnvelopeV1 {
   const primaryCandidate = candidate(request, at(now, -2_000));
   const corroboratingCandidate = candidate(request, at(now, -1_000));
   const positions = [...primaryCandidate.positions].sort((left, right) => {
@@ -285,7 +424,7 @@ function legacyAgreementEnvelopeV1(
   const sourceAttestation = (
     role: 'PRIMARY' | 'CORROBORATING',
     source: BalanceIndexerSourceCandidate,
-  ) => {
+  ): LegacyMainnetBalanceSourceAttestationV1 => {
     const identity = legacySourceIdentity(request.networkId, role);
     return {
       role,
@@ -351,8 +490,6 @@ function legacyAgreementEnvelopeV1(
   };
 }
 
-type LegacyMainnetBalanceAgreementEnvelopeV1 = ReturnType<typeof legacyAgreementEnvelopeV1>;
-
 async function queryAsRole<Row extends QueryResultRow>(
   pool: Pool,
   role: string,
@@ -378,7 +515,7 @@ describeWithPostgres('mainnet balance two-source agreement evidence boundary', (
   jest.setTimeout(120_000);
 
   const schema = `balance_agreement_${randomBytes(8).toString('hex')}`;
-  const expectedMigrationIds = DATABASE_TEST_SCHEMA_MIGRATION_LIST.map(({ id }) => id);
+  const expectedMigrationIds = MIGRATIONS_THROUGH_0031.map(({ id }) => id);
   let adminPool: Pool;
   let operationPool: Pool;
   let runner: MigrationRunner;
@@ -427,6 +564,13 @@ describeWithPostgres('mainnet balance two-source agreement evidence boundary', (
         randomBytes(32),
         randomBytes(32),
       ],
+    );
+    await operationPool.query(
+      `INSERT INTO wallet_ownership_challenge_identity_digests (
+         challenge_id, account_id, chain_namespace, chain_reference,
+         address_digest_version, address_digest
+       ) VALUES ($1, $2, $3, $4, 1, $5)`,
+      [challengeId, ownerAccountId, namespace, reference, addressDigest],
     );
     await operationPool.query(
       `INSERT INTO registered_wallets (
@@ -490,7 +634,7 @@ describeWithPostgres('mainnet balance two-source agreement evidence boundary', (
       max: 6,
       options: `-c search_path=${schema}`,
     });
-    runner = new MigrationRunner(operationPool, DATABASE_TEST_SCHEMA_MIGRATION_LIST);
+    runner = new MigrationRunner(operationPool, MIGRATIONS_THROUGH_0031);
     await expect(runner.up()).resolves.toEqual(expectedMigrationIds);
     const clock = await operationPool.query<{ now: Date }>(
       "SELECT pg_catalog.date_trunc('milliseconds', pg_catalog.clock_timestamp()) AS now",
@@ -533,56 +677,8 @@ describeWithPostgres('mainnet balance two-source agreement evidence boundary', (
     }
   });
 
-  it('accepts genuine V1 Ethereum and Solana migration fixtures and preserves them intact', async () => {
+  it('keeps immutable V1 fail-closed on its committed PostgreSQL NUL-text defect', async () => {
     for (const envelope of evidence) {
-      await expect(
-        operationPool.query(
-          'SELECT * FROM record_balance_sync_financial_agreement_evidence($1::jsonb)',
-          [envelope],
-        ),
-      ).resolves.toMatchObject({
-        rows: [
-          {
-            record_outcome: 'RECORDED',
-            recorded_agreement_fingerprint_sha256: envelope.agreement.agreementFingerprintSha256,
-          },
-        ],
-      });
-    }
-    const stored = await operationPool.query<{
-      agreement_fingerprint_sha256: string;
-      network_id: string;
-      tier: string;
-      selector: string;
-      may_persist: boolean;
-      may_authorize_financial_action: boolean;
-      agreement_envelope: LegacyMainnetBalanceAgreementEnvelopeV1;
-    }>(
-      `SELECT agreement_fingerprint_sha256, network_id, tier, selector,
-              may_persist, may_authorize_financial_action, agreement_envelope
-       FROM balance_sync_financial_agreement_evidence ORDER BY network_id`,
-    );
-    expect(stored.rows).toHaveLength(2);
-    expect(stored.rows.map(({ network_id }) => network_id).sort()).toEqual(
-      [ETHEREUM, SOLANA].sort(),
-    );
-    for (const row of stored.rows) {
-      const expected = evidence.find(
-        ({ agreement }) =>
-          agreement.agreementFingerprintSha256 === row.agreement_fingerprint_sha256,
-      );
-      expect(row).toMatchObject({
-        tier: 'FINANCIAL',
-        selector: 'finalized',
-        may_persist: false,
-        may_authorize_financial_action: false,
-        agreement_envelope: expected,
-      });
-    }
-  });
-
-  it('rejects coordinator-produced deployment-aware V2 envelopes at the untouched V1 boundary', async () => {
-    for (const envelope of deploymentAwareEvidence) {
       await expect(
         operationPool.query<{ valid: boolean }>(
           `SELECT mainnet_balance_financial_agreement_envelope_valid(
@@ -599,23 +695,189 @@ describeWithPostgres('mainnet balance two-source agreement evidence boundary', (
         ),
       ).rejects.toMatchObject({ code: '22023' });
     }
+    await expect(
+      operationPool.query<{ evidence_count: string; has_nul_text_defect: boolean }>(
+        `SELECT pg_catalog.count(*)::text AS evidence_count,
+                pg_catalog.strpos(
+                  pg_catalog.pg_get_functiondef(
+                    'mainnet_balance_financial_agreement_envelope_valid(jsonb,timestamp with time zone)'::regprocedure
+                  ),
+                  'pg_catalog.chr(0)'
+                ) > 0 AS has_nul_text_defect
+         FROM balance_sync_financial_agreement_evidence`,
+      ),
+    ).resolves.toMatchObject({
+      rows: [{ evidence_count: '0', has_nul_text_defect: true }],
+    });
   });
 
-  it('returns an exact replay and rejects same-key conflict or recomputed-hash tampering', async () => {
-    const envelope = evidence[0];
-    if (!envelope) throw new Error('Ethereum agreement fixture is missing');
+  it('preserves zero-row V1 and its fail-closed objects while V2 accepts coordinator evidence', async () => {
+    runner = new MigrationRunner(operationPool, DATABASE_TEST_SCHEMA_MIGRATION_LIST);
+    await expect(runner.up()).resolves.toEqual(['0032']);
+    await expect(
+      operationPool.query<{ evidence_count: string }>(
+        'SELECT pg_catalog.count(*)::text AS evidence_count FROM balance_sync_financial_agreement_evidence',
+      ),
+    ).resolves.toMatchObject({ rows: [{ evidence_count: '0' }] });
+
+    for (const envelope of deploymentAwareEvidence) {
+      await expect(
+        operationPool.query<{ valid: boolean }>(
+          `SELECT mainnet_balance_financial_agreement_envelope_valid(
+             $1::jsonb,
+             pg_catalog.date_trunc('milliseconds', pg_catalog.clock_timestamp())
+           ) AS valid`,
+          [envelope],
+        ),
+      ).resolves.toMatchObject({ rows: [{ valid: false }] });
+      await expect(
+        operationPool.query(
+          'SELECT * FROM record_balance_sync_financial_agreement_evidence($1::jsonb)',
+          [envelope],
+        ),
+      ).rejects.toMatchObject({ code: '22023' });
+      await expect(
+        operationPool.query<{ valid: boolean }>(
+          `SELECT mainnet_balance_financial_agreement_envelope_v2_valid(
+             $1::jsonb,
+             pg_catalog.date_trunc('milliseconds', pg_catalog.clock_timestamp())
+           ) AS valid`,
+          [envelope],
+        ),
+      ).resolves.toMatchObject({ rows: [{ valid: true }] });
+      await expect(
+        operationPool.query(
+          'SELECT * FROM record_balance_sync_financial_agreement_evidence_v2($1::jsonb)',
+          [envelope],
+        ),
+      ).resolves.toMatchObject({
+        rows: [
+          {
+            record_outcome: 'RECORDED',
+            recorded_agreement_fingerprint_sha256: envelope.agreement.agreementFingerprintSha256,
+          },
+        ],
+      });
+    }
+    await expect(
+      operationPool.query<{
+        agreement_version: number;
+        approved_manifest_fingerprint_sha256: string;
+        observed_identity_fingerprint_sha256: string;
+      }>(
+        `SELECT agreement_version, approved_manifest_fingerprint_sha256,
+                observed_identity_fingerprint_sha256
+         FROM balance_sync_financial_agreement_evidence_v2
+         ORDER BY network_id`,
+      ),
+    ).resolves.toMatchObject({
+      rows: [
+        {
+          agreement_version: 2,
+          approved_manifest_fingerprint_sha256: APPROVED_MANIFEST_FINGERPRINT,
+          observed_identity_fingerprint_sha256: OBSERVED_IDENTITY_FINGERPRINT,
+        },
+        {
+          agreement_version: 2,
+          approved_manifest_fingerprint_sha256: APPROVED_MANIFEST_FINGERPRINT,
+          observed_identity_fingerprint_sha256: OBSERVED_IDENTITY_FINGERPRINT,
+        },
+      ],
+    });
+  });
+
+  it('allows exact V2 replay and fails closed on deployment tampering', async () => {
+    const envelope = deploymentAwareEvidence[0];
+    if (!envelope) throw new Error('Agreement fixture is missing');
+
     await expect(
       operationPool.query(
-        'SELECT * FROM record_balance_sync_financial_agreement_evidence($1::jsonb)',
+        'SELECT * FROM record_balance_sync_financial_agreement_evidence_v2($1::jsonb)',
         [envelope],
       ),
     ).resolves.toMatchObject({ rows: [{ record_outcome: 'IDEMPOTENT_REPLAY' }] });
+    const tampered = structuredClone(envelope) as {
+      agreement: { approvedManifestFingerprintSha256: string };
+    };
+    tampered.agreement.approvedManifestFingerprintSha256 = 'c'.repeat(64);
+    await expect(
+      operationPool.query<{ valid: boolean }>(
+        `SELECT mainnet_balance_financial_agreement_envelope_v2_valid(
+           $1::jsonb,
+           pg_catalog.date_trunc('milliseconds', pg_catalog.clock_timestamp())
+         ) AS valid`,
+        [tampered],
+      ),
+    ).resolves.toMatchObject({ rows: [{ valid: false }] });
+    await expect(
+      operationPool.query(
+        'SELECT * FROM record_balance_sync_financial_agreement_evidence_v2($1::jsonb)',
+        [tampered],
+      ),
+    ).rejects.toMatchObject({ code: '23505' });
 
+    const invalidFreshFingerprint = structuredClone(tampered) as unknown as {
+      agreement: { agreementFingerprintSha256: string };
+    };
+    invalidFreshFingerprint.agreement.agreementFingerprintSha256 = randomBytes(32).toString('hex');
+    await expect(
+      operationPool.query(
+        'SELECT * FROM record_balance_sync_financial_agreement_evidence_v2($1::jsonb)',
+        [invalidFreshFingerprint],
+      ),
+    ).rejects.toMatchObject({ code: '22023' });
+  });
+
+  it('accepts only canonical nonzero 32-byte Solana identities at the V2 helper', async () => {
+    await expect(
+      operationPool.query<{ valid: boolean }>(
+        'SELECT mainnet_balance_solana_block_identity_v2_valid($1::text) AS valid',
+        [SOLANA_BLOCK_IDENTITY],
+      ),
+    ).resolves.toMatchObject({ rows: [{ valid: true }] });
+    for (const invalidIdentity of [
+      '1'.repeat(32),
+      `${'1'.repeat(32)}2`,
+      `${SOLANA_BLOCK_IDENTITY}1`,
+    ]) {
+      await expect(
+        operationPool.query<{ valid: boolean }>(
+          'SELECT mainnet_balance_solana_block_identity_v2_valid($1::text) AS valid',
+          [invalidIdentity],
+        ),
+      ).resolves.toMatchObject({ rows: [{ valid: false }] });
+    }
+  });
+
+  it('rejects self-consistently rehashed numeric deployment fingerprint fields', async () => {
+    const envelope = deploymentAwareEvidence[0];
+    if (!envelope) throw new Error('Ethereum agreement fixture is missing');
+    const numericEnvelope = numericDeploymentFingerprintEnvelope(envelope);
+    await expect(
+      operationPool.query<{ valid: boolean }>(
+        `SELECT mainnet_balance_financial_agreement_envelope_v2_valid(
+           $1::jsonb,
+           pg_catalog.date_trunc('milliseconds', pg_catalog.clock_timestamp())
+         ) AS valid`,
+        [numericEnvelope],
+      ),
+    ).resolves.toMatchObject({ rows: [{ valid: false }] });
+    await expect(
+      operationPool.query(
+        'SELECT * FROM record_balance_sync_financial_agreement_evidence_v2($1::jsonb)',
+        [numericEnvelope],
+      ),
+    ).rejects.toMatchObject({ code: '22023' });
+  });
+
+  it('rejects V2 same-key conflict or recomputed-hash tampering', async () => {
+    const envelope = deploymentAwareEvidence[0];
+    if (!envelope) throw new Error('Ethereum agreement fixture is missing');
     const sameKeyConflict = structuredClone(envelope) as unknown as Record<string, unknown>;
     sameKeyConflict.use = 'CONFLICT';
     await expect(
       operationPool.query(
-        'SELECT * FROM record_balance_sync_financial_agreement_evidence($1::jsonb)',
+        'SELECT * FROM record_balance_sync_financial_agreement_evidence_v2($1::jsonb)',
         [sameKeyConflict],
       ),
     ).rejects.toMatchObject({ code: '23505' });
@@ -626,14 +888,14 @@ describeWithPostgres('mainnet balance two-source agreement evidence boundary', (
     invalidHash.agreement.agreementFingerprintSha256 = randomBytes(32).toString('hex');
     await expect(
       operationPool.query(
-        'SELECT * FROM record_balance_sync_financial_agreement_evidence($1::jsonb)',
+        'SELECT * FROM record_balance_sync_financial_agreement_evidence_v2($1::jsonb)',
         [invalidHash],
       ),
     ).rejects.toMatchObject({ code: '22023' });
   });
 
   it('rejects timestamp normalization tricks and all-zero fingerprints', async () => {
-    const envelope = evidence[0];
+    const envelope = deploymentAwareEvidence[0];
     if (!envelope) throw new Error('Ethereum agreement fixture is missing');
     const invalidTimestamp = structuredClone(envelope) as unknown as {
       observationCandidate: { source: { retrievedAt: string } };
@@ -646,7 +908,7 @@ describeWithPostgres('mainnet balance two-source agreement evidence boundary', (
     for (const invalidEnvelope of [invalidTimestamp, zeroFingerprint]) {
       await expect(
         operationPool.query<{ valid: boolean }>(
-          `SELECT mainnet_balance_financial_agreement_envelope_valid(
+          `SELECT mainnet_balance_financial_agreement_envelope_v2_valid(
              $1::jsonb,
              pg_catalog.date_trunc('milliseconds', pg_catalog.clock_timestamp())
            ) AS valid`,
@@ -657,7 +919,7 @@ describeWithPostgres('mainnet balance two-source agreement evidence boundary', (
   });
 
   it('rejects JSON nulls at every scalar envelope depth', async () => {
-    const envelope = evidence[0];
+    const envelope = deploymentAwareEvidence[0];
     if (!envelope) throw new Error('Ethereum agreement fixture is missing');
     const nullEnvelopes = [
       (() => {
@@ -704,7 +966,7 @@ describeWithPostgres('mainnet balance two-source agreement evidence boundary', (
     for (const invalidEnvelope of nullEnvelopes) {
       await expect(
         operationPool.query<{ valid: boolean }>(
-          `SELECT mainnet_balance_financial_agreement_envelope_valid(
+          `SELECT mainnet_balance_financial_agreement_envelope_v2_valid(
              $1::jsonb,
              pg_catalog.date_trunc('milliseconds', pg_catalog.clock_timestamp())
            ) AS valid`,
@@ -720,9 +982,25 @@ describeWithPostgres('mainnet balance two-source agreement evidence boundary', (
       PRODUCTION_DATABASE_PRINCIPALS.workerRuntimeRole,
       PRODUCTION_DATABASE_PRINCIPALS.legacyRuntimeRole,
       PRODUCTION_DATABASE_PRINCIPALS.migrationRole,
+      PRODUCTION_BALANCE_CONSUMER_PRINCIPALS.balanceConsumerRuntimeRole,
     ]) {
       await expect(
         queryAsRole(operationPool, role, 'SELECT * FROM balance_sync_financial_agreement_evidence'),
+      ).rejects.toBeDefined();
+      await expect(
+        queryAsRole(
+          operationPool,
+          role,
+          'SELECT * FROM balance_sync_financial_agreement_evidence_v2',
+        ),
+      ).rejects.toBeDefined();
+      await expect(
+        queryAsRole(
+          operationPool,
+          role,
+          'SELECT * FROM record_balance_sync_financial_agreement_evidence_v2($1::jsonb)',
+          [deploymentAwareEvidence[0]],
+        ),
       ).rejects.toBeDefined();
       await expect(
         queryAsRole(
@@ -734,25 +1012,71 @@ describeWithPostgres('mainnet balance two-source agreement evidence boundary', (
       ).rejects.toBeDefined();
     }
     await expect(
+      operationPool.query('TRUNCATE balance_sync_financial_agreement_evidence'),
+    ).rejects.toMatchObject({ code: '55000' });
+    await expect(
       operationPool.query(
-        'UPDATE balance_sync_financial_agreement_evidence SET recorded_at = recorded_at',
+        'UPDATE balance_sync_financial_agreement_evidence_v2 SET recorded_at = recorded_at',
       ),
     ).rejects.toMatchObject({ code: '55000' });
     await expect(
-      operationPool.query('TRUNCATE balance_sync_financial_agreement_evidence'),
+      operationPool.query('DELETE FROM balance_sync_financial_agreement_evidence_v2'),
+    ).rejects.toMatchObject({ code: '55000' });
+    await expect(
+      operationPool.query('TRUNCATE balance_sync_financial_agreement_evidence_v2'),
     ).rejects.toMatchObject({ code: '55000' });
     await expect(runner.down(1)).rejects.toThrow(
-      'cannot roll back mainnet balance financial agreement evidence after use',
+      'cannot roll back deployment-aware mainnet balance agreement evidence after use',
     );
   });
 
   it('keeps the cumulative verifier valid with stablecoin ingestion still suspended', async () => {
     await expect(
       operationPool.query<{ valid: boolean }>(
-        createMainnetBalanceAgreementEvidenceTestSchemaMigrationV0027.verifySql ??
+        createMainnetBalanceAgreementEvidenceV2TestSchemaMigrationV0032.verifySql ??
           'SELECT false AS valid',
       ),
     ).resolves.toMatchObject({ rows: [{ valid: true }] });
+    const v2Verifier =
+      createMainnetBalanceAgreementEvidenceV2TestSchemaMigrationV0032.verifySql ??
+      'SELECT false AS valid';
+    await operationPool.query(
+      `GRANT SELECT (agreement_version)
+       ON balance_sync_financial_agreement_evidence_v2
+       TO ${quoteIdentifier(PRODUCTION_BALANCE_CONSUMER_PRINCIPALS.balanceConsumerRuntimeRole)}`,
+    );
+    await expect(operationPool.query<{ valid: boolean }>(v2Verifier)).resolves.toMatchObject({
+      rows: [{ valid: false }],
+    });
+    await operationPool.query(
+      `REVOKE SELECT (agreement_version)
+       ON balance_sync_financial_agreement_evidence_v2
+       FROM ${quoteIdentifier(PRODUCTION_BALANCE_CONSUMER_PRINCIPALS.balanceConsumerRuntimeRole)}`,
+    );
+    await expect(operationPool.query<{ valid: boolean }>(v2Verifier)).resolves.toMatchObject({
+      rows: [{ valid: true }],
+    });
+    await operationPool.query(
+      'ALTER TABLE balance_sync_financial_agreement_evidence_v2 SET UNLOGGED',
+    );
+    await expect(operationPool.query<{ valid: boolean }>(v2Verifier)).resolves.toMatchObject({
+      rows: [{ valid: false }],
+    });
+    await operationPool.query(
+      'ALTER TABLE balance_sync_financial_agreement_evidence_v2 SET LOGGED',
+    );
+    await operationPool.query(
+      'ALTER TABLE balance_sync_financial_agreement_evidence_v2 ENABLE ROW LEVEL SECURITY',
+    );
+    await expect(operationPool.query<{ valid: boolean }>(v2Verifier)).resolves.toMatchObject({
+      rows: [{ valid: false }],
+    });
+    await operationPool.query(
+      'ALTER TABLE balance_sync_financial_agreement_evidence_v2 DISABLE ROW LEVEL SECURITY',
+    );
+    await expect(operationPool.query<{ valid: boolean }>(v2Verifier)).resolves.toMatchObject({
+      rows: [{ valid: true }],
+    });
     expect(
       await operationPool.query<{ worker_can_record_price: boolean }>(
         `SELECT pg_catalog.has_function_privilege(

@@ -104,6 +104,10 @@ import {
   createProviderPositionChainAnchorRecordIntentMigrationV0031,
   createProviderPositionChainAnchorRecordIntentTestSchemaMigrationV0031,
 } from './0031-create-provider-position-chain-anchor-record-intents.migration';
+import {
+  createMainnetBalanceAgreementEvidenceV2MigrationV0032,
+  createMainnetBalanceAgreementEvidenceV2TestSchemaMigrationV0032,
+} from './0032-upgrade-mainnet-balance-agreement-evidence-v2.migration';
 import type { DatabaseMigration } from './migration';
 
 /**
@@ -143,6 +147,7 @@ export const DATABASE_TEST_SCHEMA_MIGRATION_LIST: readonly DatabaseMigration[] =
   createProviderPositionChainAnchorEvidenceTestSchemaMigrationV0029,
   enforceProviderPositionChainAnchorRecordDeadlineTestSchemaMigrationV0030,
   createProviderPositionChainAnchorRecordIntentTestSchemaMigrationV0031,
+  createMainnetBalanceAgreementEvidenceV2TestSchemaMigrationV0032,
 ]);
 
 export const DATABASE_MIGRATION_LIST: readonly DatabaseMigration[] = Object.freeze([
@@ -177,6 +182,7 @@ export const DATABASE_MIGRATION_LIST: readonly DatabaseMigration[] = Object.free
   createProviderPositionChainAnchorEvidenceMigrationV0029,
   enforceProviderPositionChainAnchorRecordDeadlineMigrationV0030,
   createProviderPositionChainAnchorRecordIntentMigrationV0031,
+  createMainnetBalanceAgreementEvidenceV2MigrationV0032,
 ]);
 
 export type { DatabaseMigration } from './migration';
@@ -312,3 +318,8 @@ export {
   createProviderPositionChainAnchorRecordIntentMigrationV0031,
   createProviderPositionChainAnchorRecordIntentTestSchemaMigrationV0031,
 } from './0031-create-provider-position-chain-anchor-record-intents.migration';
+export {
+  createMainnetBalanceAgreementEvidenceV2Migration,
+  createMainnetBalanceAgreementEvidenceV2MigrationV0032,
+  createMainnetBalanceAgreementEvidenceV2TestSchemaMigrationV0032,
+} from './0032-upgrade-mainnet-balance-agreement-evidence-v2.migration';

@@ -94,6 +94,16 @@ three-key account, wallet, and network scope. All of this is static source
 integrity only: it cannot select a live provider, permit egress, activate the
 consumer, or clear any deployment or live-evidence blocker.
 
+Each chain adapter must also receive an opaque, privately branded deployment-
+identity verifier. The adapter binds a nonzero approved-manifest fingerprint
+and observed-identity fingerprint into its candidate only after the verifier
+authenticates the exact request and deployment. The V2 agreement coordinator
+requires both sources to match the registry's one approved manifest and to
+report that same value as their observed identity. The checked-in registry
+remains empty and `NOT_APPROVED`; no verifier constructor appears in any launch
+root. These pins establish a dormant source contract, not a live deployment
+identity or provider approval.
+
 The same closed artifact set now includes one provider-neutral, source-only
 Node HTTPS transport capsule. Preflight pins its exact SHA-256 and requires its
 reviewed class/import surface, per-exchange cancellable A+AAAA resolver, public
@@ -120,10 +130,13 @@ classifications without reading or forwarding an abort reason. The helper
 checks cancellation before transport, after a rejected transport call, and
 after a successful response; transports must accept the signal, and neither
 the helper nor downstream path may detach work with `Promise.race`. The dormant
-two-source coordinator uses `Promise.allSettled`, drains both same-signal reads,
-then rechecks cancellation before accessing either value. Rescan preserves the
-two cancellation classifications, while the existing SQS receipt remains the
-sole retry/redrive authority.
+two-source coordinator captures `Promise.allSettled` behind an abort-aware
+helper. Without cancellation it observes both same-signal reads to settlement;
+cancellation returns a fixed unavailable result promptly while the already-
+started pair remains observed by the captured all-settled promise. The
+coordinator rechecks the branded execution context before accessing either
+value. Rescan preserves the two cancellation classifications, while the
+existing SQS receipt remains the sole retry/redrive authority.
 
 The resolver and all checkpoint operations review the branded context, pass
 its exact signal to `PostgresService.queryWithCancellation`, and recheck after
@@ -177,6 +190,43 @@ Solana balance read also brackets all token-account calls with two reads of the
 selected block header; null or any position/hash/parent mismatch fails as
 `PROVIDER_UNAVAILABLE`. These are source-integrity checks, not provider or
 mainnet observations.
+
+The 68-artifact balance-consumer slice also byte-pins the exact migration
+`0005` principal constants inherited through `0028`, immutable migration
+`0027`, migration `0032`, and the migration index. Its semantic inspection
+requires a separate permanent append-only
+`balance_sync_financial_agreement_evidence_v2` relation, the exact V2 source-
+attestation and agreement fingerprint domains, all 51 generated coordinator-
+declared JSON string-type gates, owner-only V2 envelope validator and recorder
+functions, and production/test-schema registration after `0031`.
+The migration must supersede `0031`; preserve migration `0027`'s V1 relation,
+functions, constraints, manifest, and verifier byte-for-byte; reject, at V2
+admission, a fingerprint already committed in V1; accept only exact V2 replay;
+and refuse rollback once the V2 relation has data. Because V1 remains
+untouched, this check does not claim bidirectional or global concurrent
+serialization. The immutable V1 validator remains fail-closed because its
+committed position-ID expression attempts PostgreSQL NUL text with `chr(0)`;
+`0032` must not awaken or replace it and repairs only the derived V2 expression
+with bytea `convert_to(...) || decode('00', 'hex')` separators. It must expose
+no table, column, row-type, or function grant to API, worker, legacy,
+migration, balance-consumer, or `PUBLIC` and remain absent from runtime
+composition and launch roots. A passing source inspection still reports
+`databaseCapability: DORMANT_SOURCE_ONLY`; it does not clear
+`BALANCE_CONSUMER_DATABASE_CAPABILITY_NOT_ENABLED` or any other activation or
+live-evidence blocker.
+
+The generated verifier also requires an ordinary permanent nonpartitioned
+relation with no RLS, policies, or non-internal rules; exact column order,
+types, nullability, identity/generated/default/collation state; exact PL/pgSQL
+input/output signatures and function-body hashes; and no non-owner table,
+column, row-type, or function ACL. A guarded disposable loopback PostgreSQL run
+on 2026-09-07 passed 10/10 mainnet balance-agreement cases and 6/6 related
+provider-position cases. The mainnet cases prove V1 rejection leaves zero rows,
+the upgrade preserves the empty V1 relation and objects, and genuine Ethereum
+and Solana V2 envelopes record successfully. This is local-only integration
+evidence. It is not live-provider, deployed, production-catalog, or recursive
+historical-verifier closure, and exact normalized CHECK-definition hashes plus
+verification against the eventual live catalog remain pre-grant blockers.
 
 The inspected source keeps activation false, sets
 `BALANCE_CONSUMER_MODE=disabled`, and leaves the runtime uncomposed. The task

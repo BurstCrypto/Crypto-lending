@@ -380,6 +380,13 @@ const BALANCE_CONSUMER_ARTIFACTS = Object.freeze({
     resolve(__dirname, '../infra/postgres/validate-bootstrap-principals.mjs'),
     'utf8',
   ),
+  databasePrincipalBoundariesMigrationSource: readFileSync(
+    resolve(
+      __dirname,
+      '../apps/api/src/infrastructure/database/migrations/0005-enforce-database-principal-boundaries.migration.ts',
+    ),
+    'utf8',
+  ),
   walletAddressMigrationSource: readFileSync(
     resolve(
       __dirname,
@@ -398,6 +405,20 @@ const BALANCE_CONSUMER_ARTIFACTS = Object.freeze({
     resolve(
       __dirname,
       '../apps/api/src/infrastructure/database/migrations/0029-create-provider-position-chain-anchor-evidence.migration.ts',
+    ),
+    'utf8',
+  ),
+  mainnetBalanceAgreementEvidenceV1MigrationSource: readFileSync(
+    resolve(
+      __dirname,
+      '../apps/api/src/infrastructure/database/migrations/0027-create-mainnet-balance-agreement-evidence.migration.ts',
+    ),
+    'utf8',
+  ),
+  mainnetBalanceAgreementEvidenceV2MigrationSource: readFileSync(
+    resolve(
+      __dirname,
+      '../apps/api/src/infrastructure/database/migrations/0032-upgrade-mainnet-balance-agreement-evidence-v2.migration.ts',
     ),
     'utf8',
   ),
@@ -2963,8 +2984,8 @@ test('provider-position read inspection rejects dormant durable evidence and mig
     ],
     [
       'providerPositionMigrationIndexSource',
-      '  suspendGenericWorkerBalanceAuthorityMigrationV0028,\n  createProviderPositionChainAnchorEvidenceMigrationV0029,\n  enforceProviderPositionChainAnchorRecordDeadlineMigrationV0030,\n  createProviderPositionChainAnchorRecordIntentMigrationV0031,\n]);',
-      '  suspendGenericWorkerBalanceAuthorityMigrationV0028,\n  createProviderPositionChainAnchorEvidenceTestSchemaMigrationV0029,\n  enforceProviderPositionChainAnchorRecordDeadlineMigrationV0030,\n  createProviderPositionChainAnchorRecordIntentMigrationV0031,\n]);',
+      '  suspendGenericWorkerBalanceAuthorityMigrationV0028,\n  createProviderPositionChainAnchorEvidenceMigrationV0029,\n  enforceProviderPositionChainAnchorRecordDeadlineMigrationV0030,\n  createProviderPositionChainAnchorRecordIntentMigrationV0031,\n  createMainnetBalanceAgreementEvidenceV2MigrationV0032,\n]);',
+      '  suspendGenericWorkerBalanceAuthorityMigrationV0028,\n  createProviderPositionChainAnchorEvidenceTestSchemaMigrationV0029,\n  enforceProviderPositionChainAnchorRecordDeadlineMigrationV0030,\n  createProviderPositionChainAnchorRecordIntentMigrationV0031,\n  createMainnetBalanceAgreementEvidenceV2MigrationV0032,\n]);',
     ],
     [
       'providerPositionMigrationIndexSource',
@@ -5296,6 +5317,163 @@ test('balance-consumer inspection pins dormant deployment identity binding', () 
   }
 });
 
+test('balance-consumer inspection pins immutable V1 input and one-way owner-only V2 agreement evidence admission', () => {
+  assert.deepEqual(
+    inspectBalanceConsumerDeploymentArtifacts(BALANCE_CONSUMER_ARTIFACTS),
+    EXPECTED_DORMANT_BALANCE_CONSUMER_DEPLOYMENT,
+  );
+
+  const mutations: readonly (readonly [keyof BalanceConsumerArtifactSources, string, string])[] = [
+    ['databasePrincipalBoundariesMigrationSource', "id: '0005',", "id: '0004',"],
+    ['mainnetBalanceAgreementEvidenceV1MigrationSource', "id: '0027',", "id: '0026',"],
+    ['mainnetBalanceAgreementEvidenceV2MigrationSource', "id: '0032',", "id: '0031',"],
+    [
+      'mainnetBalanceAgreementEvidenceV2MigrationSource',
+      "supersedesVerificationOf: ['0031'],",
+      "supersedesVerificationOf: ['0027'],",
+    ],
+    [
+      'mainnetBalanceAgreementEvidenceV2MigrationSource',
+      'crypto-lending:mainnet-balance-source-attestation:v2',
+      'crypto-lending:mainnet-balance-source-attestation:v1',
+    ],
+    [
+      'mainnetBalanceAgreementEvidenceV2MigrationSource',
+      'EXACT_CHECKPOINT_BALANCE_AND_DEPLOYMENT_IDENTITY_MATCH',
+      'EXACT_CHECKPOINT_AND_BALANCE_MATCH',
+    ],
+    [
+      'mainnetBalanceAgreementEvidenceV2MigrationSource',
+      "OR pg_catalog.jsonb_typeof(observation -> 'walletId') <> 'string'",
+      "OR pg_catalog.jsonb_typeof(observation -> 'walletId') <> 'number'",
+    ],
+    [
+      'mainnetBalanceAgreementEvidenceV2MigrationSource',
+      "corroborating_attestation ->> 'observedIdentityFingerprintSha256'\n          <> agreement ->> 'observedIdentityFingerprintSha256'",
+      "corroborating_attestation ->> 'observedIdentityFingerprintSha256'\n          = agreement ->> 'observedIdentityFingerprintSha256'",
+    ],
+    [
+      'mainnetBalanceAgreementEvidenceV2MigrationSource',
+      "const TABLE = 'balance_sync_financial_agreement_evidence_v2';",
+      "const TABLE = 'balance_sync_financial_agreement_evidence';",
+    ],
+    [
+      'mainnetBalanceAgreementEvidenceV2MigrationSource',
+      'approved_manifest_fingerprint_sha256 text NOT NULL,',
+      'approved_manifest_fingerprint_sha256 text,',
+    ],
+    [
+      'mainnetBalanceAgreementEvidenceV2MigrationSource',
+      "|| pg_catalog.decode('00', 'hex')",
+      "|| pg_catalog.convert_to(pg_catalog.chr(0), 'UTF8')",
+    ],
+    [
+      'mainnetBalanceAgreementEvidenceV2MigrationSource',
+      'FROM ${V1_TABLE} AS evidence',
+      'FROM ${TABLE} AS evidence',
+    ],
+    [
+      'mainnetBalanceAgreementEvidenceV2MigrationSource',
+      "RAISE EXCEPTION 'mainnet balance agreement fingerprint collides with v1 evidence'",
+      "RAISE NOTICE 'mainnet balance agreement fingerprint collides with v1 evidence'",
+    ],
+    [
+      'mainnetBalanceAgreementEvidenceV2MigrationSource',
+      'IF prior.agreement_version = 2 AND prior.agreement_envelope = requested_envelope THEN',
+      'IF prior.agreement_envelope = requested_envelope THEN',
+    ],
+    [
+      'mainnetBalanceAgreementEvidenceV2MigrationSource',
+      'ALTER TABLE ${TABLE} ENABLE ALWAYS TRIGGER',
+      'ALTER TABLE ${TABLE} ENABLE TRIGGER',
+    ],
+    [
+      'mainnetBalanceAgreementEvidenceV2MigrationSource',
+      'REVOKE ALL PRIVILEGES ON TABLE ${TABLE} FROM ${guardedRoles};',
+      'GRANT SELECT ON TABLE ${TABLE} TO ${balance};',
+    ],
+    [
+      'mainnetBalanceAgreementEvidenceV2MigrationSource',
+      "RAISE EXCEPTION 'cannot roll back deployment-aware mainnet balance agreement evidence after use'",
+      "RAISE NOTICE 'dropping deployment-aware mainnet balance agreement evidence history'",
+    ],
+    [
+      'mainnetBalanceAgreementEvidenceV2MigrationSource',
+      'FROM (${previous.verifySql}) AS prior',
+      'FROM (SELECT true AS valid) AS prior',
+    ],
+    [
+      'mainnetBalanceAgreementEvidenceV2MigrationSource',
+      "AND pg_catalog.bool_and(relation.relpersistence = 'p')",
+      "AND pg_catalog.bool_and(relation.relpersistence = 'u')",
+    ],
+    [
+      'mainnetBalanceAgreementEvidenceV2MigrationSource',
+      'AND pg_catalog.bool_and(NOT relation.relrowsecurity)',
+      'AND pg_catalog.bool_and(relation.relrowsecurity)',
+    ],
+    [
+      'mainnetBalanceAgreementEvidenceV2MigrationSource',
+      "WHERE rewrite.ev_class = relation.oid AND rewrite.rulename <> '_RETURN'",
+      "WHERE rewrite.ev_class = relation.oid AND rewrite.rulename = '_RETURN'",
+    ],
+    [
+      'mainnetBalanceAgreementEvidenceV2MigrationSource',
+      "AND attribute.attidentity = ''",
+      "AND attribute.attidentity <> ''",
+    ],
+    [
+      'mainnetBalanceAgreementEvidenceV2MigrationSource',
+      'AND attribute.attcollation = CASE',
+      'AND attribute.attcollation <> CASE',
+    ],
+    [
+      'mainnetBalanceAgreementEvidenceV2MigrationSource',
+      `'i'::"char", 't'::"char", 't'::"char", 't'::"char"`,
+      `'i'::"char", 't'::"char", 't'::"char", 'i'::"char"`,
+    ],
+    [
+      'mainnetBalanceAgreementEvidenceV2MigrationSource',
+      'pg_catalog.aclexplode(guarded_attribute.attacl)',
+      'pg_catalog.aclexplode(NULL::aclitem[])',
+    ],
+    [
+      'migrationIndexSource',
+      '  createProviderPositionChainAnchorRecordIntentMigrationV0031,\n  createMainnetBalanceAgreementEvidenceV2MigrationV0032,\n]);',
+      '  createProviderPositionChainAnchorRecordIntentMigrationV0031,\n  createMainnetBalanceAgreementEvidenceV2TestSchemaMigrationV0032,\n]);',
+    ],
+    [
+      'migrationIndexSource',
+      '  createProviderPositionChainAnchorRecordIntentTestSchemaMigrationV0031,\n  createMainnetBalanceAgreementEvidenceV2TestSchemaMigrationV0032,\n]);',
+      '  createProviderPositionChainAnchorRecordIntentTestSchemaMigrationV0031,\n  createMainnetBalanceAgreementEvidenceV2MigrationV0032,\n]);',
+    ],
+  ];
+
+  for (const [key, approved, rejected] of mutations) {
+    assert.deepEqual(
+      inspectBalanceConsumerDeploymentArtifacts(
+        mutateBalanceConsumerArtifact(key, approved, rejected),
+      ),
+      INVALID_BALANCE_CONSUMER_DEPLOYMENT,
+      `${key}: ${approved}`,
+    );
+  }
+
+  for (const runtimeIdentity of [
+    'record_balance_sync_financial_agreement_evidence',
+    'record_balance_sync_financial_agreement_evidence_v2',
+  ]) {
+    assert.deepEqual(
+      inspectBalanceConsumerDeploymentArtifacts({
+        ...BALANCE_CONSUMER_ARTIFACTS,
+        appModuleSource: `${BALANCE_CONSUMER_ARTIFACTS.appModuleSource}\nvoid ${runtimeIdentity};\n`,
+      }),
+      INVALID_BALANCE_CONSUMER_DEPLOYMENT,
+      runtimeIdentity,
+    );
+  }
+});
+
 test('balance-consumer inspection requires one stable Solana header around account reads', () => {
   const mutations: readonly (readonly [string, string])[] = [
     [
@@ -5479,6 +5657,8 @@ test('balance-consumer inspection pins the dormant Node HTTPS transport without 
     ],
     ['const CONNECT_TIMEOUT_MS = 2_000;', 'const CONNECT_TIMEOUT_MS = 20_000;'],
     ['const IO_CLOSE_TIMEOUT_MS = 250;', 'const IO_CLOSE_TIMEOUT_MS = 2_500;'],
+    ["'eth_getStorageAt',", "'eth_getProof',"],
+    ["'getMultipleAccounts',", "'getProgramAccounts',"],
     ['resolver.resolve6(hostname,', '// resolver.resolve6(hostname,'],
     ['resolver.cancel();', 'void resolver;'],
     ['checkServerIdentity,', 'checkServerIdentity: () => undefined,'],
@@ -5924,7 +6104,7 @@ test('balance-consumer inspection pins cancellable PostgreSQL ownership and shut
 });
 
 test('balance-consumer inspection brands and freezes only the exact dormant local contract', () => {
-  assert.equal(Object.keys(BALANCE_CONSUMER_ARTIFACTS).length, 65);
+  assert.equal(Object.keys(BALANCE_CONSUMER_ARTIFACTS).length, 68);
   const inspected = inspectBalanceConsumerDeploymentArtifacts(BALANCE_CONSUMER_ARTIFACTS);
   assert.deepEqual(inspected, EXPECTED_DORMANT_BALANCE_CONSUMER_DEPLOYMENT);
   assert.equal(Object.isFrozen(inspected), true);
@@ -6564,6 +6744,18 @@ test('balance-consumer artifact shape, bounds, and private brand fail closed', (
   delete missingWalletIdentity.walletIdentitySource;
   const missingSolanaTokenAccount = { ...BALANCE_CONSUMER_ARTIFACTS } as Record<string, unknown>;
   delete missingSolanaTokenAccount.solanaTokenAccountSource;
+  const missingDatabasePrincipalBoundariesMigration = {
+    ...BALANCE_CONSUMER_ARTIFACTS,
+  } as Record<string, unknown>;
+  delete missingDatabasePrincipalBoundariesMigration.databasePrincipalBoundariesMigrationSource;
+  const missingMainnetBalanceAgreementEvidenceV1Migration = {
+    ...BALANCE_CONSUMER_ARTIFACTS,
+  } as Record<string, unknown>;
+  delete missingMainnetBalanceAgreementEvidenceV1Migration.mainnetBalanceAgreementEvidenceV1MigrationSource;
+  const missingMainnetBalanceAgreementEvidenceV2Migration = {
+    ...BALANCE_CONSUMER_ARTIFACTS,
+  } as Record<string, unknown>;
+  delete missingMainnetBalanceAgreementEvidenceV2Migration.mainnetBalanceAgreementEvidenceV2MigrationSource;
   const accessor = { ...BALANCE_CONSUMER_ARTIFACTS } as Record<string, unknown>;
   Object.defineProperty(accessor, 'activationSource', {
     enumerable: true,
@@ -6601,6 +6793,9 @@ test('balance-consumer artifact shape, bounds, and private brand fail closed', (
     missingSupportedAssetRegistry,
     missingWalletIdentity,
     missingSolanaTokenAccount,
+    missingDatabasePrincipalBoundariesMigration,
+    missingMainnetBalanceAgreementEvidenceV1Migration,
+    missingMainnetBalanceAgreementEvidenceV2Migration,
     { ...BALANCE_CONSUMER_ARTIFACTS, unexpected: 'value' },
     { ...BALANCE_CONSUMER_ARTIFACTS, runtimeSource: 1 },
     accessor,

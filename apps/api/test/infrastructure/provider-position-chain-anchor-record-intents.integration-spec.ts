@@ -18,6 +18,9 @@ const SHA256 = /^[0-9a-f]{64}$/u;
 const ETHEREUM = 'eip155:1' as const;
 const SOLANA = 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp' as const;
 const REGISTRY_FINGERPRINT = '5058b141479f114c1e5f87ed8798fbb7a7ffcce7b502aa7e0794dc53ca1f767d';
+const MIGRATIONS_THROUGH_0031 = DATABASE_TEST_SCHEMA_MIGRATION_LIST.filter(
+  ({ id }) => id <= '0031',
+);
 
 type NetworkId = typeof ETHEREUM | typeof SOLANA;
 
@@ -155,7 +158,7 @@ describeWithPostgres('provider position chain-anchor record intents PostgreSQL c
   jest.setTimeout(180_000);
 
   const schema = `anchor_intents_${randomBytes(8).toString('hex')}`;
-  const expectedMigrationIds = DATABASE_TEST_SCHEMA_MIGRATION_LIST.map(({ id }) => id);
+  const expectedMigrationIds = MIGRATIONS_THROUGH_0031.map(({ id }) => id);
   let fixtureSequence = 0;
   let appliedMigrationIds: string[] = [];
   let adminPool: Pool;
@@ -320,7 +323,7 @@ describeWithPostgres('provider position chain-anchor record intents PostgreSQL c
       max: 4,
       options: `-c search_path=${schema}`,
     });
-    runner = new MigrationRunner(operationPool, DATABASE_TEST_SCHEMA_MIGRATION_LIST);
+    runner = new MigrationRunner(operationPool, MIGRATIONS_THROUGH_0031);
     appliedMigrationIds = await runner.up();
   });
 
@@ -334,7 +337,7 @@ describeWithPostgres('provider position chain-anchor record intents PostgreSQL c
 
   it('applies migration 0031 and its cumulative live catalog verifier returns true', async () => {
     expect(appliedMigrationIds).toEqual(expectedMigrationIds);
-    const migration = DATABASE_TEST_SCHEMA_MIGRATION_LIST.find(({ id }) => id === '0031');
+    const migration = MIGRATIONS_THROUGH_0031.find(({ id }) => id === '0031');
     if (!migration?.verifySql) throw new Error('Migration 0031 verifier is missing');
     await expect(operationPool.query<{ valid: boolean }>(migration.verifySql)).resolves.toEqual(
       expect.objectContaining({ rows: [{ valid: true }] }),

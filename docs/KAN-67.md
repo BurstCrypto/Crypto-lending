@@ -141,24 +141,42 @@ financial action.
   time-bounded source-pair registry; distinct source IDs, failure families, and
   reader instances; current identity-validated evidence; an exact Ethereum
   block-number/hash/parent checkpoint or Solana rooted finalized-slot/block/
-  parent checkpoint; and identical complete stablecoin balances. Its immutable
-  candidate preserves both source attestations and a domain-separated agreement
+  parent checkpoint; identical complete stablecoin balances; and an approved
+  deployment-manifest fingerprint that exactly matches each source's observed
+  deployment-identity fingerprint. Its immutable V2 candidate preserves both
+  deployment-aware source attestations and a domain-separated agreement
   fingerprint, while setting both persistence and financial authority false.
-  Migration `0027` now adds a separate append-only
-  `balance_sync_financial_agreement_evidence` table and an owner-only recording
-  function. The database revalidates the complete closed envelope, the exact
-  active three-asset set, canonical position IDs, the later retrieval time,
-  both ordered and independent attestations, exact finalized checkpoint, and
-  every coordinator-v1 domain-separated SHA-256 fingerprint before recording.
+  Migration `0027` established the separate append-only
+  `balance_sync_financial_agreement_evidence` table and owner-only V1 recorder.
+  Migration `0032` leaves that V1 relation, its functions, constraints,
+  manifest, and verifier byte-for-byte unchanged. V1 remains fail-closed: its
+  committed PostgreSQL position-ID expression attempts to construct NUL text
+  with `chr(0)`, so it cannot accept otherwise-valid agreement evidence.
+  Migration `0032` neither awakens nor replaces that path. It adds a distinct
+  permanent append-only `balance_sync_financial_agreement_evidence_v2` relation plus
+  owner-only V2 envelope validation and recording functions, repairing only
+  the derived V2 position-ID hash with bytea `convert_to(...) ||
+decode('00', 'hex')` separators. The V2 database path
+  revalidates the complete closed envelope, the exact active three-asset set,
+  canonical position IDs, the later retrieval time, both ordered and
+  independent attestations, exact finalized checkpoint, deployment-identity
+  agreement, all 51 coordinator-declared JSON string types, and every
+  coordinator-V2 domain-separated SHA-256 fingerprint before recording. When a
+  candidate is presented to the V2 recorder, it
+  rejects a fingerprint already committed in V1 and accepts only an exact V2
+  replay. V1 remains untouched; this is not a bidirectional or global
+  concurrent-serialization claim.
   It locks and binds the active registered wallet and accepts a new record only
   while the source-pair approval and chain freshness window remain current.
   Exact replay returns `IDEMPOTENT_REPLAY`; same-fingerprint content conflict is
   rejected. Both row mutation and truncation are protected by `ALWAYS`
   append-only triggers, and rollback refuses to delete history once any row
-  exists. The table, row type, validators, and recorder remain schema-owner
-  only: API, worker, legacy, migration, and `PUBLIC` receive no table or function
-  capability. Migration `0027` supersedes the cumulative `0026` verifier and
-  therefore preserves the stablecoin-ingestion suspension.
+  exists. The table, its columns, row type, validators, and recorder remain
+  schema-owner only: API, worker, legacy, migration, and `PUBLIC` receive no
+  table, column, type, or function capability. Migration `0032` supersedes the
+  cumulative `0031` verifier, so it
+  preserves the earlier stablecoin-ingestion and generic-worker suspensions as
+  well as the dormant provider-position boundaries.
   The checked-in source-pair registry is empty and `NOT_APPROVED`; the
   coordinator and transcript adapters remain unregistered and own no endpoint
   or egress path. Distinct synthetic aliases do not establish real provider
@@ -189,9 +207,15 @@ financial action.
   alerting require later approved live-integration evidence.
 
 There were no installs, external network/RPC/provider calls, cloud services,
-trials, deployments, pushes, or paid actions in this implementation. Durable
-integration was exercised only against the guarded disposable loopback
-PostgreSQL fixture.
+trials, deployments, pushes, or paid actions in this implementation. On
+2026-09-07, the guarded disposable loopback PostgreSQL run passed 10/10 mainnet
+balance-agreement cases and the related provider-position lane passed 6/6. The
+mainnet lane covered V1 rejection with zero rows, upgrade preservation of the
+empty V1 relation and its objects, and genuine Ethereum and Solana V2
+acceptance. This is local-only database evidence, not a live provider,
+blockchain, deployment, or production-catalog result. Exact normalized CHECK-
+definition hashes and verification against the eventual live catalog remain
+pre-grant blockers.
 
 ## Local verification
 
@@ -200,6 +224,7 @@ All tests use deterministic injected readers and an injected clock.
 ```powershell
 npm test --workspace @crypto-lending/api -- --runInBand src/blockchain-sync/application/mainnet-balance-two-source-agreement.coordinator.spec.ts
 npm test --workspace @crypto-lending/api -- --runInBand src/infrastructure/database/migrations/0027-create-mainnet-balance-agreement-evidence.migration.spec.ts
+npm test --workspace @crypto-lending/api -- --runInBand src/infrastructure/database/migrations/0032-upgrade-mainnet-balance-agreement-evidence-v2.migration.spec.ts
 npm test --workspace @crypto-lending/api -- --runInBand src/portfolio/domain/portfolio-balance-snapshot.spec.ts src/portfolio/application/portfolio.service.spec.ts
 npm run test:e2e --workspace @crypto-lending/api -- --runInBand test/portfolio.e2e-spec.ts
 npm run typecheck --workspace @crypto-lending/api

@@ -56,19 +56,24 @@ describe('migration 0031 provider position chain anchor record intents', () => {
   const down = sql(migration.downSql);
   const verifier = migration.verifySql ?? '';
 
-  it('supersedes 0030 and registers the canonical and isolated migrations last', () => {
+  it('supersedes 0030 and registers both variants immediately before 0032', () => {
     expect(migration.id).toBe('0031');
     expect(migration.supersedesVerificationOf).toEqual(['0030']);
     expect(migration.transactional).not.toBe(false);
     expect(migration.description).toContain('one-shot');
     expect(migration.description).toContain('source-only reconciliation');
-    expect(DATABASE_MIGRATION_LIST.at(-1)).toBe(
+    expect(DATABASE_MIGRATION_LIST.at(-2)).toBe(
       createProviderPositionChainAnchorRecordIntentMigrationV0031,
     );
-    expect(DATABASE_TEST_SCHEMA_MIGRATION_LIST.at(-1)).toBe(
+    expect(DATABASE_TEST_SCHEMA_MIGRATION_LIST.at(-2)).toBe(
       createProviderPositionChainAnchorRecordIntentTestSchemaMigrationV0031,
     );
-    expect(DATABASE_MIGRATION_LIST.map(({ id }) => id).slice(-3)).toEqual(['0029', '0030', '0031']);
+    expect(DATABASE_MIGRATION_LIST.map(({ id }) => id).slice(-4)).toEqual([
+      '0029',
+      '0030',
+      '0031',
+      '0032',
+    ]);
   });
 
   it('keeps every declared PostgreSQL object identifier within the 63-byte limit', () => {
