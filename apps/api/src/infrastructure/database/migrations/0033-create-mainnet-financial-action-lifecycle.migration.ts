@@ -582,18 +582,23 @@ const ENFORCE_EVENT_BODY = `
           ARRAY['fingerprintEncodingVersion', 'networkId', 'transactionId']::text[],
           ARRAY['1', intent.network_id, NEW.chain_transaction_id]::text[]
         );
-        SELECT stored.* INTO STRICT submission_event
-        FROM mainnet_financial_action_events AS stored
-        WHERE stored.intent_id = NEW.intent_id
-          AND stored.stage = 'WALLET_SIGNED_SUBMISSION_BOUND';
-        IF NEW.submission_fingerprint_sha256
-            IS DISTINCT FROM submission_event.submission_fingerprint_sha256
-          OR NEW.chain_transaction_id IS DISTINCT FROM submission_event.chain_transaction_id
-          OR NEW.transaction_identity_sha256
-            IS DISTINCT FROM submission_event.transaction_identity_sha256
-        THEN
-          RAISE EXCEPTION 'mainnet financial action submission identity conflict'
-            USING ERRCODE = '23505';
+        -- The first signed-bound event establishes the submission identity. Every
+        -- later event must inherit that exact stored identity instead of trusting
+        -- its caller.
+        IF NEW.stage <> 'WALLET_SIGNED_SUBMISSION_BOUND' THEN
+          SELECT stored.* INTO STRICT submission_event
+          FROM mainnet_financial_action_events AS stored
+          WHERE stored.intent_id = NEW.intent_id
+            AND stored.stage = 'WALLET_SIGNED_SUBMISSION_BOUND';
+          IF NEW.submission_fingerprint_sha256
+              IS DISTINCT FROM submission_event.submission_fingerprint_sha256
+            OR NEW.chain_transaction_id IS DISTINCT FROM submission_event.chain_transaction_id
+            OR NEW.transaction_identity_sha256
+              IS DISTINCT FROM submission_event.transaction_identity_sha256
+          THEN
+            RAISE EXCEPTION 'mainnet financial action submission identity conflict'
+              USING ERRCODE = '23505';
+          END IF;
         END IF;
       END IF;
 
@@ -745,6 +750,12 @@ const ENFORCE_EVENT_BODY = `
           ]::text[]
         )
       END;
+      IF NEW.stage = 'WALLET_SIGNED_SUBMISSION_BOUND'
+        AND NEW.submission_fingerprint_sha256 IS DISTINCT FROM expected_transition
+      THEN
+        RAISE EXCEPTION 'mainnet financial action submission fingerprint conflict'
+          USING ERRCODE = '23505';
+      END IF;
       NEW.transition_fingerprint_sha256 := expected_transition;
       NEW.recorded_at := database_recorded_at;
       NEW.terminal := NEW.stage IN (

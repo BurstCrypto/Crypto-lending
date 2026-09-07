@@ -207,6 +207,26 @@ describe('migration 0033 dormant mainnet financial action lifecycle', () => {
     expect(up).not.toContain('DISABLE TRIGGER');
   });
 
+  it('lets the first signed submission establish its identity and pins every later event to it', () => {
+    const eventTrigger = functionBody(
+      up,
+      'enforce_mainnet_action_event_transition',
+      'validate_mainnet_action_intent_completion',
+    );
+    expect(eventTrigger).toContain(
+      "IF NEW.stage <> 'WALLET_SIGNED_SUBMISSION_BOUND' THEN\n          SELECT stored.* INTO STRICT submission_event",
+    );
+    expect(eventTrigger).toContain(
+      "IF NEW.stage = 'WALLET_SIGNED_SUBMISSION_BOUND'\n        AND NEW.submission_fingerprint_sha256 IS DISTINCT FROM expected_transition",
+    );
+    expect(eventTrigger).toContain(
+      "RAISE EXCEPTION 'mainnet financial action submission fingerprint conflict'",
+    );
+    expect(eventTrigger.indexOf('SELECT stored.* INTO STRICT submission_event')).toBeLessThan(
+      eventTrigger.indexOf('NEW.transition_fingerprint_sha256 := expected_transition'),
+    );
+  });
+
   it('keeps signing gated but never strands post-bind evidence across expiry or revocation', () => {
     const bind = functionBody(
       up,
