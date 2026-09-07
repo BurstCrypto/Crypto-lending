@@ -2260,6 +2260,31 @@ test('schema v3 rejects older bundles and every write-authority assertion', () =
   }
 });
 
+test('content-addressed bundle bindings reject zero-digest placeholders', () => {
+  for (const field of [
+    'releaseCandidateManifestSha256',
+    'deploymentTargetSha256',
+    'directoryConfigurationSha256',
+  ] as const) {
+    const candidate = structuredClone(validContent()) as unknown as Record<string, unknown>;
+    candidate[field] = '0'.repeat(64);
+    expectInvalid(() =>
+      productionEvidenceBundleSigningBytes(
+        unsignedBundle(candidate as unknown as ProductionEvidenceBundleContent),
+      ),
+    );
+  }
+
+  const zeroCapture = structuredClone(validContent()) as unknown as Record<string, unknown>;
+  const rdsEvidence = mutableRecord(zeroCapture.rdsMasterLifecycleEvidence);
+  mutableRecord(rdsEvidence.supportingCapture).captureSha256 = '0'.repeat(64);
+  expectInvalid(() =>
+    productionEvidenceBundleSigningBytes(
+      unsignedBundle(zeroCapture as unknown as ProductionEvidenceBundleContent),
+    ),
+  );
+});
+
 test('freshness is checked again when evidence is applied, including exclusive expiry', () => {
   const options = testOptions();
   const verified = verifyProductionEvidenceBundleBytesWithTestRegistries(

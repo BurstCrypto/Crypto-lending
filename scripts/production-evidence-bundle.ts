@@ -647,14 +647,14 @@ function timestamp(value: unknown): Readonly<{ text: string; milliseconds: numbe
 }
 
 function sha256(value: unknown): string {
-  if (typeof value !== 'string' || !SHA256_PATTERN.test(value)) return invalid();
+  if (typeof value !== 'string' || !SHA256_PATTERN.test(value) || /^0{64}$/u.test(value)) {
+    return invalid();
+  }
   return value;
 }
 
 function evidenceSha256(value: unknown): string {
-  const digest = sha256(value);
-  if (/^0{64}$/u.test(digest)) return invalid();
-  return digest;
+  return sha256(value);
 }
 
 function safeReference(value: unknown): string {
