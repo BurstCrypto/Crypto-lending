@@ -19,6 +19,13 @@ import {
   type RecordDormantMainnetFinancialActionReconciliationRequestV1,
 } from '../../src/mainnet-actions/application/ports/dormant-mainnet-financial-action-lifecycle-durable.port';
 import { PostgresDormantMainnetFinancialActionLifecycleDurableAdapter } from '../../src/mainnet-actions/infrastructure/postgres-dormant-mainnet-financial-action-lifecycle-durable.adapter';
+import {
+  activeWalletRegistrationKey,
+  createWalletRegistrationKey,
+  createWalletRegistrationKeyRing,
+  digestWalletIdentity,
+  type WalletRegistrationDigestReference,
+} from '../../src/wallets/infrastructure/crypto/wallet-registration-crypto';
 
 const testDatabaseUrl = process.env.TEST_DATABASE_URL;
 const runInfrastructureIntegration = process.env.RUN_INFRASTRUCTURE_INTEGRATION === '1';
@@ -29,10 +36,11 @@ const SHA256 = /^[0-9a-f]{64}$/u;
 const ETHEREUM_MAINNET = 'eip155:1' as const;
 const ETHEREUM_USDC = '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48';
 const AAVE_V3_MARKET = '0x87870bca3f3fd6335c3f4ce8392d69350b4fa4e2';
+const WALLET_ADDRESS = '0x1111111111111111111111111111111111111111';
 const CHAIN_TRANSACTION_ID = `0x${'b'.repeat(64)}`;
 const FINALIZED_BLOCK_ID = `0x${'c'.repeat(64)}`;
-const MIGRATIONS_THROUGH_0033 = DATABASE_TEST_SCHEMA_MIGRATION_LIST.filter(
-  ({ id }) => id <= '0033',
+const MIGRATIONS_THROUGH_0034 = DATABASE_TEST_SCHEMA_MIGRATION_LIST.filter(
+  ({ id }) => id <= '0034',
 );
 
 type Queryable = Pick<PoolClient, 'query'>;
@@ -125,10 +133,15 @@ async function withForcedDeferredConstraints<Row>(
   }
 }
 
-async function registerActiveEthereumWallet(pool: Pool, accountId: string): Promise<string> {
+async function registerActiveEthereumWallet(
+  pool: Pool,
+  accountId: string,
+  parentAddressDigest: WalletRegistrationDigestReference<'address'>,
+  acceptedAddressDigest: WalletRegistrationDigestReference<'address'>,
+): Promise<string> {
   const challengeId = randomUUID();
   const walletId = randomUUID();
-  const addressDigest = randomBytes(32);
+  const parentAddressDigestBytes = Buffer.from(parentAddressDigest.value, 'hex');
   const registry = MAINNET_SUPPORTED_ASSET_REGISTRY.latest;
   await pool.query(
     `INSERT INTO wallet_ownership_challenges (
@@ -139,7 +152,7 @@ async function registerActiveEthereumWallet(pool: Pool, accountId: string): Prom
        status, created_at, issued_at, expires_at, completed_at, payload_destroyed_at
      ) VALUES (
        $1, $2, 'EVM_ERC4361_ERC191', 'eip155', '1', 'MAINNET', $3, $4,
-       1, $5, 1, $6, 1, $7, 1, $8, 'REGISTERED',
+       $5, $6, 1, $7, 1, $8, 1, $9, 'REGISTERED',
        statement_timestamp() - interval '2 minutes',
        statement_timestamp() - interval '2 minutes',
        statement_timestamp() + interval '5 minutes',
@@ -151,7 +164,8 @@ async function registerActiveEthereumWallet(pool: Pool, accountId: string): Prom
       accountId,
       registry.version,
       registry.fingerprintSha256,
-      addressDigest,
+      parentAddressDigest.version,
+      parentAddressDigestBytes,
       randomBytes(32),
       randomBytes(32),
       randomBytes(32),
@@ -161,8 +175,8 @@ async function registerActiveEthereumWallet(pool: Pool, accountId: string): Prom
     `INSERT INTO wallet_ownership_challenge_identity_digests (
        challenge_id, account_id, chain_namespace, chain_reference,
        address_digest_version, address_digest
-     ) VALUES ($1, $2, 'eip155', '1', 1, $3)`,
-    [challengeId, accountId, addressDigest],
+     ) VALUES ($1, $2, 'eip155', '1', $3, $4)`,
+    [challengeId, accountId, parentAddressDigest.version, parentAddressDigestBytes],
   );
   await pool.query(
     `INSERT INTO registered_wallets (
@@ -174,7 +188,7 @@ async function registerActiveEthereumWallet(pool: Pool, accountId: string): Prom
        metadata_key_version, metadata_ciphertext, metadata_iv, metadata_auth_tag
      ) VALUES (
        $1, $2, $3, 'eip155', '1', 'MAINNET', $4, $5,
-       1, $6, 1, $7, $8, $9, 1, $10, $11, $12
+       $6, $7, 1, $8, $9, $10, 1, $11, $12, $13
      )`,
     [
       walletId,
@@ -182,7 +196,8 @@ async function registerActiveEthereumWallet(pool: Pool, accountId: string): Prom
       challengeId,
       registry.version,
       registry.fingerprintSha256,
-      addressDigest,
+      parentAddressDigest.version,
+      parentAddressDigestBytes,
       Buffer.from('dormant-mainnet-adapter-address'),
       randomBytes(12),
       randomBytes(16),
@@ -191,6 +206,35 @@ async function registerActiveEthereumWallet(pool: Pool, accountId: string): Prom
       randomBytes(16),
     ],
   );
+  await pool.query(
+    `INSERT INTO registered_wallet_identity_digests (
+       wallet_id, account_id, chain_namespace, chain_reference,
+       address_digest_version, address_digest, status, registered_at, revoked_at
+     ) VALUES ($1, $2, 'eip155', '1', $3, $4, 'ACTIVE', statement_timestamp(), NULL)`,
+    [
+      walletId,
+      accountId,
+      acceptedAddressDigest.version,
+      Buffer.from(acceptedAddressDigest.value, 'hex'),
+    ],
+  );
+  await pool.query(
+    'ALTER TABLE wallet_identity_key_policy DISABLE TRIGGER wallet_identity_key_policy_immutable_row',
+  );
+  try {
+    await pool.query(
+      `UPDATE wallet_identity_key_policy
+       SET active_write_version = $1::smallint,
+           accepted_read_versions = ARRAY[$1::smallint],
+           updated_at = pg_catalog.clock_timestamp()
+       WHERE policy_name = 'wallet-registration-identity-hmac'`,
+      [acceptedAddressDigest.version],
+    );
+  } finally {
+    await pool.query(
+      'ALTER TABLE wallet_identity_key_policy ENABLE ALWAYS TRIGGER wallet_identity_key_policy_immutable_row',
+    );
+  }
   return walletId;
 }
 
@@ -252,7 +296,11 @@ async function transitionYieldOperation(
   );
 }
 
-async function provisionSubmittedYieldFixture(pool: Pool): Promise<YieldFixture> {
+async function provisionSubmittedYieldFixture(
+  pool: Pool,
+  parentAddressDigest: WalletRegistrationDigestReference<'address'>,
+  acceptedAddressDigest: WalletRegistrationDigestReference<'address'>,
+): Promise<YieldFixture> {
   const accountId = randomUUID();
   const ledgerTransactionId = randomUUID();
   const ledgerBook = await requiredRow<{ book_id: string }>(
@@ -272,7 +320,12 @@ async function provisionSubmittedYieldFixture(pool: Pool): Promise<YieldFixture>
      ) VALUES ($1, $2, $3, 'DIRECT_SETTLEMENT', $4)`,
     [ledgerTransactionId, accountId, ledgerBook.book_id, randomUUID()],
   );
-  const walletId = await registerActiveEthereumWallet(pool, accountId);
+  const walletId = await registerActiveEthereumWallet(
+    pool,
+    accountId,
+    parentAddressDigest,
+    acceptedAddressDigest,
+  );
   const fixtureWithoutSubmission = {
     accountId,
     correlationId: randomUUID(),
@@ -371,7 +424,7 @@ describeWithPostgres('PostgreSQL dormant mainnet financial action durable adapte
   jest.setTimeout(180_000);
 
   const schema = `mainnet_action_adapter_${randomBytes(8).toString('hex')}`;
-  const expectedMigrationIds = MIGRATIONS_THROUGH_0033.map(({ id }) => id);
+  const expectedMigrationIds = MIGRATIONS_THROUGH_0034.map(({ id }) => id);
   let adminPool: Pool | undefined;
   let operationPool: Pool | undefined;
   let postgres: PostgresService | undefined;
@@ -406,7 +459,7 @@ describeWithPostgres('PostgreSQL dormant mainnet financial action durable adapte
       options: `-c search_path=${schema}`,
     });
     postgres = new PostgresService(operationPool);
-    runner = new MigrationRunner(operationPool, MIGRATIONS_THROUGH_0033);
+    runner = new MigrationRunner(operationPool, MIGRATIONS_THROUGH_0034);
     appliedMigrationIds = await runner.up();
   });
 
@@ -432,11 +485,67 @@ describeWithPostgres('PostgreSQL dormant mainnet financial action durable adapte
     await expect(requireRunner().assertUpToDate()).resolves.toBeUndefined();
     const pool = requireOperationPool();
     if (!postgres) throw new Error('Dormant mainnet lifecycle PostgresService is unavailable');
-    const fixture = await provisionSubmittedYieldFixture(pool);
+    const parentIdentityKey = createWalletRegistrationKey(
+      'identity-hmac',
+      1,
+      randomBytes(32).toString('base64url'),
+      'dormant-mainnet-adapter-parent-identity-v1',
+    );
+    const currentIdentityKey = createWalletRegistrationKey(
+      'identity-hmac',
+      2,
+      randomBytes(32).toString('base64url'),
+      'dormant-mainnet-adapter-current-identity-v2',
+    );
+    const identityKeyRing = createWalletRegistrationKeyRing('identity-hmac', 2, [
+      currentIdentityKey,
+    ]);
+    const parentWalletAddressDigest = digestWalletIdentity(
+      parentIdentityKey,
+      ETHEREUM_MAINNET,
+      WALLET_ADDRESS,
+    );
+    const currentWalletAddressDigest = digestWalletIdentity(
+      activeWalletRegistrationKey(identityKeyRing),
+      ETHEREUM_MAINNET,
+      WALLET_ADDRESS,
+    );
+    const fixture = await provisionSubmittedYieldFixture(
+      pool,
+      parentWalletAddressDigest,
+      currentWalletAddressDigest,
+    );
+    const identityBinding = await requiredRow<{
+      parent_digest_version: number;
+      accepted_read_versions: number[];
+      current_alias_count: number;
+    }>(
+      pool,
+      `SELECT wallet.address_digest_version AS parent_digest_version,
+              policy.accepted_read_versions,
+              (SELECT pg_catalog.count(*)::integer
+               FROM registered_wallet_identity_digests AS alias
+               WHERE alias.wallet_id = wallet.wallet_id
+                 AND alias.address_digest_version = $2::smallint
+                 AND alias.address_digest = pg_catalog.decode($3::text, 'hex')
+                 AND alias.status = 'ACTIVE'
+                 AND alias.revoked_at IS NULL) AS current_alias_count
+       FROM registered_wallets AS wallet
+       CROSS JOIN wallet_identity_key_policy AS policy
+       WHERE wallet.wallet_id = $1::uuid
+         AND policy.policy_name = 'wallet-registration-identity-hmac'`,
+      [fixture.walletId, currentWalletAddressDigest.version, currentWalletAddressDigest.value],
+    );
+    expect(identityBinding).toEqual({
+      parent_digest_version: 1,
+      accepted_read_versions: [2],
+      current_alias_count: 1,
+    });
     const serverNow = await databaseNow(pool);
     const adapter = new PostgresDormantMainnetFinancialActionLifecycleDurableAdapter(
       postgres,
       Object.freeze({ now: () => serverNow }),
+      identityKeyRing,
     );
     const signal = new AbortController().signal;
     const intentId = randomUUID();
@@ -449,7 +558,7 @@ describeWithPostgres('PostgreSQL dormant mainnet financial action durable adapte
       replayProtectionId: randomUUID(),
       idempotencyKeyDigestSha256: digest(),
       networkId: ETHEREUM_MAINNET,
-      walletAddress: '0x1111111111111111111111111111111111111111',
+      walletAddress: WALLET_ADDRESS,
       providerId: 'aave',
       protocolId: 'aave-v3',
       marketId: AAVE_V3_MARKET,
@@ -515,6 +624,43 @@ describeWithPostgres('PostgreSQL dormant mainnet financial action durable adapte
     );
     expect(Date.parse(prepared.effectiveAt)).toBeLessThanOrEqual(Date.parse(prepared.recordedAt));
     expect(Date.parse(prepared.effectiveAt)).toBeLessThan(Date.parse(intentInput.expiresAt));
+
+    const mismatchedIntentId = randomUUID();
+    const mismatchedPrepareRequest: PrepareDormantMainnetFinancialActionDurableRequestV1 =
+      Object.freeze({
+        ...prepareRequest,
+        intentInput: Object.freeze({
+          ...intentInput,
+          intentId: mismatchedIntentId,
+          replayProtectionId: randomUUID(),
+          idempotencyKeyDigestSha256: digest(),
+          walletAddress: '0x3333333333333333333333333333333333333333',
+        }),
+        volatileIntentCommitment: Object.freeze({
+          ...prepareRequest.volatileIntentCommitment,
+          sha256: digest(),
+        }),
+        correlationId: randomUUID(),
+      });
+    const mismatchedCapability = await adapter.prepare(mismatchedPrepareRequest);
+    expect(adapter.reviewResult(mismatchedCapability, mismatchedPrepareRequest)).toMatchObject({
+      outcome: 'DATABASE_OUTCOME_UNKNOWN',
+      operation: 'PREPARE',
+      lastConfirmedCursor: null,
+      recoveryMode: 'READ_ONLY',
+      mayAuthorizeFinancialAction: false,
+      apiMaySign: false,
+      apiMayBroadcast: false,
+      automaticRetryAllowed: false,
+      ledgerSettlementAuthority: false,
+    });
+    const mismatchedRows = await pool.query<{ intent_count: number }>(
+      `SELECT pg_catalog.count(*)::integer AS intent_count
+       FROM mainnet_financial_action_intents
+       WHERE intent_id = $1::uuid`,
+      [mismatchedIntentId],
+    );
+    expect(mismatchedRows.rows).toEqual([{ intent_count: 0 }]);
 
     const signedAt = await databaseNow(pool);
     const bindRequest: BindDormantMainnetFinancialActionSubmissionRequestV1 = Object.freeze({

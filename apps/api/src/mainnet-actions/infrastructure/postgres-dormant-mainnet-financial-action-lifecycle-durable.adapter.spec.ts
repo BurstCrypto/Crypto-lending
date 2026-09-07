@@ -3,6 +3,16 @@ import {
   type SupportedStablecoin,
 } from '../../blockchain/domain/supported-asset-registry';
 import type { PostgresService } from '../../infrastructure/database/postgres.service';
+import {
+  activeWalletRegistrationKey,
+  createWalletRegistrationKey,
+  createWalletRegistrationKeyRing,
+  digestWalletIdentity,
+  walletRegistrationKeyForVersion,
+  type WalletRegistrationDigestReference,
+  type WalletRegistrationKey,
+  type WalletRegistrationKeyRing,
+} from '../../wallets/infrastructure/crypto/wallet-registration-crypto';
 import type { DormantMainnetFinancialActionIntentInputV1 } from '../domain/dormant-mainnet-financial-action';
 import {
   DORMANT_MAINNET_FINANCIAL_ACTION_DURABLE_LIFECYCLE_VERSION,
@@ -51,11 +61,11 @@ const SOLANA_MARKET = base58Filled(8, 32);
 const SOLANA_TRANSACTION = base58Filled(9, 64);
 const SOLANA_BLOCK = base58Filled(10, 32);
 const SOLANA_FINALIZED_BLOCK = base58Filled(11, 32);
+const ETHEREUM_WALLET = '0x1111111111111111111111111111111111111111';
 const INTENT_FINGERPRINT = digest('1');
 const VOLATILE_COMMITMENT = digest('2');
 const PREPARED_SNAPSHOT = digest('3');
 const IDEMPOTENCY_DIGEST = digest('4');
-const WALLET_IDENTITY_DIGEST = digest('5');
 const SUBMISSION_FINGERPRINT = digest('6');
 const BOUND_SNAPSHOT = digest('7');
 const BROADCAST_SNAPSHOT = digest('8');
@@ -69,6 +79,13 @@ const EFFECT_DIGEST = digest('f');
 const FAILURE_DIGEST = 'ab'.repeat(32);
 const BLOCK_IDENTITY_DIGEST = 'bc'.repeat(32);
 const FINALIZED_BLOCK_IDENTITY_DIGEST = 'cd'.repeat(32);
+const IDENTITY_KEY_V1 = createWalletRegistrationKey(
+  'identity-hmac',
+  1,
+  Buffer.alloc(32, 0x11).toString('base64url'),
+  'dormant-lifecycle-identity-v1',
+);
+const IDENTITY_KEY_RING = createWalletRegistrationKeyRing('identity-hmac', 1, [IDENTITY_KEY_V1]);
 
 function digest(character: string): string {
   return character.repeat(64);
@@ -131,7 +148,7 @@ function prepareRequest(
     replayProtectionId: REPLAY_ID,
     idempotencyKeyDigestSha256: IDEMPOTENCY_DIGEST,
     networkId,
-    walletAddress: ethereum ? '0x1111111111111111111111111111111111111111' : SOLANA_WALLET,
+    walletAddress: ethereum ? ETHEREUM_WALLET : SOLANA_WALLET,
     providerId: ethereum ? 'aave' : 'kamino',
     protocolId: ethereum ? 'aave-v3' : 'kamino-lend',
     marketId: ethereum ? '0x2222222222222222222222222222222222222222' : SOLANA_MARKET,
@@ -241,6 +258,11 @@ function preparedRow(
 ): Record<string, unknown> {
   const intent = request.intentInput;
   const ethereum = intent.networkId === ETHEREUM;
+  const walletIdentityDigest = digestWalletIdentity(
+    activeWalletRegistrationKey(IDENTITY_KEY_RING),
+    intent.networkId,
+    intent.walletAddress,
+  );
   return {
     record_outcome: 'RECORDED',
     result_intent_id: intent.intentId,
@@ -258,8 +280,8 @@ function preparedRow(
     wallet_id: intent.walletRegistrationId,
     wallet_chain_namespace: ethereum ? 'eip155' : 'solana',
     wallet_chain_reference: ethereum ? '1' : '5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp',
-    wallet_identity_digest_version: 1,
-    wallet_identity_digest_hex: WALLET_IDENTITY_DIGEST,
+    wallet_identity_digest_version: walletIdentityDigest.version,
+    wallet_identity_digest_hex: walletIdentityDigest.value,
     network_id: intent.networkId,
     provider_id: intent.providerId,
     protocol_id: intent.protocolId,
@@ -391,14 +413,33 @@ interface Fixture {
   readonly clock: ReturnType<typeof jest.fn>;
 }
 
-function fixture(): Fixture {
+function fixture(
+  walletIdentityKeyRing: WalletRegistrationKeyRing<'identity-hmac'> = IDENTITY_KEY_RING,
+): Fixture {
   const query: jest.Mock<Promise<unknown>, [string, readonly unknown[], AbortSignal]> = jest.fn();
   const clock = jest.fn(() => new Date(NOW));
   const postgres = { queryWithCancellation: query } as unknown as PostgresService;
-  const adapter = new PostgresDormantMainnetFinancialActionLifecycleDurableAdapter(postgres, {
-    now: clock,
-  } as DormantMainnetFinancialActionLifecycleClock);
+  const adapter = new PostgresDormantMainnetFinancialActionLifecycleDurableAdapter(
+    postgres,
+    {
+      now: clock,
+    } as DormantMainnetFinancialActionLifecycleClock,
+    walletIdentityKeyRing,
+  );
   return { adapter, query, clock };
+}
+
+function walletIdentityCandidates(
+  request: PrepareDormantMainnetFinancialActionDurableRequestV1,
+  ring: WalletRegistrationKeyRing<'identity-hmac'> = IDENTITY_KEY_RING,
+): readonly WalletRegistrationDigestReference<'address'>[] {
+  return ring.keys.map((candidate) =>
+    digestWalletIdentity(
+      walletRegistrationKeyForVersion(ring, candidate.version),
+      request.intentInput.networkId,
+      request.intentInput.walletAddress,
+    ),
+  );
 }
 
 function queryResult(row: Record<string, unknown>): Readonly<{ rows: readonly unknown[] }> {
@@ -466,6 +507,35 @@ async function bindConfirmed(
 }
 
 describe('PostgresDormantMainnetFinancialActionLifecycleDurableAdapter', () => {
+  it('rejects forged identity key rings before any database operation', () => {
+    const query = jest.fn();
+    const postgres = { queryWithCancellation: query } as unknown as PostgresService;
+    const clock = Object.freeze({ now: () => new Date(NOW) });
+    const forgedRing = Object.freeze({
+      purpose: 'identity-hmac' as const,
+      activeWriteVersion: 1,
+      keys: Object.freeze([IDENTITY_KEY_V1]),
+    }) as WalletRegistrationKeyRing<'identity-hmac'>;
+    const forgedKey = Object.freeze({
+      keyId: 'forged-identity-v1',
+      purpose: 'identity-hmac' as const,
+      version: 1,
+    }) as WalletRegistrationKey<'identity-hmac'>;
+
+    expect(
+      () =>
+        new PostgresDormantMainnetFinancialActionLifecycleDurableAdapter(
+          postgres,
+          clock,
+          forgedRing,
+        ),
+    ).toThrow(new TypeError('Invalid dormant lifecycle wallet identity key ring.'));
+    expect(() => createWalletRegistrationKeyRing('identity-hmac', 1, [forgedKey])).toThrow(
+      'Wallet registration cryptographic operation failed',
+    );
+    expect(query).not.toHaveBeenCalled();
+  });
+
   it('uses fixed one-call SQL and supports direct reconciliation plus authenticated review', async () => {
     const test = fixture();
     const prepared = await prepareConfirmed(test);
@@ -535,13 +605,20 @@ describe('PostgresDormantMainnetFinancialActionLifecycleDurableAdapter', () => {
     expect(test.query).toHaveBeenCalledTimes(5);
     const calls = test.query.mock.calls as [string, readonly unknown[], AbortSignal][];
     expect(calls.map(([sql]) => sql.match(/FROM ([a-z0-9_]+)/u)?.[1])).toEqual([
-      'prepare_mainnet_financial_action_lifecycle',
+      'prepare_mainnet_financial_action_lifecycle_v2',
       'bind_mainnet_financial_action_submission',
       'record_mainnet_financial_action_reconciliation_observation',
       'record_mainnet_financial_action_reconciliation_observation',
       'read_mainnet_financial_action_lifecycle',
     ]);
-    expect(calls.map(([, values]) => values.length)).toEqual([30, 9, 16, 16, 2]);
+    expect(calls.map(([, values]) => values.length)).toEqual([32, 9, 16, 16, 2]);
+    const ethereumCandidates = walletIdentityCandidates(prepared.request);
+    expect(calls[0]?.[1][30]).toEqual(ethereumCandidates.map(({ version }) => version));
+    expect(calls[0]?.[1][31]).toEqual(ethereumCandidates.map(({ value }) => value));
+    expect(calls[0]?.[0]).toContain('$31::smallint[], $32::text[]');
+    expect(JSON.stringify(calls[0]?.[1])).not.toContain(
+      Buffer.alloc(32, 0x11).toString('base64url'),
+    );
     expect(calls.every(([, , signal]) => signal instanceof AbortSignal)).toBe(true);
     expect(test.adapter.reviewResult(finalCapability, finalRequest)).toBe(finalized);
     expect(test.adapter.reviewResult(finalCapability, { ...finalRequest })).toBeNull();
@@ -567,11 +644,103 @@ describe('PostgresDormantMainnetFinancialActionLifecycleDurableAdapter', () => {
       recoveryMode: 'READ_THEN_RECONCILE_ONLY',
     });
     expect(test.query).toHaveBeenCalledTimes(3);
+    const solanaCandidates = walletIdentityCandidates(prepared.request);
+    expect(test.query.mock.calls[0]?.[1][30]).toEqual(
+      solanaCandidates.map(({ version }) => version),
+    );
+    expect(test.query.mock.calls[0]?.[1][31]).toEqual(solanaCandidates.map(({ value }) => value));
     expect(
       (test.query.mock.calls[2]?.[0] as string).includes(
         'record_mainnet_financial_action_broadcast_observation',
       ),
     ).toBe(true);
+  });
+
+  it('sorts rotated address candidates while accepting the immutable parent digest anchor', async () => {
+    const keyV2 = createWalletRegistrationKey(
+      'identity-hmac',
+      2,
+      Buffer.alloc(32, 0x22).toString('base64url'),
+      'dormant-lifecycle-identity-v2',
+    );
+    const keyV3 = createWalletRegistrationKey(
+      'identity-hmac',
+      3,
+      Buffer.alloc(32, 0x33).toString('base64url'),
+      'dormant-lifecycle-identity-v3',
+    );
+    const rotatedRing = createWalletRegistrationKeyRing('identity-hmac', 3, [keyV3, keyV2]);
+    const test = fixture(rotatedRing);
+    const request = prepareRequest();
+    resolveOnce(test.query, queryResult(preparedRow(request)));
+
+    const capability = await test.adapter.prepare(request);
+    expect(confirmed(test.adapter, capability, request).stage).toBe('PREPARED');
+
+    const expected = walletIdentityCandidates(request, rotatedRing);
+    expect(test.query.mock.calls[0]?.[1][30]).toEqual([2, 3]);
+    expect(test.query.mock.calls[0]?.[1][31]).toEqual(expected.map(({ value }) => value));
+    expect(test.query.mock.calls[0]?.[1][30]).not.toContain(1);
+    expect(preparedRow(request).wallet_identity_digest_version).toBe(1);
+    expect(test.query).toHaveBeenCalledTimes(1);
+  });
+
+  it('derives different candidates for a different valid address and treats a database mismatch as unknown', async () => {
+    const baseline = prepareRequest();
+    const altered = frozenNull({
+      ...baseline,
+      intentInput: frozenNull({
+        ...baseline.intentInput,
+        walletAddress: '0x3333333333333333333333333333333333333333',
+      }),
+    });
+    const test = fixture();
+    rejectOnce(test.query, Object.assign(new Error('candidate mismatch'), { code: '22023' }));
+
+    const capability = await test.adapter.prepare(altered);
+    expect(unknownOutcome(test.adapter, capability, altered)).toMatchObject({
+      operation: 'PREPARE',
+      lastConfirmedCursor: null,
+      automaticRetryAllowed: false,
+      ledgerSettlementAuthority: false,
+    });
+    const baselineCandidates = walletIdentityCandidates(baseline).map(({ value }) => value);
+    expect(test.query.mock.calls[0]?.[1][31]).not.toEqual(baselineCandidates);
+    expect(test.query.mock.calls[0]?.[1][31]).toEqual(
+      walletIdentityCandidates(altered).map(({ value }) => value),
+    );
+    expect(test.query).toHaveBeenCalledTimes(1);
+  });
+
+  it('retains address digest candidates when the caller mutates plaintext after dispatch', async () => {
+    const original = prepareRequest();
+    const mutableIntent = { ...original.intentInput };
+    const mutable = {
+      ...original,
+      intentInput: mutableIntent,
+    } as PrepareDormantMainnetFinancialActionDurableRequestV1;
+    const test = fixture();
+    let resolveQuery: ((value: unknown) => void) | undefined;
+    test.query.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveQuery = resolve;
+        }),
+    );
+
+    const pending = test.adapter.prepare(mutable);
+    mutableIntent.walletAddress = '0x3333333333333333333333333333333333333333';
+    resolveQuery?.(queryResult(preparedRow(original)));
+    const capability = await pending;
+
+    expect(confirmed(test.adapter, capability, mutable).stage).toBe('PREPARED');
+    expect(test.query.mock.calls[0]?.[1][31]).toEqual(
+      walletIdentityCandidates(original).map(({ value }) => value),
+    );
+    expect(test.query.mock.calls[0]?.[1][31]).not.toEqual(
+      walletIdentityCandidates(mutable).map(({ value }) => value),
+    );
+    expect(test.query).toHaveBeenCalledTimes(1);
   });
 
   it.each([
@@ -664,6 +833,13 @@ describe('PostgresDormantMainnetFinancialActionLifecycleDurableAdapter', () => {
 
     await expect(
       test.adapter.prepare({ ...prepareRequest(), extra: true } as never),
+    ).rejects.toMatchObject({ code: 'INVALID_PREPARE_REQUEST' });
+    await expect(
+      test.adapter.prepare({
+        ...prepareRequest(),
+        walletIdentityDigestVersions: [1],
+        walletIdentityDigestsHex: [digest('f')],
+      } as never),
     ).rejects.toMatchObject({ code: 'INVALID_PREPARE_REQUEST' });
 
     const copiedCursor = { ...prepared.result.cursor };

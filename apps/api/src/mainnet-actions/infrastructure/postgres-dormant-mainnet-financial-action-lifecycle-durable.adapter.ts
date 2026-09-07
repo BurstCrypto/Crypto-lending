@@ -7,6 +7,14 @@ import {
   type SupportedStablecoin,
 } from '../../blockchain/domain/supported-asset-registry';
 import {
+  activeWalletRegistrationKey,
+  digestWalletIdentity,
+  MAX_WALLET_REGISTRATION_KEYS_PER_PURPOSE,
+  walletRegistrationKeyForVersion,
+  type WalletRegistrationDigestReference,
+  type WalletRegistrationKeyRing,
+} from '../../wallets/infrastructure/crypto/wallet-registration-crypto';
+import {
   parseDormantMainnetFinancialActionIntent,
   type DormantMainnetFinancialActionIntentV1,
 } from '../domain/dormant-mainnet-financial-action';
@@ -265,6 +273,7 @@ interface PrepareDatabaseArgumentsV1 {
   readonly issuedAt: string;
   readonly expiresAt: string;
   readonly correlationId: string;
+  readonly walletIdentityDigestCandidates: readonly WalletRegistrationDigestReference<'address'>[];
 }
 
 interface CursorDatabaseArgumentsV1 {
@@ -432,12 +441,17 @@ type DormantMainnetFinancialActionLifecycleDatabaseCommandV1 =
  */
 class DormantMainnetFinancialActionLifecycleDatabaseCodec {
   readonly #cursorMetadata = new WeakMap<object, CursorMetadata>();
+  readonly #walletIdentityKeyRing: WalletRegistrationKeyRing<'identity-hmac'>;
+
+  constructor(walletIdentityKeyRing: WalletRegistrationKeyRing<'identity-hmac'>) {
+    this.#walletIdentityKeyRing = walletIdentityKeyRing;
+  }
 
   encodePrepare(
     value: unknown,
     serverNow: unknown,
   ): DormantMainnetFinancialActionLifecycleDatabaseCommandV1 & { readonly operation: 'PREPARE' } {
-    return encodePrepare(value, serverNow);
+    return encodePrepare(value, serverNow, this.#walletIdentityKeyRing);
   }
 
   encodeBindSubmission(value: unknown): DormantMainnetFinancialActionLifecycleDatabaseCommandV1 & {
@@ -478,10 +492,115 @@ class DormantMainnetFinancialActionLifecycleDatabaseCodec {
   }
 }
 
-/** Pure pre-I/O encoder for migration 0033's prepare argument set. */
+function captureWalletIdentityKeyRing(value: unknown): WalletRegistrationKeyRing<'identity-hmac'> {
+  const failure = (): never => {
+    throw new TypeError('Invalid dormant lifecycle wallet identity key ring.');
+  };
+  try {
+    if (
+      typeof value !== 'object' ||
+      value === null ||
+      isProxy(value) ||
+      Array.isArray(value) ||
+      Object.getPrototypeOf(value) !== Object.prototype ||
+      !Object.isFrozen(value)
+    ) {
+      return failure();
+    }
+    const descriptors = Object.getOwnPropertyDescriptors(value);
+    const keys = Reflect.ownKeys(descriptors);
+    if (
+      keys.length !== 3 ||
+      !keys.includes('purpose') ||
+      !keys.includes('activeWriteVersion') ||
+      !keys.includes('keys')
+    ) {
+      return failure();
+    }
+    const purposeDescriptor = descriptors.purpose;
+    const activeVersionDescriptor = descriptors.activeWriteVersion;
+    const candidatesDescriptor = descriptors.keys;
+    for (const descriptor of [purposeDescriptor, activeVersionDescriptor, candidatesDescriptor]) {
+      if (
+        descriptor === undefined ||
+        !descriptor.enumerable ||
+        descriptor.configurable ||
+        descriptor.writable !== false ||
+        !('value' in descriptor)
+      ) {
+        return failure();
+      }
+    }
+    const candidates = candidatesDescriptor?.value as unknown;
+    if (
+      purposeDescriptor?.value !== 'identity-hmac' ||
+      !Number.isSafeInteger(activeVersionDescriptor?.value) ||
+      (activeVersionDescriptor?.value as number) < 1 ||
+      (activeVersionDescriptor?.value as number) > 32_767 ||
+      !Array.isArray(candidates) ||
+      isProxy(candidates) ||
+      Object.getPrototypeOf(candidates) !== Array.prototype ||
+      !Object.isFrozen(candidates) ||
+      candidates.length < 1 ||
+      candidates.length > MAX_WALLET_REGISTRATION_KEYS_PER_PURPOSE
+    ) {
+      return failure();
+    }
+
+    const ring = value as WalletRegistrationKeyRing<'identity-hmac'>;
+    const active = activeWalletRegistrationKey(ring);
+    let previousVersion = 0;
+    for (const candidate of candidates) {
+      const version = (candidate as { readonly version?: unknown }).version;
+      if (
+        !Number.isSafeInteger(version) ||
+        (version as number) <= previousVersion ||
+        walletRegistrationKeyForVersion(ring, version) !== candidate
+      ) {
+        return failure();
+      }
+      previousVersion = version as number;
+    }
+    if (active.version !== activeVersionDescriptor?.value) return failure();
+    return ring;
+  } catch {
+    return failure();
+  }
+}
+
+function deriveWalletIdentityDigestCandidates(
+  ring: WalletRegistrationKeyRing<'identity-hmac'>,
+  networkId: MainnetFinancialActionDatabaseNetworkId,
+  canonicalAddress: string,
+  code: DormantMainnetFinancialActionLifecycleDatabaseCodecErrorCode,
+): readonly WalletRegistrationDigestReference<'address'>[] {
+  try {
+    const candidates = ring.keys.map((candidate) => {
+      const key = walletRegistrationKeyForVersion(ring, candidate.version);
+      const reference = digestWalletIdentity(key, networkId, canonicalAddress);
+      return Object.freeze({ version: reference.version, value: reference.value });
+    });
+    if (
+      candidates.length < 1 ||
+      candidates.length > MAX_WALLET_REGISTRATION_KEYS_PER_PURPOSE ||
+      candidates.some(
+        (candidate, index) => index > 0 && candidate.version <= candidates[index - 1]!.version,
+      )
+    ) {
+      return invalid(code);
+    }
+    return Object.freeze(candidates);
+  } catch (error) {
+    if (error instanceof DormantMainnetFinancialActionLifecycleDatabaseCodecError) throw error;
+    return invalid(code);
+  }
+}
+
+/** Pure pre-I/O encoder for migration 0034's address-bound prepare argument set. */
 function encodePrepare(
   value: unknown,
   serverNow: unknown,
+  walletIdentityKeyRing: WalletRegistrationKeyRing<'identity-hmac'>,
 ): DormantMainnetFinancialActionLifecycleDatabaseCommandV1 & { readonly operation: 'PREPARE' } {
   const code = 'INVALID_PREPARE_REQUEST' as const;
   const record = exactRecord(value, PREPARE_KEYS, code);
@@ -569,6 +688,12 @@ function encodePrepare(
     issuedAt: intent.issuedAt,
     expiresAt: intent.expiresAt,
     correlationId: uuid(record.correlationId, code),
+    walletIdentityDigestCandidates: deriveWalletIdentityDigestCandidates(
+      walletIdentityKeyRing,
+      intent.networkId,
+      intent.walletAddress,
+      code,
+    ),
   });
   return Object.freeze({
     operation: 'PREPARE' as const,
@@ -980,7 +1105,14 @@ function decodeDatabaseResult(
     recordedAt,
     terminal,
   });
-  reviewCommandResultBinding(cursorMetadata, command, row, binding, code);
+  reviewCommandResultBinding(
+    cursorMetadata,
+    command,
+    row,
+    binding,
+    authoritativeIntentAnchor,
+    code,
+  );
 
   const cursor = issueCursor(
     cursorMetadata,
@@ -1103,6 +1235,7 @@ function reviewCommandResultBinding(
   command: DormantMainnetFinancialActionLifecycleDatabaseCommandV1,
   row: Record<string, unknown>,
   binding: ReviewedDatabaseRowBinding,
+  authoritativeIntentAnchor: AuthoritativeIntentAnchor,
   code: DormantMainnetFinancialActionLifecycleDatabaseCodecErrorCode,
 ): void {
   if (
@@ -1157,7 +1290,7 @@ function reviewCommandResultBinding(
     binding.intentRecordFingerprintSha256 !== prior.cursor.intentRecordFingerprintSha256 ||
     binding.volatileIntentCommitmentSha256 !== prior.metadata.volatileIntentCommitmentSha256 ||
     !sameAuthoritativeIntentAnchor(
-      reviewAuthoritativeRowIdentity(row, binding.networkId, code),
+      authoritativeIntentAnchor,
       prior.metadata.authoritativeIntentAnchor,
     ) ||
     (!currentReconciliationReplay &&
@@ -2056,12 +2189,13 @@ const RESULT_PROJECTION = `
 `;
 
 const PREPARE_SQL = `SELECT ${RESULT_PROJECTION}
-FROM prepare_mainnet_financial_action_lifecycle(
+FROM prepare_mainnet_financial_action_lifecycle_v2(
   $1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid, $6::uuid, $7::uuid,
   $8::text, $9::text, $10::uuid, $11::text, $12::text, $13::text, $14::text,
   $15::integer, $16::text, $17::text, $18::text, $19::smallint, $20::text,
   $21::text, $22::text, $23::text, $24::integer, $25::text, $26::text, $27::text,
-  $28::timestamptz, $29::timestamptz, $30::uuid
+  $28::timestamptz, $29::timestamptz, $30::uuid,
+  $31::smallint[], $32::text[]
 ) AS result`;
 
 const BIND_SUBMISSION_SQL = `SELECT ${RESULT_PROJECTION}
@@ -2087,7 +2221,7 @@ const READ_SQL = `SELECT ${RESULT_PROJECTION}
 FROM read_mainnet_financial_action_lifecycle($1::uuid, $2::uuid) AS result`;
 
 /**
- * Direct-import-only migration-0033 adapter. It is intentionally undecorated
+ * Direct-import-only migration-0034 adapter. It is intentionally undecorated
  * and unregistered, owns no signer/broadcaster, and performs one database call
  * per invocation with no loop or automatic retry.
  */
@@ -2098,11 +2232,15 @@ export class PostgresDormantMainnetFinancialActionLifecycleDurableAdapter implem
   readonly #databaseQuery: QueryWithCancellation;
   readonly #clockReceiver: object;
   readonly #clockNow: DormantMainnetFinancialActionLifecycleClock['now'];
-  readonly #codec = new DormantMainnetFinancialActionLifecycleDatabaseCodec();
+  readonly #codec: DormantMainnetFinancialActionLifecycleDatabaseCodec;
   readonly #issuedResults = new WeakMap<object, IssuedResult>();
   readonly #requestMethods = new WeakMap<object, DatabaseMethod>();
 
-  constructor(postgres: PostgresService, clock: DormantMainnetFinancialActionLifecycleClock) {
+  constructor(
+    postgres: PostgresService,
+    clock: DormantMainnetFinancialActionLifecycleClock,
+    walletIdentityKeyRing: WalletRegistrationKeyRing<'identity-hmac'>,
+  ) {
     const database = captureMethod<QueryWithCancellation>(postgres, 'queryWithCancellation');
     const capturedClock = captureMethod<DormantMainnetFinancialActionLifecycleClock['now']>(
       clock,
@@ -2112,6 +2250,9 @@ export class PostgresDormantMainnetFinancialActionLifecycleDurableAdapter implem
     this.#databaseQuery = database.method;
     this.#clockReceiver = capturedClock.receiver;
     this.#clockNow = capturedClock.method;
+    this.#codec = new DormantMainnetFinancialActionLifecycleDatabaseCodec(
+      captureWalletIdentityKeyRing(walletIdentityKeyRing),
+    );
   }
 
   async prepare(request: PrepareDormantMainnetFinancialActionDurableRequestV1): Promise<unknown> {
@@ -2272,6 +2413,8 @@ function databaseInvocation(
           args.issuedAt,
           args.expiresAt,
           args.correlationId,
+          Object.freeze(args.walletIdentityDigestCandidates.map((candidate) => candidate.version)),
+          Object.freeze(args.walletIdentityDigestCandidates.map((candidate) => candidate.value)),
         ]),
       });
     }
