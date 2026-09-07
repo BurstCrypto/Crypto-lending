@@ -14,12 +14,17 @@ import {
   PRODUCTION_DEPLOYMENT_INTENT_SIGNER_ROLES,
   canonicalizeProductionDeploymentIntentValue,
   isProductionAuthorizedDeploymentIntentReport,
+  isUnbrandedDeploymentIntentReportFreshAtForTest,
   loadAndVerifyProductionDeploymentIntent,
   productionDeploymentAuthorityStateSha256,
   productionDeploymentIntentContentSha256,
   productionDeploymentIntentSigningBytes,
+  revalidateProductionDeploymentIntentReportForApplication,
+  revalidateUnbrandedDeploymentIntentReportAtForTest,
   validateProductionDeploymentIntentExample,
   verifyProductionDeploymentIntent,
+  verifyProductionDeploymentIntentAuthorizationLifecycleForTest,
+  verifyProductionDeploymentIntentAtTrustedClockWithTestRegistry,
   verifyProductionDeploymentIntentAgainstProductionTargetWithTestRegistry,
   verifyProductionDeploymentIntentBytes,
   verifyProductionDeploymentIntentBytesWithTestRegistry,
@@ -67,40 +72,49 @@ const keyIds = Object.freeze({
   DEPLOYMENT_OWNER: 'deployment-owner-2026',
   INDEPENDENT_SECURITY: 'independent-security-2026',
 });
-const TEST_REGISTRY = Object.freeze({
-  schemaVersion: 1,
-  artifactType: 'PRODUCTION_DEPLOYMENT_INTENT_AUTHORITY_KEY_REGISTRY',
-  keys: Object.freeze(
-    PRODUCTION_DEPLOYMENT_INTENT_SIGNER_ROLES.map((role) =>
-      Object.freeze({
-        keyId: keyIds[role],
-        role,
-        scope: PRODUCTION_DEPLOYMENT_INTENT_SCOPE,
-        algorithm: 'Ed25519',
-        status: 'APPROVED',
-        publicKeySpkiDerBase64: keyPairs[role].publicKey
-          .export({ format: 'der', type: 'spki' })
-          .toString('base64'),
-        validFrom: '2026-09-01T00:00:00Z',
-        validUntil: '2027-08-01T00:00:00Z',
-        approvalReferenceId: `review/deployment-intent/${role.toLowerCase()}`,
-      }),
+function testRegistry({
+  validFrom = '2026-09-01T00:00:00Z',
+  validUntil = '2027-08-01T00:00:00Z',
+} = {}) {
+  return Object.freeze({
+    schemaVersion: 1,
+    artifactType: 'PRODUCTION_DEPLOYMENT_INTENT_AUTHORITY_KEY_REGISTRY',
+    keys: Object.freeze(
+      PRODUCTION_DEPLOYMENT_INTENT_SIGNER_ROLES.map((role) =>
+        Object.freeze({
+          keyId: keyIds[role],
+          role,
+          scope: PRODUCTION_DEPLOYMENT_INTENT_SCOPE,
+          algorithm: 'Ed25519',
+          status: 'APPROVED',
+          publicKeySpkiDerBase64: keyPairs[role].publicKey
+            .export({ format: 'der', type: 'spki' })
+            .toString('base64'),
+          validFrom,
+          validUntil,
+          approvalReferenceId: `review/deployment-intent/${role.toLowerCase()}`,
+        }),
+      ),
     ),
-  ),
-});
+  });
+}
+
+const TEST_REGISTRY = testRegistry();
 
 function buildContent({
   operation = 'PROVISION_INERT',
   currentAuthority = operation === 'PROVISION_INERT' ? INERT_AUTHORITY : READ_ONLY_AUTHORITY,
   proposedAuthority = operation === 'ACTIVATE_READ_ONLY' ? READ_ONLY_AUTHORITY : INERT_AUTHORITY,
   predecessorIntentSha256 = operation === 'PROVISION_INERT' ? ZERO_SHA256 : PREDECESSOR_SHA256,
+  issuedAt = ISSUED_AT,
+  expiresAt = EXPIRES_AT,
 } = {}) {
   return {
     status: 'AUTHORIZED',
     intentId: `production/${operation.toLowerCase().replaceAll('_', '-')}/2026-09-07/intent-001`,
     operation,
-    issuedAt: ISSUED_AT,
-    expiresAt: EXPIRES_AT,
+    issuedAt,
+    expiresAt,
     deployment: {
       accountId: '123456789012',
       region: 'us-east-1',
@@ -129,7 +143,7 @@ function buildContent({
   };
 }
 
-function buildRecord(configuration = {}) {
+function buildRecord({ signedAt = SIGNED_AT, ...configuration } = {}) {
   const content = buildContent(configuration);
   const unsigned = {
     schemaVersion: 1,
@@ -142,7 +156,7 @@ function buildRecord(configuration = {}) {
       role,
       scope: PRODUCTION_DEPLOYMENT_INTENT_SCOPE,
       authorityKeyId: keyIds[role],
-      signedAt: SIGNED_AT,
+      signedAt,
     };
     return {
       ...signer,
@@ -183,6 +197,20 @@ function optionsFor(record, overrides = {}) {
     expectedChangeSetName: record.content.deployment.changeSetName,
     ...overrides,
   };
+}
+
+function productionOptionsFor(record, overrides = {}) {
+  return Object.fromEntries(
+    Object.entries(optionsFor(record, overrides)).filter(([key]) => key !== 'evaluatedAt'),
+  );
+}
+
+function canonicalInstantAt(milliseconds) {
+  return new Date(Math.floor(milliseconds / 1_000) * 1_000).toISOString().replace('.000Z', 'Z');
+}
+
+function clockReading(wallTime, monotonicMilliseconds) {
+  return { wallTime, monotonicMilliseconds };
 }
 
 function verifyWithTestRegistry(record, options = optionsFor(record), registry = TEST_REGISTRY) {
@@ -237,7 +265,7 @@ test('supports only the five reviewed operations and never proposes financial wr
 test('the empty production registry cannot authorize any otherwise valid intent', () => {
   const record = buildRecord();
   assert.deepEqual(PRODUCTION_DEPLOYMENT_INTENT_AUTHORITY_KEY_REGISTRY.keys, []);
-  const direct = verifyProductionDeploymentIntent(record, optionsFor(record));
+  const direct = verifyProductionDeploymentIntent(record, productionOptionsFor(record));
   assert.equal(direct.ok, false);
   assert.equal(direct.executionAllowed, false);
   assert.equal(isProductionAuthorizedDeploymentIntentReport(direct), false);
@@ -259,12 +287,217 @@ test('the empty production registry cannot authorize any otherwise valid intent'
   assert.equal(isProductionAuthorizedDeploymentIntentReport(keysPresentButTargetEmpty), false);
 
   const bytes = Buffer.from(canonicalizeProductionDeploymentIntentValue(record), 'utf8');
-  assert.equal(verifyProductionDeploymentIntentBytes(bytes, optionsFor(record)).ok, false);
+  assert.equal(
+    verifyProductionDeploymentIntentBytes(bytes, productionOptionsFor(record)).ok,
+    false,
+  );
   assert.equal(
     loadAndVerifyProductionDeploymentIntent(
       resolve('.local-validation/absent.production-deployment-intent.local.json'),
-      optionsFor(record),
+      productionOptionsFor(record),
     ).ok,
+    false,
+  );
+});
+
+test('production-style verification captures current time and rejects injected or stale time', () => {
+  const now = Date.now();
+  const registry = testRegistry({
+    validFrom: canonicalInstantAt(now - 24 * 60 * 60 * 1_000),
+    validUntil: canonicalInstantAt(now + 300 * 24 * 60 * 60 * 1_000),
+  });
+  const active = buildRecord({
+    issuedAt: canonicalInstantAt(now - 5 * 60_000),
+    signedAt: canonicalInstantAt(now - 4 * 60_000),
+    expiresAt: canonicalInstantAt(now + 30 * 60_000),
+  });
+  const activeOptions = productionOptionsFor(active);
+  const activeReport = verifyProductionDeploymentIntentAtTrustedClockWithTestRegistry(
+    active,
+    activeOptions,
+    registry,
+  );
+  assert.equal(activeReport.ok, true);
+  assert.equal(activeReport.productionAuthorityValidated, false);
+  assert.equal(isProductionAuthorizedDeploymentIntentReport(activeReport), false);
+  assert.equal(
+    verifyProductionDeploymentIntentAtTrustedClockWithTestRegistry(
+      active,
+      { evaluatedAt: active.content.issuedAt, ...activeOptions },
+      registry,
+    ).ok,
+    false,
+  );
+
+  const expired = buildRecord({
+    issuedAt: canonicalInstantAt(now - 30 * 60_000),
+    signedAt: canonicalInstantAt(now - 20 * 60_000),
+    expiresAt: canonicalInstantAt(now - 5 * 60_000),
+  });
+  assert.equal(
+    verifyProductionDeploymentIntentAtTrustedClockWithTestRegistry(
+      expired,
+      productionOptionsFor(expired),
+      registry,
+    ).ok,
+    false,
+  );
+});
+
+test('cached report freshness and revalidation fail closed at the exact expiration instant', () => {
+  const record = buildRecord();
+  const report = verifyProductionDeploymentIntentAuthorizationLifecycleForTest(
+    record,
+    productionOptionsFor(record),
+    TEST_REGISTRY,
+    [clockReading(EVALUATED_AT, 1_000), clockReading('2026-09-07T12:10:01Z', 2_000)],
+  );
+  assert.equal(report.ok, true);
+  assert.equal(report.productionAuthorityValidated, false);
+  assert.equal(report.executionAllowed, false);
+  assert.equal(isProductionAuthorizedDeploymentIntentReport(report), false);
+  assert.equal(
+    isUnbrandedDeploymentIntentReportFreshAtForTest(
+      report,
+      clockReading('2026-09-07T12:29:59Z', 1_200_000),
+    ),
+    true,
+  );
+  assert.equal(
+    revalidateUnbrandedDeploymentIntentReportAtForTest(
+      report,
+      clockReading('2026-09-07T12:29:59Z', 1_200_001),
+    ),
+    report,
+  );
+  assert.equal(
+    isUnbrandedDeploymentIntentReportFreshAtForTest(report, clockReading(EXPIRES_AT, 1_201_000)),
+    false,
+  );
+  assert.equal(
+    isUnbrandedDeploymentIntentReportFreshAtForTest(
+      report,
+      clockReading('2026-09-07T12:15:00Z', 1_202_000),
+    ),
+    false,
+  );
+  assert.throws(
+    () =>
+      revalidateUnbrandedDeploymentIntentReportAtForTest(
+        report,
+        clockReading('2026-09-07T12:20:00Z', 1_203_000),
+      ),
+    { name: 'ProductionDeploymentIntentInvalidError' },
+  );
+  assert.throws(() => revalidateProductionDeploymentIntentReportForApplication(report), {
+    name: 'ProductionDeploymentIntentInvalidError',
+  });
+});
+
+test('authorization lifecycle makes observed clock rollback sticky and rejects unsafe double reads', () => {
+  const record = buildRecord();
+  const productionOptions = productionOptionsFor(record);
+  const wallRollbackDuringVerification =
+    verifyProductionDeploymentIntentAuthorizationLifecycleForTest(
+      record,
+      productionOptions,
+      TEST_REGISTRY,
+      [clockReading(EVALUATED_AT, 1_000), clockReading('2026-09-07T12:09:59Z', 2_000)],
+    );
+  assert.equal(wallRollbackDuringVerification.ok, false);
+
+  const monotonicRollbackDuringVerification =
+    verifyProductionDeploymentIntentAuthorizationLifecycleForTest(
+      record,
+      productionOptions,
+      TEST_REGISTRY,
+      [clockReading(EVALUATED_AT, 1_000), clockReading('2026-09-07T12:10:01Z', 999)],
+    );
+  assert.equal(monotonicRollbackDuringVerification.ok, false);
+
+  const expiredDuringVerification = verifyProductionDeploymentIntentAuthorizationLifecycleForTest(
+    record,
+    productionOptions,
+    TEST_REGISTRY,
+    [clockReading(EVALUATED_AT, 1_000), clockReading(EXPIRES_AT, 1_201_000)],
+  );
+  assert.equal(expiredDuringVerification.ok, false);
+
+  const report = verifyProductionDeploymentIntentAuthorizationLifecycleForTest(
+    record,
+    productionOptions,
+    TEST_REGISTRY,
+    [clockReading(EVALUATED_AT, 1_000), clockReading('2026-09-07T12:10:01Z', 2_000)],
+  );
+  assert.equal(report.ok, true);
+  assert.equal(
+    isUnbrandedDeploymentIntentReportFreshAtForTest(
+      report,
+      clockReading('2026-09-07T12:20:00Z', 600_000),
+    ),
+    true,
+  );
+  assert.equal(
+    isUnbrandedDeploymentIntentReportFreshAtForTest(
+      report,
+      clockReading('2026-09-07T12:19:59Z', 601_000),
+    ),
+    false,
+  );
+  assert.equal(
+    isUnbrandedDeploymentIntentReportFreshAtForTest(
+      report,
+      clockReading('2026-09-07T12:21:00Z', 700_000),
+    ),
+    false,
+  );
+
+  const monotonicReport = verifyProductionDeploymentIntentAuthorizationLifecycleForTest(
+    record,
+    productionOptions,
+    TEST_REGISTRY,
+    [clockReading(EVALUATED_AT, 1_000), clockReading('2026-09-07T12:10:01Z', 2_000)],
+  );
+  assert.equal(
+    isUnbrandedDeploymentIntentReportFreshAtForTest(
+      monotonicReport,
+      clockReading('2026-09-07T12:20:00Z', 600_000),
+    ),
+    true,
+  );
+  assert.equal(
+    isUnbrandedDeploymentIntentReportFreshAtForTest(
+      monotonicReport,
+      clockReading('2026-09-07T12:20:01Z', 599_999),
+    ),
+    false,
+  );
+  assert.equal(
+    isUnbrandedDeploymentIntentReportFreshAtForTest(
+      monotonicReport,
+      clockReading('2026-09-07T12:21:00Z', 700_000),
+    ),
+    false,
+  );
+
+  const deadlineReport = verifyProductionDeploymentIntentAuthorizationLifecycleForTest(
+    record,
+    productionOptions,
+    TEST_REGISTRY,
+    [clockReading(EVALUATED_AT, 1_000), clockReading('2026-09-07T12:10:01Z', 2_000)],
+  );
+  assert.equal(
+    isUnbrandedDeploymentIntentReportFreshAtForTest(
+      deadlineReport,
+      clockReading('2026-09-07T12:20:00Z', 1_201_000),
+    ),
+    false,
+  );
+  assert.equal(
+    isUnbrandedDeploymentIntentReportFreshAtForTest(
+      deadlineReport,
+      clockReading('2026-09-07T12:20:01Z', 700_000),
+    ),
     false,
   );
 });

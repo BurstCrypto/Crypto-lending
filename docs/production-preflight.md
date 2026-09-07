@@ -54,7 +54,16 @@ deployment-owner and independent-security keys. The checked-in production trust
 registry and deployment-target registry are both empty, the checked-in example
 is unsigned and inert, and the validator has no executor; every result retains
 `executionAllowed: false`. Test-only injected keys can exercise verification but
-cannot mint the private production brand. `EMERGENCY_KILL` and `DELETE` require
+cannot mint the private production brand. Production entry points do not accept
+a caller-supplied evaluation time: they capture wall and module-held monotonic
+clocks before validation and again immediately before branding. Private,
+sticky authorization metadata binds the final observation, absolute expiration,
+and monotonic deadline. The production-brand predicate and application
+revalidation recapture both clocks and permanently invalidate that report after
+any observed wall/monotonic rollback or either expiration boundary. Only an
+isolated, explicitly unbranded test metadata path permits deterministic clock
+injection and it cannot grant production authority or execution.
+`EMERGENCY_KILL` and `DELETE` require
 the exact zero-count/no-egress/no-write kill state, while rollback cannot
 increase authority and no operation permits financial writes. Predecessor
 validation is a point-in-time check against caller-supplied expected state; any
@@ -746,9 +755,14 @@ within seven days, uses distinct key material, and signs the same binding. The
 binding is derived only from the already verified technical bundle:
 
 - `releaseCandidateManifestSha256` is the bundle's exact release-manifest hash;
-- `deploymentTargetId` is the bundle's exact checked-in target ID; and
+- `deploymentTargetId` is the bundle's exact checked-in target ID;
 - `deploymentTargetConfigurationSha256` is the bundle's exact
-  `deploymentTargetSha256`.
+  `deploymentTargetSha256`; and
+- `productionEvidenceBundleSha256` is the bundle's exact `bundleSha256`.
+
+The public-launch artifact and signing domain are schema version 2. Omitting or changing the
+technical-evidence bundle hash invalidates all seven signatures, so a version-1 decision or an
+approval replayed with replacement technical evidence fails closed.
 
 The CLI does not accept any of those binding values from separate arguments.
 It loads the authority artifact only after technical-evidence verification and

@@ -9,6 +9,7 @@
 
 import { createHash, createPublicKey, verify as verifySignature } from 'node:crypto';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
+import { performance } from 'node:perf_hooks';
 import { fileURLToPath } from 'node:url';
 import { TextDecoder, types as utilTypes } from 'node:util';
 
@@ -59,6 +60,32 @@ const REFERENCE_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:/-]{2,191}$/u;
 const BASE64_PATTERN = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u;
 const ETHEREUM_MAINNET_ID = 'eip155:1';
 const SOLANA_MAINNET_ID = 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp';
+const READ_TRUSTED_TIME_MILLISECONDS = Date.now.bind(Date);
+const READ_MONOTONIC_TIME_MILLISECONDS = performance.now.bind(performance);
+
+const VERIFICATION_BINDING_KEYS = Object.freeze([
+  'expectedOperation',
+  'expectedIntentSha256',
+  'expectedPredecessorIntentSha256',
+  'expectedSourceRevision',
+  'expectedReleaseCandidateManifestSha256',
+  'expectedDeploymentTargetId',
+  'expectedDeploymentTargetSha256',
+  'expectedInfrastructureContractSha256',
+  'expectedInfrastructureTemplateSha256',
+  'expectedDeploymentConfigurationSha256',
+  'expectedBillingControlSha256',
+  'expectedEgressPolicySha256',
+  'expectedCredentialStateSha256',
+  'expectedCurrentStateSha256',
+  'expectedProposedStateSha256',
+  'expectedRollbackPlanSha256',
+  'expectedKillStateSha256',
+  'expectedAccountId',
+  'expectedRegion',
+  'expectedStackName',
+  'expectedChangeSetName',
+]);
 
 const EXACT_KEYS = Object.freeze({
   root: ['schemaVersion', 'artifactType', 'intentSha256', 'content', 'signatures'],
@@ -117,30 +144,9 @@ const EXACT_KEYS = Object.freeze({
     'validUntil',
     'approvalReferenceId',
   ],
-  options: [
-    'evaluatedAt',
-    'expectedOperation',
-    'expectedIntentSha256',
-    'expectedPredecessorIntentSha256',
-    'expectedSourceRevision',
-    'expectedReleaseCandidateManifestSha256',
-    'expectedDeploymentTargetId',
-    'expectedDeploymentTargetSha256',
-    'expectedInfrastructureContractSha256',
-    'expectedInfrastructureTemplateSha256',
-    'expectedDeploymentConfigurationSha256',
-    'expectedBillingControlSha256',
-    'expectedEgressPolicySha256',
-    'expectedCredentialStateSha256',
-    'expectedCurrentStateSha256',
-    'expectedProposedStateSha256',
-    'expectedRollbackPlanSha256',
-    'expectedKillStateSha256',
-    'expectedAccountId',
-    'expectedRegion',
-    'expectedStackName',
-    'expectedChangeSetName',
-  ],
+  productionOptions: VERIFICATION_BINDING_KEYS,
+  testOptions: Object.freeze(['evaluatedAt', ...VERIFICATION_BINDING_KEYS]),
+  testClockReading: ['wallTime', 'monotonicMilliseconds'],
 });
 
 const ZERO_CALLS = Object.freeze({
@@ -161,7 +167,8 @@ export const PRODUCTION_DEPLOYMENT_INTENT_AUTHORITY_KEY_REGISTRY = Object.freeze
   keys: Object.freeze([]),
 });
 
-const PRODUCTION_AUTHORIZED_REPORTS = new WeakSet();
+const PRODUCTION_AUTHORIZED_REPORTS = new WeakMap();
+const TEST_AUTHORIZED_REPORTS = new WeakMap();
 
 export class ProductionDeploymentIntentInvalidError extends Error {
   constructor() {
@@ -301,6 +308,56 @@ function canonicalInstant(value) {
     return invalid();
   }
   return Object.freeze({ text: value, milliseconds: date.getTime() });
+}
+
+function trustedCurrentInstant() {
+  try {
+    const milliseconds = READ_TRUSTED_TIME_MILLISECONDS();
+    if (!Number.isSafeInteger(milliseconds) || milliseconds < 0) return invalid();
+    const date = new Date(milliseconds);
+    if (!Number.isFinite(date.getTime()) || date.getTime() !== milliseconds) return invalid();
+    return Object.freeze({ text: date.toISOString(), milliseconds });
+  } catch {
+    return invalid();
+  }
+}
+
+function monotonicMilliseconds(value) {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return invalid();
+  return value;
+}
+
+function trustedClockReading() {
+  try {
+    // Pair conservatively: a pause before the wall read can only shorten the
+    // monotonic lifetime derived from this sample, never extend it.
+    const capturedMonotonicMilliseconds = monotonicMilliseconds(READ_MONOTONIC_TIME_MILLISECONDS());
+    return Object.freeze({
+      wall: trustedCurrentInstant(),
+      monotonicMilliseconds: capturedMonotonicMilliseconds,
+    });
+  } catch {
+    return invalid();
+  }
+}
+
+function testClockReading(value) {
+  const parsed = dataRecord(value, EXACT_KEYS.testClockReading);
+  return Object.freeze({
+    wall: canonicalInstant(parsed.wallTime),
+    monotonicMilliseconds: monotonicMilliseconds(parsed.monotonicMilliseconds),
+  });
+}
+
+function testClockSequence(value) {
+  const readings = strictArray(value, 2).map((candidate) => testClockReading(candidate));
+  if (readings.length !== 2) return invalid();
+  let index = 0;
+  return () => {
+    const reading = readings[index];
+    index += 1;
+    return reading ?? invalid();
+  };
 }
 
 function digest(value, allowGenesis = false) {
@@ -721,9 +778,15 @@ function parsedSignature(value, expectedRole) {
   });
 }
 
-function verificationOptions(value) {
-  const parsed = dataRecord(value, EXACT_KEYS.options);
-  const evaluatedAt = canonicalInstant(parsed.evaluatedAt);
+function verificationOptions(value, trustedEvaluationInstant) {
+  const usesInjectedTestTime = trustedEvaluationInstant === undefined;
+  const parsed = dataRecord(
+    value,
+    usesInjectedTestTime ? EXACT_KEYS.testOptions : EXACT_KEYS.productionOptions,
+  );
+  const evaluatedAt = usesInjectedTestTime
+    ? canonicalInstant(parsed.evaluatedAt)
+    : trustedEvaluationInstant;
   if (
     typeof parsed.expectedAccountId !== 'string' ||
     !/^\d{12}$/u.test(parsed.expectedAccountId) ||
@@ -793,15 +856,48 @@ function requireIntegratedProductionTarget() {
   return invalid();
 }
 
+function createAuthorizationFreshness(initialReading, finalReading, expiresAtMilliseconds) {
+  const monotonicDeadlineMilliseconds =
+    initialReading.monotonicMilliseconds +
+    (expiresAtMilliseconds - initialReading.wall.milliseconds);
+  if (
+    finalReading.wall.milliseconds < initialReading.wall.milliseconds ||
+    finalReading.monotonicMilliseconds < initialReading.monotonicMilliseconds ||
+    finalReading.wall.milliseconds >= expiresAtMilliseconds ||
+    !Number.isFinite(monotonicDeadlineMilliseconds) ||
+    finalReading.monotonicMilliseconds >= monotonicDeadlineMilliseconds
+  ) {
+    return invalid();
+  }
+  return Object.seal({
+    invalidated: false,
+    expiresAtMilliseconds,
+    monotonicDeadlineMilliseconds,
+    lastObservedWallMilliseconds: finalReading.wall.milliseconds,
+    lastObservedMonotonicMilliseconds: finalReading.monotonicMilliseconds,
+  });
+}
+
 function verifyIntent(
   value,
   optionsValue,
   registryValue,
-  { requireProductionTarget, brandProduction },
+  { requireProductionTarget, brandProduction, trustedEvaluationInstant, authorizationLifecycle },
 ) {
   try {
+    if (
+      (brandProduction &&
+        (trustedEvaluationInstant === undefined ||
+          authorizationLifecycle?.reportRegistry !== PRODUCTION_AUTHORIZED_REPORTS)) ||
+      (!brandProduction &&
+        authorizationLifecycle?.reportRegistry === PRODUCTION_AUTHORIZED_REPORTS) ||
+      (authorizationLifecycle !== undefined &&
+        trustedEvaluationInstant !== authorizationLifecycle.initialReading.wall)
+    ) {
+      return invalid();
+    }
     const parsed = parsedRoot(value);
-    const options = verificationOptions(optionsValue);
+    const options = verificationOptions(optionsValue, trustedEvaluationInstant);
     const content = parsed.unsigned.value.content;
     if (
       parsed.unsigned.value.intentSha256 !== options.expectedIntentSha256 ||
@@ -865,6 +961,14 @@ function verifyIntent(
       }
       usedPublicKeys.add(authority.publicKeySha256);
     }
+    const freshness =
+      authorizationLifecycle === undefined
+        ? undefined
+        : createAuthorizationFreshness(
+            authorizationLifecycle.initialReading,
+            authorizationLifecycle.readClock(),
+            parsed.unsigned.expiresAt.milliseconds,
+          );
     const report = deepFreeze({
       ok: true,
       signatureValidated: true,
@@ -885,7 +989,7 @@ function verifyIntent(
       errors: Object.freeze([]),
       ...ZERO_CALLS,
     });
-    if (brandProduction) PRODUCTION_AUTHORIZED_REPORTS.add(report);
+    if (freshness !== undefined) authorizationLifecycle.reportRegistry.set(report, freshness);
     return report;
   } catch {
     return failureReport();
@@ -904,12 +1008,113 @@ function failureReport(errors = ['Production deployment intent validation failed
   });
 }
 
+function verifyIntentAtTrustedCurrentTime(
+  value,
+  options,
+  registry,
+  { requireProductionTarget, brandProduction },
+) {
+  try {
+    const initialReading = trustedClockReading();
+    return verifyIntent(value, options, registry, {
+      requireProductionTarget,
+      brandProduction,
+      trustedEvaluationInstant: initialReading.wall,
+      authorizationLifecycle: brandProduction
+        ? Object.freeze({
+            initialReading,
+            readClock: trustedClockReading,
+            reportRegistry: PRODUCTION_AUTHORIZED_REPORTS,
+          })
+        : undefined,
+    });
+  } catch {
+    return failureReport();
+  }
+}
+
+function reportIsFreshAt(value, registry, reading) {
+  if (value === null || typeof value !== 'object') return false;
+  const freshness = registry.get(value);
+  if (freshness === undefined || freshness.invalidated) return false;
+  if (
+    reading.wall.milliseconds < freshness.lastObservedWallMilliseconds ||
+    reading.monotonicMilliseconds < freshness.lastObservedMonotonicMilliseconds ||
+    reading.wall.milliseconds >= freshness.expiresAtMilliseconds ||
+    reading.monotonicMilliseconds >= freshness.monotonicDeadlineMilliseconds
+  ) {
+    freshness.invalidated = true;
+    return false;
+  }
+  freshness.lastObservedWallMilliseconds = reading.wall.milliseconds;
+  freshness.lastObservedMonotonicMilliseconds = reading.monotonicMilliseconds;
+  return true;
+}
+
+function reportIsFreshFromClock(value, registry, readClock) {
+  if (value === null || typeof value !== 'object') return false;
+  const freshness = registry.get(value);
+  if (freshness === undefined || freshness.invalidated) return false;
+  try {
+    return reportIsFreshAt(value, registry, readClock());
+  } catch {
+    freshness.invalidated = true;
+    return false;
+  }
+}
+
+function revalidateReportFromClock(value, registry, readClock) {
+  if (!reportIsFreshFromClock(value, registry, readClock)) return invalid();
+  return value;
+}
+
 /** Test-only trust seam. A successful report is deliberately never production-branded. */
 export function verifyProductionDeploymentIntentWithTestRegistry(value, options, registry) {
   return verifyIntent(value, options, registry, {
     requireProductionTarget: false,
     brandProduction: false,
   });
+}
+
+/** Test-only trusted-clock seam. Successful reports remain explicitly unbranded. */
+export function verifyProductionDeploymentIntentAtTrustedClockWithTestRegistry(
+  value,
+  options,
+  registry,
+) {
+  return verifyIntentAtTrustedCurrentTime(value, options, registry, {
+    requireProductionTarget: false,
+    brandProduction: false,
+  });
+}
+
+/**
+ * Test-only production-lifecycle seam. It uses the real double-read and sticky
+ * freshness machinery with an isolated metadata map, so it cannot mint a
+ * production brand or enable execution.
+ */
+export function verifyProductionDeploymentIntentAuthorizationLifecycleForTest(
+  value,
+  options,
+  registry,
+  clockReadings,
+) {
+  try {
+    const readClock = testClockSequence(clockReadings);
+    const initialReading = readClock();
+    return verifyIntent(value, options, registry, {
+      requireProductionTarget: false,
+      brandProduction: false,
+      trustedEvaluationInstant: initialReading.wall,
+      authorizationLifecycle: Object.freeze({
+        initialReading,
+        readClock,
+        reportRegistry: TEST_AUTHORIZED_REPORTS,
+      }),
+    });
+  } catch {
+    return failureReport();
+  }
 }
 
 /** Test-only seam: injected keys still cannot bypass the empty production target registry. */
@@ -925,14 +1130,39 @@ export function verifyProductionDeploymentIntentAgainstProductionTargetWithTestR
 }
 
 export function verifyProductionDeploymentIntent(value, options) {
-  return verifyIntent(value, options, PRODUCTION_DEPLOYMENT_INTENT_AUTHORITY_KEY_REGISTRY, {
-    requireProductionTarget: true,
-    brandProduction: true,
-  });
+  return verifyIntentAtTrustedCurrentTime(
+    value,
+    options,
+    PRODUCTION_DEPLOYMENT_INTENT_AUTHORITY_KEY_REGISTRY,
+    {
+      requireProductionTarget: true,
+      brandProduction: true,
+    },
+  );
 }
 
 export function isProductionAuthorizedDeploymentIntentReport(value) {
-  return value !== null && typeof value === 'object' && PRODUCTION_AUTHORIZED_REPORTS.has(value);
+  return reportIsFreshFromClock(value, PRODUCTION_AUTHORIZED_REPORTS, trustedClockReading);
+}
+
+export function revalidateProductionDeploymentIntentReportForApplication(value) {
+  return revalidateReportFromClock(value, PRODUCTION_AUTHORIZED_REPORTS, trustedClockReading);
+}
+
+/** Test-only freshness seam; its isolated reports never possess production authority. */
+export function isUnbrandedDeploymentIntentReportFreshAtForTest(value, clockReading) {
+  if (PRODUCTION_AUTHORIZED_REPORTS.has(value)) return false;
+  return reportIsFreshFromClock(value, TEST_AUTHORIZED_REPORTS, () =>
+    testClockReading(clockReading),
+  );
+}
+
+/** Test-only revalidation seam; it rejects production-branded reports. */
+export function revalidateUnbrandedDeploymentIntentReportAtForTest(value, clockReading) {
+  if (PRODUCTION_AUTHORIZED_REPORTS.has(value)) return invalid();
+  return revalidateReportFromClock(value, TEST_AUTHORIZED_REPORTS, () =>
+    testClockReading(clockReading),
+  );
 }
 
 function parsedCanonicalBytes(bytes) {
@@ -964,7 +1194,7 @@ export function verifyProductionDeploymentIntentBytesWithTestRegistry(bytes, opt
 
 export function verifyProductionDeploymentIntentBytes(bytes, options) {
   try {
-    return verifyIntent(
+    return verifyIntentAtTrustedCurrentTime(
       parsedCanonicalBytes(bytes),
       options,
       PRODUCTION_DEPLOYMENT_INTENT_AUTHORITY_KEY_REGISTRY,

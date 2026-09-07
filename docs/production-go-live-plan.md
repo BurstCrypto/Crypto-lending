@@ -375,7 +375,7 @@ exactly and moves the ten-provider launch target.
    blocker audit immediately before the decision. The exact clean release
    manifest, checked-in schema-v2 deployment target, and live-read evidence must
    first receive the two-role Ed25519 technical quorum; the separately signed
-   seven-role public-launch decision must bind that verified technical bundle.
+   seven-role public-launch decision must sign the exact SHA-256 of that verified technical bundle.
    Both authority registries and the deployment-target registry are empty
    today, so local tests cannot manufacture this evidence.
 
@@ -590,7 +590,13 @@ operational intent requires distinct Ed25519 signatures from reviewed
 deployment-owner and independent-security keys. The checked-in production key
 registry and deployment-target registry are intentionally empty, the example is
 unsigned and `PROVISION_INERT`, and no executor or runtime integration exists.
-Every validation report remains non-executable. Kill/delete require exact zero
+Every validation report remains non-executable. Production validation captures
+wall and module-held monotonic clocks twice rather than accepting caller time.
+Private report metadata records the final observation, absolute expiration, and
+monotonic deadline. Production-brand checks and application revalidation re-read
+both clocks and permanently invalidate a cached report after any observed clock
+rollback or either expiration boundary; deterministic injected clocks use an
+isolated unbranded test-only metadata map. Kill/delete require exact zero
 desired counts and no egress or writes; rollback cannot increase authority; no
 operation can enable financial writes. A future executor must atomically consume
 the validated predecessor because the offline validator provides only a
