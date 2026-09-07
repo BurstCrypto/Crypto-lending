@@ -11,6 +11,10 @@ import {
   ACTION_LIFECYCLE_PATH,
   ACTION_LIFECYCLE_MIGRATION_PATH,
   ACTION_LIFECYCLE_MIGRATION_SPEC_PATH,
+  ACTION_LIFECYCLE_DURABLE_PORT_PATH,
+  ACTION_LIFECYCLE_POSTGRES_ADAPTER_INTEGRATION_SPEC_PATH,
+  ACTION_LIFECYCLE_POSTGRES_ADAPTER_PATH,
+  ACTION_LIFECYCLE_POSTGRES_ADAPTER_SPEC_PATH,
   ACTION_LIFECYCLE_SPEC_PATH,
   DATABASE_MIGRATION_INDEX_PATH,
   EXPECTED_ACTIONS,
@@ -19,8 +23,12 @@ import {
   REVIEWED_ACTION_BOUNDARY_SHA256,
   REVIEWED_ACTION_BOUNDARY_SPEC_SHA256,
   REVIEWED_ACTION_LIFECYCLE_SHA256,
+  REVIEWED_ACTION_LIFECYCLE_DURABLE_PORT_SHA256,
   REVIEWED_ACTION_LIFECYCLE_MIGRATION_SHA256,
   REVIEWED_ACTION_LIFECYCLE_MIGRATION_SPEC_SHA256,
+  REVIEWED_ACTION_LIFECYCLE_POSTGRES_ADAPTER_INTEGRATION_SPEC_SHA256,
+  REVIEWED_ACTION_LIFECYCLE_POSTGRES_ADAPTER_SHA256,
+  REVIEWED_ACTION_LIFECYCLE_POSTGRES_ADAPTER_SPEC_SHA256,
   REVIEWED_ACTION_LIFECYCLE_SPEC_SHA256,
   REVIEWED_DATABASE_MIGRATION_INDEX_SHA256,
   validateDormantMainnetActionBoundaryFiles,
@@ -35,6 +43,10 @@ function snapshot() {
     specSource: baseline.specSource,
     lifecycleSource: baseline.lifecycleSource,
     lifecycleSpecSource: baseline.lifecycleSpecSource,
+    durablePortSource: baseline.durablePortSource,
+    postgresAdapterSource: baseline.postgresAdapterSource,
+    postgresAdapterSpecSource: baseline.postgresAdapterSpecSource,
+    postgresAdapterIntegrationSpecSource: baseline.postgresAdapterIntegrationSpecSource,
     migrationSource: baseline.migrationSource,
     migrationSpecSource: baseline.migrationSpecSource,
     migrationIndexSource: baseline.migrationIndexSource,
@@ -75,9 +87,25 @@ test('the exact Ethereum and Solana lending action candidate boundary is dormant
   assert.equal(REVIEWED_ACTION_BOUNDARY_SPEC_SHA256.length, 64);
   assert.equal(REVIEWED_ACTION_LIFECYCLE_SHA256.length, 64);
   assert.equal(REVIEWED_ACTION_LIFECYCLE_SPEC_SHA256.length, 64);
+  assert.equal(REVIEWED_ACTION_LIFECYCLE_DURABLE_PORT_SHA256.length, 64);
+  assert.equal(REVIEWED_ACTION_LIFECYCLE_POSTGRES_ADAPTER_SHA256.length, 64);
+  assert.equal(REVIEWED_ACTION_LIFECYCLE_POSTGRES_ADAPTER_SPEC_SHA256.length, 64);
+  assert.equal(REVIEWED_ACTION_LIFECYCLE_POSTGRES_ADAPTER_INTEGRATION_SPEC_SHA256.length, 64);
   assert.equal(REVIEWED_ACTION_LIFECYCLE_MIGRATION_SHA256.length, 64);
   assert.equal(REVIEWED_ACTION_LIFECYCLE_MIGRATION_SPEC_SHA256.length, 64);
   assert.equal(REVIEWED_DATABASE_MIGRATION_INDEX_SHA256.length, 64);
+  assert.equal(
+    REVIEWED_ACTION_LIFECYCLE_MIGRATION_SHA256,
+    'c3840f3b3cd7de0e7dbf159c335fbe0784e55e81c936defdf618c9b0092ffa27',
+  );
+  assert.equal(
+    REVIEWED_ACTION_LIFECYCLE_MIGRATION_SPEC_SHA256,
+    '7015c5fc30584e868cbdc2df3a376479521d1972f516134d4e95c595a4b7816e',
+  );
+  assert.equal(
+    REVIEWED_DATABASE_MIGRATION_INDEX_SHA256,
+    '6ec4f52c67e555070782c3b0a87950ff887e1f513cd92567534ee9dd9393a78b',
+  );
 });
 
 test('action, provider, protocol, order, and chain drift fail closed', () => {
@@ -197,6 +225,197 @@ test('lifecycle bytes, pure imports, closed authority, and adversarial spec are 
     value.lifecycleSpecSource =
       "import './dormant-mainnet-financial-action-lifecycle';\ntest('only one', () => {});";
   });
+});
+
+test('durable port and Postgres adapter bytes, imports, and exports are exact', () => {
+  for (const [name, field, expectedError] of [
+    [
+      'durable port drift',
+      'durablePortSource',
+      'dormant durable port bytes drifted from the reviewed source',
+    ],
+    [
+      'Postgres adapter drift',
+      'postgresAdapterSource',
+      'dormant Postgres adapter bytes drifted from the reviewed source',
+    ],
+    [
+      'Postgres adapter spec drift',
+      'postgresAdapterSpecSource',
+      'dormant Postgres adapter spec bytes drifted from the reviewed source',
+    ],
+    [
+      'Postgres adapter integration drift',
+      'postgresAdapterIntegrationSpecSource',
+      'dormant Postgres adapter integration spec bytes drifted from the reviewed source',
+    ],
+  ]) {
+    mutationReports(name, expectedError, (value) => {
+      value[field] += '\n// unreviewed drift';
+    });
+  }
+
+  mutationReports('port import', 'dormant durable port import inventory changed', (value) => {
+    value.durablePortSource = `import type { Signer } from 'ethers';\n${value.durablePortSource}`;
+  });
+  mutationReports(
+    'adapter import',
+    'dormant Postgres adapter import inventory changed',
+    (value) => {
+      value.postgresAdapterSource = `import { request } from 'node:https';\n${value.postgresAdapterSource}`;
+    },
+  );
+  mutationReports('port export', 'dormant durable port export inventory changed', (value) => {
+    value.durablePortSource += '\nexport type RuntimeMainnetWriter = unknown;';
+  });
+  mutationReports(
+    'adapter export',
+    'dormant Postgres adapter export inventory changed',
+    (value) => {
+      value.postgresAdapterSource += '\nexport class MainnetWriter {}';
+    },
+  );
+  mutationReports(
+    'test export',
+    'dormant Postgres adapter tests export runtime capabilities',
+    (value) => {
+      value.postgresAdapterSpecSource += '\nexport const adapterFixture = true;';
+    },
+  );
+});
+
+test('cursor provenance and raw result review cannot become forgeable exports', () => {
+  mutationReports(
+    'Symbol cursor brand',
+    'dormant durable lifecycle uses a reflectable Symbol cursor brand',
+    (value) => {
+      value.postgresAdapterSource += "\nconst CURSOR_BRAND = Symbol.for('clma-cursor');";
+    },
+  );
+  for (const source of [
+    '\nexport function decodeDormantMainnetFinancialActionDatabaseResult() {}',
+    '\nexport const createDormantMainnetFinancialActionDatabaseOutcomeUnknown = () => ({});',
+    '\nexport type DormantMainnetFinancialActionLifecycleDatabaseCommandV1 = unknown;',
+    '\nexport class DormantMainnetFinancialActionLifecycleDatabaseCodecError extends Error {}',
+  ]) {
+    mutationReports(
+      source,
+      'dormant Postgres adapter exposes a standalone raw decoder, outcome maker, or database command',
+      (value) => {
+        value.postgresAdapterSource += source;
+      },
+    );
+  }
+});
+
+test('adapter database access is one-call, cancellable, allowlisted, and retry-free', () => {
+  mutationReports(
+    'SQL function drift',
+    'dormant Postgres adapter function-SQL allowlist changed',
+    (value) => {
+      value.postgresAdapterSource = value.postgresAdapterSource.replace(
+        'read_mainnet_financial_action_lifecycle',
+        'write_unreviewed_mainnet_financial_action',
+      );
+    },
+  );
+  mutationReports(
+    'second database call',
+    'dormant Postgres adapter no longer performs one cancellable call without retry',
+    (value) => {
+      value.postgresAdapterSource +=
+        '\nvoid Reflect.apply(this.#databaseQuery, this.#databaseReceiver, []);';
+    },
+  );
+  for (const source of [
+    "\nvoid postgres.query('SELECT 1');",
+    '\nvoid postgres.withTransaction(async () => undefined);',
+    '\nconst retryAttempts = 2;',
+    '\nsetTimeout(() => undefined, 1);',
+  ]) {
+    mutationReports(
+      source,
+      'dormant Postgres adapter no longer performs one cancellable call without retry',
+      (value) => {
+        value.postgresAdapterSource += source;
+      },
+    );
+  }
+});
+
+test('adapter grants, DDL, registration, barrels, and execution authority fail closed', () => {
+  for (const source of [
+    "\nconst grant = 'GRANT EXECUTE ON FUNCTION unsafe TO crypto_api_runtime';",
+    "\nconst ddl = 'CREATE TABLE unsafe(value text)';",
+  ]) {
+    mutationReports(
+      source,
+      'dormant Postgres adapter contains grant, DDL, or write-table SQL authority',
+      (value) => {
+        value.postgresAdapterSource += source;
+      },
+    );
+  }
+  for (const source of [
+    '\n@Injectable() class RegisteredAdapter {}',
+    "\nexport * from './runtime-mainnet-writer';",
+    '\nconst moduleMetadata = { providers: [PostgresDormantMainnetFinancialActionLifecycleDurableAdapter] };',
+  ]) {
+    mutationReports(
+      source,
+      'dormant durable lifecycle is registered, re-exported, dynamic, or network-capable',
+      (value) => {
+        value.postgresAdapterSource += source;
+      },
+    );
+  }
+  for (const source of [
+    '\nsendTransaction(payload);',
+    "\nconst provider = new JsonRpcProvider('https://rpc.invalid');",
+    "\nenqueue('job_outbox');",
+    '\nconst unsafe = { ledgerSettlementAuthority: true };',
+  ]) {
+    mutationReports(
+      source,
+      'dormant durable lifecycle gained signer, provider, outbox, retry, or ledger authority',
+      (value) => {
+        value.postgresAdapterSource += source;
+      },
+    );
+  }
+});
+
+test('adapter unit and loopback integration security evidence is pinned', () => {
+  mutationReports(
+    'unit provenance coverage removed',
+    'dormant Postgres adapter spec lost exact provenance, one-call, or denial coverage',
+    (value) => {
+      value.postgresAdapterSpecSource = value.postgresAdapterSpecSource.replace(
+        "Symbol.for('forged-clma-brand')",
+        "'removed-forged-brand'",
+      );
+    },
+  );
+  for (const [name, from, to] of [
+    ['loopback removed', "!['localhost', '127.0.0.1', '[::1]', '::1'].includes(hostname)", 'false'],
+    ['PostgreSQL 16 removed', 'serverVersionNum < 160_000', 'serverVersionNum < 1'],
+    ['migration cap widened', "({ id }) => id <= '0033'", "({ id }) => id <= '9999'"],
+    [
+      'direct reconciliation removed',
+      'await adapter.recordReconciliation(reconciliationRequest)',
+      'await adapter.recordBroadcast(reconciliationRequest)',
+    ],
+    ['settlement authority enabled', 'ledger_authority_count: 0', 'ledger_authority_count: 1'],
+  ]) {
+    mutationReports(
+      name,
+      'dormant Postgres adapter integration lost loopback 0033 flow or denial coverage',
+      (value) => {
+        value.postgresAdapterIntegrationSpecSource =
+          value.postgresAdapterIntegrationSpecSource.replace(from, to);
+      },
+    );
+  }
 });
 
 test('the exact 0033 migration, spec, and index inventory is pinned', () => {
@@ -409,6 +628,16 @@ test('only the reviewed migration index may wire or reference 0033 at runtime', 
       );
     },
   );
+  mutationReports(
+    'runtime lifecycle SQL function',
+    'migration-0033 lifecycle SQL function is referenced outside the reviewed adapter by runtime source apps/api/src/mainnet-actions/unsafe-durable-store.ts',
+    (value) => {
+      value.runtimeSources.set(
+        'apps/api/src/mainnet-actions/unsafe-durable-store.ts',
+        "const sql = 'SELECT * FROM prepare_mainnet_financial_action_lifecycle($1)';",
+      );
+    },
+  );
 });
 
 test('any runtime reference to the dormant boundary fails closed', () => {
@@ -448,6 +677,25 @@ test('any runtime reference to the dormant boundary fails closed', () => {
       "void import('./domain/dormant-mainnet-financial-action-' + 'lifecycle');",
     );
   });
+  for (const source of [
+    "export * from './application/ports/dormant-mainnet-financial-action-lifecycle-durable.port';",
+    "import { PostgresDormantMainnetFinancialActionLifecycleDurableAdapter } from './infrastructure/postgres-dormant-mainnet-financial-action-lifecycle-durable.adapter';",
+    'const moduleMetadata = { providers: [PostgresDormantMainnetFinancialActionLifecycleDurableAdapter] };',
+  ]) {
+    mutationRejected(source, (value) => {
+      value.runtimeSources.set('apps/api/src/mainnet-actions/unsafe-durable-runtime.ts', source);
+    });
+  }
+  mutationReports(
+    'standalone codec restored',
+    'standalone dormant lifecycle database codec must remain absent',
+    (value) => {
+      value.runtimeSources.set(
+        'apps/api/src/mainnet-actions/application/dormant-mainnet-financial-action-lifecycle-database.codec.ts',
+        'export const rawDecode = () => undefined;',
+      );
+    },
+  );
 });
 
 test('malformed snapshots and runtime inventories fail closed without throwing', () => {
@@ -468,6 +716,12 @@ test('malformed snapshots and runtime inventories fail closed without throwing',
   });
   mutationRejected('lifecycle in consumers', (value) => {
     value.runtimeSources.set(ACTION_LIFECYCLE_PATH, value.lifecycleSource);
+  });
+  mutationRejected('durable port in consumers', (value) => {
+    value.runtimeSources.set(ACTION_LIFECYCLE_DURABLE_PORT_PATH, value.durablePortSource);
+  });
+  mutationRejected('Postgres adapter in consumers', (value) => {
+    value.runtimeSources.set(ACTION_LIFECYCLE_POSTGRES_ADAPTER_PATH, value.postgresAdapterSource);
   });
 });
 
@@ -490,6 +744,34 @@ test('repository loading rejects missing reviewed artifacts with a value-free er
     assert.deepEqual(validateDormantMainnetActionBoundaryFiles(repositoryRoot), [
       ACTION_BOUNDARY_INPUT_ERROR,
     ]);
+    writeFixture(repositoryRoot, ACTION_LIFECYCLE_DURABLE_PORT_PATH, baseline.durablePortSource);
+    assert.deepEqual(validateDormantMainnetActionBoundaryFiles(repositoryRoot), [
+      ACTION_BOUNDARY_INPUT_ERROR,
+    ]);
+    writeFixture(
+      repositoryRoot,
+      ACTION_LIFECYCLE_POSTGRES_ADAPTER_PATH,
+      baseline.postgresAdapterSource,
+    );
+    assert.deepEqual(validateDormantMainnetActionBoundaryFiles(repositoryRoot), [
+      ACTION_BOUNDARY_INPUT_ERROR,
+    ]);
+    writeFixture(
+      repositoryRoot,
+      ACTION_LIFECYCLE_POSTGRES_ADAPTER_SPEC_PATH,
+      baseline.postgresAdapterSpecSource,
+    );
+    assert.deepEqual(validateDormantMainnetActionBoundaryFiles(repositoryRoot), [
+      ACTION_BOUNDARY_INPUT_ERROR,
+    ]);
+    writeFixture(
+      repositoryRoot,
+      ACTION_LIFECYCLE_POSTGRES_ADAPTER_INTEGRATION_SPEC_PATH,
+      baseline.postgresAdapterIntegrationSpecSource,
+    );
+    assert.deepEqual(validateDormantMainnetActionBoundaryFiles(repositoryRoot), [
+      ACTION_BOUNDARY_INPUT_ERROR,
+    ]);
     writeFixture(repositoryRoot, ACTION_LIFECYCLE_MIGRATION_PATH, baseline.migrationSource);
     assert.deepEqual(validateDormantMainnetActionBoundaryFiles(repositoryRoot), [
       ACTION_BOUNDARY_INPUT_ERROR,
@@ -504,6 +786,14 @@ test('repository loading rejects missing reviewed artifacts with a value-free er
     ]);
     writeFixture(repositoryRoot, DATABASE_MIGRATION_INDEX_PATH, baseline.migrationIndexSource);
     assert.deepEqual(validateDormantMainnetActionBoundaryFiles(repositoryRoot), []);
+    writeFixture(
+      repositoryRoot,
+      'apps/api/src/mainnet-actions/application/dormant-mainnet-financial-action-lifecycle-database.codec.ts',
+      'export const rawDecode = () => undefined;',
+    );
+    assert.deepEqual(validateDormantMainnetActionBoundaryFiles(repositoryRoot), [
+      'standalone dormant lifecycle database codec must remain absent',
+    ]);
   } finally {
     rmSync(repositoryRoot, { recursive: true, force: true });
   }

@@ -15,6 +15,16 @@ export const ACTION_LIFECYCLE_PATH =
   'apps/api/src/mainnet-actions/domain/dormant-mainnet-financial-action-lifecycle.ts';
 export const ACTION_LIFECYCLE_SPEC_PATH =
   'apps/api/src/mainnet-actions/domain/dormant-mainnet-financial-action-lifecycle.spec.ts';
+export const ACTION_LIFECYCLE_DURABLE_PORT_PATH =
+  'apps/api/src/mainnet-actions/application/ports/dormant-mainnet-financial-action-lifecycle-durable.port.ts';
+const PROHIBITED_ACTION_LIFECYCLE_DATABASE_CODEC_PATH =
+  'apps/api/src/mainnet-actions/application/dormant-mainnet-financial-action-lifecycle-database.codec.ts';
+export const ACTION_LIFECYCLE_POSTGRES_ADAPTER_PATH =
+  'apps/api/src/mainnet-actions/infrastructure/postgres-dormant-mainnet-financial-action-lifecycle-durable.adapter.ts';
+export const ACTION_LIFECYCLE_POSTGRES_ADAPTER_SPEC_PATH =
+  'apps/api/src/mainnet-actions/infrastructure/postgres-dormant-mainnet-financial-action-lifecycle-durable.adapter.spec.ts';
+export const ACTION_LIFECYCLE_POSTGRES_ADAPTER_INTEGRATION_SPEC_PATH =
+  'apps/api/test/infrastructure/postgres-dormant-mainnet-financial-action-lifecycle-durable-adapter.integration-spec.ts';
 export const ACTION_LIFECYCLE_MIGRATION_PATH =
   'apps/api/src/infrastructure/database/migrations/0033-create-mainnet-financial-action-lifecycle.migration.ts';
 export const ACTION_LIFECYCLE_MIGRATION_SPEC_PATH =
@@ -35,10 +45,18 @@ export const REVIEWED_ACTION_LIFECYCLE_SHA256 =
   '87436578870cc361d9bc8c63f9e72a5c28fb37d09c1cbb685d49662288e660db';
 export const REVIEWED_ACTION_LIFECYCLE_SPEC_SHA256 =
   'ba4f5acc5d10497178c0c3c4ff7a89435f03e33bc2efbc7f6024bf090069cc86';
+export const REVIEWED_ACTION_LIFECYCLE_DURABLE_PORT_SHA256 =
+  '389a0e898f1a411ae4d01c53ce82d72b1672633a071d7f7a7c8d01e1c61e9cd3';
+export const REVIEWED_ACTION_LIFECYCLE_POSTGRES_ADAPTER_SHA256 =
+  '5b4052709e040b16c3f788fc784c3f30cb2bc0129a0f369680eb6d534dd696df';
+export const REVIEWED_ACTION_LIFECYCLE_POSTGRES_ADAPTER_SPEC_SHA256 =
+  'f9c976efdeee588087a54a72e30d132e5dbd81345197c7fde8d84bf801702906';
+export const REVIEWED_ACTION_LIFECYCLE_POSTGRES_ADAPTER_INTEGRATION_SPEC_SHA256 =
+  'a71f07935cbc5354d5654f7b1f51ac528f2012d6914840daf26acb5f3b6c40c9';
 export const REVIEWED_ACTION_LIFECYCLE_MIGRATION_SHA256 =
-  '103060b3ec546bf838eaa505226a6fd746580d6b429d09612d5623008c400228';
+  'c3840f3b3cd7de0e7dbf159c335fbe0784e55e81c936defdf618c9b0092ffa27';
 export const REVIEWED_ACTION_LIFECYCLE_MIGRATION_SPEC_SHA256 =
-  '3470bfaa4380a2686c12b46221ef23e79361d0748a808fb65e3fb0a636ee65ca';
+  '7015c5fc30584e868cbdc2df3a376479521d1972f516134d4e95c595a4b7816e';
 export const REVIEWED_DATABASE_MIGRATION_INDEX_SHA256 =
   '6ec4f52c67e555070782c3b0a87950ff887e1f513cd92567534ee9dd9393a78b';
 export const ACTION_BOUNDARY_INPUT_ERROR =
@@ -72,6 +90,80 @@ const EXPECTED_LIFECYCLE_IMPORTS = Object.freeze([
   'node:util/types',
   '../../wallets/domain/wallet-identity',
   './dormant-mainnet-financial-action',
+]);
+const EXPECTED_DURABLE_PORT_IMPORTS = Object.freeze([
+  '../../domain/dormant-mainnet-financial-action',
+]);
+const EXPECTED_POSTGRES_ADAPTER_IMPORTS = Object.freeze([
+  'node:util/types',
+  '../../infrastructure/database/postgres.service',
+  '../../blockchain/domain/supported-asset-registry',
+  '../domain/dormant-mainnet-financial-action',
+  '../application/ports/dormant-mainnet-financial-action-lifecycle-durable.port',
+]);
+const EXPECTED_POSTGRES_ADAPTER_SPEC_IMPORTS = Object.freeze([
+  '../../blockchain/domain/supported-asset-registry',
+  '../../infrastructure/database/postgres.service',
+  '../domain/dormant-mainnet-financial-action',
+  '../application/ports/dormant-mainnet-financial-action-lifecycle-durable.port',
+  './postgres-dormant-mainnet-financial-action-lifecycle-durable.adapter',
+]);
+const EXPECTED_POSTGRES_ADAPTER_INTEGRATION_SPEC_IMPORTS = Object.freeze([
+  'node:crypto',
+  'pg',
+  'pg',
+  '../../src/blockchain/domain/supported-asset-registry',
+  '../../src/infrastructure/database/migration-runner.service',
+  '../../src/infrastructure/database/migrations',
+  '../../src/infrastructure/database/postgres.service',
+  '../../src/mainnet-actions/domain/dormant-mainnet-financial-action',
+  '../../src/mainnet-actions/application/ports/dormant-mainnet-financial-action-lifecycle-durable.port',
+  '../../src/mainnet-actions/infrastructure/postgres-dormant-mainnet-financial-action-lifecycle-durable.adapter',
+]);
+const EXPECTED_DURABLE_PORT_EXPORTS = Object.freeze([
+  'DORMANT_MAINNET_FINANCIAL_ACTION_DURABLE_LIFECYCLE_VERSION',
+  'DORMANT_MAINNET_FINANCIAL_ACTION_DURABLE_REQUEST_USE',
+  'DORMANT_MAINNET_FINANCIAL_ACTION_DURABLE_RESULT_USE',
+  'MAINNET_FINANCIAL_ACTION_DATABASE_FINGERPRINT_ENCODING',
+  'MainnetFinancialActionDatabaseNetworkId',
+  'DormantMainnetFinancialActionDurableOperation',
+  'DormantMainnetFinancialActionDatabaseStage',
+  'DormantMainnetFinancialActionDatabaseRecordOutcome',
+  'DormantMainnetWalletBroadcastDatabaseOutcome',
+  'DormantMainnetReconciliationDatabaseOutcome',
+  'DormantMainnetFinancialActionVolatileCommitmentV1',
+  'DormantMainnetFinancialActionClmaDatabaseCursorV1',
+  'DormantMainnetFinancialActionAuthoritativeLinksV1',
+  'PrepareDormantMainnetFinancialActionDurableRequestV1',
+  'BindDormantMainnetFinancialActionSubmissionRequestV1',
+  'RecordDormantMainnetFinancialActionBroadcastRequestV1',
+  'RecordDormantMainnetFinancialActionReconciliationRequestV1',
+  'ReadDormantMainnetFinancialActionDurableRequestV1',
+  'DormantMainnetFinancialActionDurableRequestV1',
+  'DormantMainnetFinancialActionDatabaseConfirmedResultV1',
+  'DormantMainnetFinancialActionPreWalletDatabaseOutcomeUnknownV1',
+  'DormantMainnetFinancialActionPostWalletDatabaseOutcomeUnknownV1',
+  'DormantMainnetFinancialActionDatabaseOutcomeUnknownV1',
+  'DormantMainnetFinancialActionDurableResultV1',
+  'DormantMainnetFinancialActionLifecycleDurablePort',
+]);
+const EXPECTED_POSTGRES_ADAPTER_EXPORTS = Object.freeze([
+  'DormantMainnetFinancialActionLifecycleClock',
+  'PostgresDormantMainnetFinancialActionLifecycleDurableAdapter',
+]);
+const EXPECTED_POSTGRES_ADAPTER_SQL_CONSTANTS = Object.freeze([
+  'PREPARE_SQL',
+  'BIND_SUBMISSION_SQL',
+  'RECORD_BROADCAST_SQL',
+  'RECORD_RECONCILIATION_SQL',
+  'READ_SQL',
+]);
+const EXPECTED_POSTGRES_ADAPTER_SQL_FUNCTIONS = Object.freeze([
+  'prepare_mainnet_financial_action_lifecycle',
+  'bind_mainnet_financial_action_submission',
+  'record_mainnet_financial_action_broadcast_observation',
+  'record_mainnet_financial_action_reconciliation_observation',
+  'read_mainnet_financial_action_lifecycle',
 ]);
 const EXPECTED_PRODUCTION_MIGRATION_TAIL = Object.freeze([
   'createProviderPositionChainAnchorEvidenceMigrationV0029',
@@ -151,12 +243,27 @@ const UNSAFE_CAPABILITY =
 const PROHIBITED_BOUNDARY_SOURCE =
   /(?:\bprocess\.env\b|\b(?:fetch|WebSocket|XMLHttpRequest|eval|Function)\s*\(|\b(?:require|import)\s*\(|\bexport\s+(?:\*|\{[^}]*\})\s+from\s*['"]|\b(?:sendRawTransaction|sendTransaction|signTransaction|broadcastTransaction|eth_sendRawTransaction)\b|@(Injectable|Module|Controller)\s*\()/u;
 const RUNTIME_REFERENCE =
-  /(?:dormant-mainnet-financial-action|DormantMainnetFinancialAction|DORMANT_MAINNET_FINANCIAL_ACTION|MAINNET_FINANCIAL_ACTION_PROVIDER_CANDIDATES|assessDormantMainnetFinancialAction|parseDormantMainnetFinancialActionIntent|createDormantMainnetFinancialActionLifecycleProtocol)/u;
+  /(?:dormant-mainnet-financial-action|DormantMainnetFinancialAction|DORMANT_MAINNET_FINANCIAL_ACTION|MAINNET_FINANCIAL_ACTION_PROVIDER_CANDIDATES|MAINNET_FINANCIAL_ACTION_DATABASE_FINGERPRINT_ENCODING|PostgresDormantMainnetFinancialActionLifecycleDurableAdapter|assessDormantMainnetFinancialAction|parseDormantMainnetFinancialActionIntent|createDormantMainnetFinancialActionLifecycleProtocol)/u;
 const ACTION_LIFECYCLE_MIGRATION_REFERENCE =
   /(?:0033-create-mainnet-financial-action-lifecycle|createMainnetFinancialActionLifecycle(?:TestSchema)?MigrationV0033|MAINNET_ACTION_FINGERPRINT_GOLDEN_VECTORS|mainnet_financial_action_(?:intents|events|evidence_claims)|(?:read|prepare|bind|record)_mainnet_financial_action_(?:lifecycle|submission|broadcast_observation|reconciliation_observation))/u;
+const ACTION_LIFECYCLE_DATABASE_FUNCTION_REFERENCE =
+  /\b(?:prepare_mainnet_financial_action_lifecycle|bind_mainnet_financial_action_submission|record_mainnet_financial_action_broadcast_observation|record_mainnet_financial_action_reconciliation_observation|read_mainnet_financial_action_lifecycle)\b/u;
+const DURABLE_SOURCE_SYMBOL_BRAND = /\bSymbol(?:\.for)?\s*\(/u;
+const DURABLE_STANDALONE_RESULT_EXPORT =
+  /\bexport\s+(?:(?:const|function)\s+(?:decode(?:Dormant)?MainnetFinancialActionDatabaseResult|createDormantMainnetFinancialActionDatabaseOutcomeUnknown|databaseOutcomeUnknown)|(?:type|interface|class)\s+DormantMainnetFinancialActionLifecycleDatabase(?:CommandV1|Codec|CodecError|CodecErrorCode))\b/u;
+const PROHIBITED_DURABLE_REGISTRATION =
+  /(?:@(?:Injectable|Module|Controller)\s*\(|\bfrom\s*['"]@nestjs\/|\bexport\s+(?:\*|\{[^}]*\})\s+from\s*['"]|\bproviders\s*:|\bmodule\.exports\b|\bprocess\.env\b|\b(?:fetch|WebSocket|XMLHttpRequest|eval|Function)\s*\(|\b(?:require|import)\s*\()/u;
+const PROHIBITED_ADAPTER_DATABASE_CONTROL =
+  /(?:\.\s*query\s*\(|\bwithTransaction\s*\(|\b(?:maxRetries|retryDelayMs|retryAttempts|retryCount|retryLimit|retryPolicy)\b|\b(?:setTimeout|setInterval|setImmediate|queueMicrotask)\s*\()/iu;
+const PROHIBITED_ADAPTER_SQL_AUTHORITY =
+  /\b(?:GRANT|REVOKE|CREATE|ALTER|DROP|TRUNCATE|INSERT|UPDATE|DELETE)\b/u;
+const PROHIBITED_DURABLE_AUTHORITY =
+  /(?:\b(?:sendRawTransaction|sendTransaction|signTransaction|broadcastTransaction|eth_sendRawTransaction|writeContract|JsonRpcProvider|WalletClient|PrivateKeyAccount)\b|\b(?:job_outbox|outbox|enqueue)\b|\b(?:mayAuthorizeFinancialAction|apiMaySign|apiMayBroadcast|mayResendTransaction|automaticRetryAllowed|ledgerSettlementAuthority)\s*:\s*true\b|\bledger_settlement_authority\s*=\s*true\b)/iu;
 const REVIEWED_DORMANT_SOURCE_PATHS = new Set([
   ACTION_BOUNDARY_PATH,
   ACTION_LIFECYCLE_PATH,
+  ACTION_LIFECYCLE_DURABLE_PORT_PATH,
+  ACTION_LIFECYCLE_POSTGRES_ADAPTER_PATH,
   ACTION_LIFECYCLE_MIGRATION_PATH,
 ]);
 const REVIEWED_RUNTIME_DYNAMIC_IMPORTS = new Map([
@@ -211,8 +318,32 @@ function extractImports(source) {
   );
 }
 
+function extractExports(source) {
+  return [
+    ...source.matchAll(
+      /\bexport\s+(?:declare\s+)?(?:abstract\s+)?(?:const|let|var|class|function|interface|type|enum)\s+([A-Za-z_$][A-Za-z0-9_$]*)/gu,
+    ),
+  ].map((entry) => entry[1]);
+}
+
+function hasUnsupportedExportSyntax(source) {
+  return /\bexport\s+(?:default\b|\*|\{)/u.test(source);
+}
+
+function extractSqlConstants(source) {
+  return [...source.matchAll(/\bconst\s+([A-Z][A-Z0-9_]*_SQL)\s*=/gu)].map((entry) => entry[1]);
+}
+
+function extractSqlFunctions(source) {
+  return [...source.matchAll(/\bFROM\s+([a-z][a-z0-9_]*)\s*\(/gu)].map((entry) => entry[1]);
+}
+
 function countTests(source) {
   return [...source.matchAll(/\b(?:it|test)\s*\(/gu)].length;
+}
+
+function countDeclaredTests(source) {
+  return [...source.matchAll(/(?:^|\n)\s*(?:it|test)\s*\(/gu)].length;
 }
 
 function occurrences(source, value) {
@@ -478,6 +609,178 @@ function validateDormantActionMigrationSnapshot(migrationSource, migrationSpecSo
   return errors;
 }
 
+function validateDormantDurableLifecycleSnapshot(
+  durablePortSource,
+  postgresAdapterSource,
+  postgresAdapterSpecSource,
+  postgresAdapterIntegrationSpecSource,
+) {
+  const errors = [];
+  if (!exactArray(extractImports(durablePortSource), EXPECTED_DURABLE_PORT_IMPORTS)) {
+    errors.push('dormant durable port import inventory changed');
+  }
+  if (!exactArray(extractImports(postgresAdapterSource), EXPECTED_POSTGRES_ADAPTER_IMPORTS)) {
+    errors.push('dormant Postgres adapter import inventory changed');
+  }
+  if (
+    !exactArray(extractImports(postgresAdapterSpecSource), EXPECTED_POSTGRES_ADAPTER_SPEC_IMPORTS)
+  ) {
+    errors.push('dormant Postgres adapter spec import inventory changed');
+  }
+  if (
+    !exactArray(
+      extractImports(postgresAdapterIntegrationSpecSource),
+      EXPECTED_POSTGRES_ADAPTER_INTEGRATION_SPEC_IMPORTS,
+    )
+  ) {
+    errors.push('dormant Postgres adapter integration spec import inventory changed');
+  }
+
+  if (
+    hasUnsupportedExportSyntax(durablePortSource) ||
+    !exactArray(extractExports(durablePortSource), EXPECTED_DURABLE_PORT_EXPORTS)
+  ) {
+    errors.push('dormant durable port export inventory changed');
+  }
+  if (
+    hasUnsupportedExportSyntax(postgresAdapterSource) ||
+    !exactArray(extractExports(postgresAdapterSource), EXPECTED_POSTGRES_ADAPTER_EXPORTS)
+  ) {
+    errors.push('dormant Postgres adapter export inventory changed');
+  }
+  if (
+    hasUnsupportedExportSyntax(postgresAdapterSpecSource) ||
+    hasUnsupportedExportSyntax(postgresAdapterIntegrationSpecSource) ||
+    extractExports(postgresAdapterSpecSource).length !== 0 ||
+    extractExports(postgresAdapterIntegrationSpecSource).length !== 0
+  ) {
+    errors.push('dormant Postgres adapter tests export runtime capabilities');
+  }
+  if (DURABLE_STANDALONE_RESULT_EXPORT.test(postgresAdapterSource)) {
+    errors.push(
+      'dormant Postgres adapter exposes a standalone raw decoder, outcome maker, or database command',
+    );
+  }
+
+  const durableSources = [durablePortSource, postgresAdapterSource];
+  if (durableSources.some((source) => DURABLE_SOURCE_SYMBOL_BRAND.test(source))) {
+    errors.push('dormant durable lifecycle uses a reflectable Symbol cursor brand');
+  }
+  if (durableSources.some((source) => PROHIBITED_DURABLE_REGISTRATION.test(source))) {
+    errors.push(
+      'dormant durable lifecycle is registered, re-exported, dynamic, or network-capable',
+    );
+  }
+  if (durableSources.some((source) => PROHIBITED_DURABLE_AUTHORITY.test(source))) {
+    errors.push(
+      'dormant durable lifecycle gained signer, provider, outbox, retry, or ledger authority',
+    );
+  }
+  if (ACTION_LIFECYCLE_DATABASE_FUNCTION_REFERENCE.test(durablePortSource)) {
+    errors.push('migration-0033 lifecycle SQL functions escaped the reviewed Postgres adapter');
+  }
+
+  if (
+    !exactArray(
+      extractSqlConstants(postgresAdapterSource),
+      EXPECTED_POSTGRES_ADAPTER_SQL_CONSTANTS,
+    ) ||
+    !exactArray(
+      extractSqlFunctions(postgresAdapterSource),
+      EXPECTED_POSTGRES_ADAPTER_SQL_FUNCTIONS,
+    ) ||
+    occurrences(postgresAdapterSource, 'SELECT ${RESULT_PROJECTION}') !==
+      EXPECTED_POSTGRES_ADAPTER_SQL_FUNCTIONS.length
+  ) {
+    errors.push('dormant Postgres adapter function-SQL allowlist changed');
+  }
+  const databaseExecution = extractSection(postgresAdapterSource, '  async #execute(', '  #issue(');
+  if (
+    databaseExecution === null ||
+    occurrences(postgresAdapterSource, 'queryWithCancellation') !== 2 ||
+    occurrences(postgresAdapterSource, '#databaseQuery') !== 3 ||
+    occurrences(postgresAdapterSource, 'Reflect.apply(this.#databaseQuery') !== 1 ||
+    occurrences(postgresAdapterSource, 'this.#execute(') !== 5 ||
+    PROHIBITED_ADAPTER_DATABASE_CONTROL.test(postgresAdapterSource) ||
+    /\b(?:for|while)\s*\(/u.test(databaseExecution)
+  ) {
+    errors.push('dormant Postgres adapter no longer performs one cancellable call without retry');
+  }
+  if (PROHIBITED_ADAPTER_SQL_AUTHORITY.test(postgresAdapterSource)) {
+    errors.push('dormant Postgres adapter contains grant, DDL, or write-table SQL authority');
+  }
+
+  for (const marker of [
+    'mayAuthorizeFinancialAction: false;',
+    'readonly ledgerSettlementAuthority: false;',
+    'readonly apiMaySign: false;',
+    'readonly apiMayBroadcast: false;',
+    'readonly mayResendTransaction: false;',
+    'readonly automaticRetryAllowed: false;',
+    'reviewResult(',
+  ]) {
+    if (!durablePortSource.includes(marker)) {
+      errors.push(`dormant durable port lacks authority denial or review marker: ${marker}`);
+    }
+  }
+  for (const marker of [
+    'readonly #cursorMetadata = new WeakMap<object, CursorMetadata>();',
+    'readonly #issuedResults = new WeakMap<object, IssuedResult>();',
+    'readonly #requestMethods = new WeakMap<object, DatabaseMethod>();',
+    "captureMethod<QueryWithCancellation>(postgres, 'queryWithCancellation')",
+    'ledgerSettlementAuthority: false as const',
+    "recoveryMode: 'READ_THEN_RECONCILE_ONLY' as const",
+    'reviewResult(',
+  ]) {
+    if (!postgresAdapterSource.includes(marker)) {
+      errors.push(`dormant Postgres adapter lacks exact review or database marker: ${marker}`);
+    }
+  }
+
+  if (
+    countDeclaredTests(postgresAdapterSpecSource) < 9 ||
+    !postgresAdapterSpecSource.includes(
+      "describe('PostgresDormantMainnetFinancialActionLifecycleDurableAdapter'",
+    ) ||
+    !postgresAdapterSpecSource.includes('Object.getOwnPropertySymbols') ||
+    !postgresAdapterSpecSource.includes("Symbol.for('forged-clma-brand')") ||
+    !postgresAdapterSpecSource.includes('structuredClone(prepared.result.cursor)') ||
+    !postgresAdapterSpecSource.includes("outcome: 'DATABASE_OUTCOME_UNKNOWN'") ||
+    !postgresAdapterSpecSource.includes('ledgerSettlementAuthority: false') ||
+    !postgresAdapterSpecSource.includes('toHaveBeenCalledTimes(1)')
+  ) {
+    errors.push(
+      'dormant Postgres adapter spec lost exact provenance, one-call, or denial coverage',
+    );
+  }
+  if (
+    countDeclaredTests(postgresAdapterIntegrationSpecSource) !== 1 ||
+    !postgresAdapterIntegrationSpecSource.includes(
+      "process.env.RUN_INFRASTRUCTURE_INTEGRATION === '1'",
+    ) ||
+    !postgresAdapterIntegrationSpecSource.includes(
+      "!['localhost', '127.0.0.1', '[::1]', '::1'].includes(hostname)",
+    ) ||
+    !postgresAdapterIntegrationSpecSource.includes('serverVersionNum < 160_000') ||
+    !postgresAdapterIntegrationSpecSource.includes('serverVersionNum >= 170_000') ||
+    !postgresAdapterIntegrationSpecSource.includes("({ id }) => id <= '0033'") ||
+    !postgresAdapterIntegrationSpecSource.includes('await adapter.prepare(prepareRequest)') ||
+    !postgresAdapterIntegrationSpecSource.includes('await adapter.bindSubmission(bindRequest)') ||
+    !postgresAdapterIntegrationSpecSource.includes(
+      'await adapter.recordReconciliation(reconciliationRequest)',
+    ) ||
+    !postgresAdapterIntegrationSpecSource.includes('await adapter.read(readRequest)') ||
+    !postgresAdapterIntegrationSpecSource.includes("outcome: 'UNKNOWN'") ||
+    postgresAdapterIntegrationSpecSource.includes('adapter.recordBroadcast(') ||
+    occurrences(postgresAdapterIntegrationSpecSource, 'ledgerSettlementAuthority: false') < 5 ||
+    !postgresAdapterIntegrationSpecSource.includes('ledger_authority_count: 0')
+  ) {
+    errors.push('dormant Postgres adapter integration lost loopback 0033 flow or denial coverage');
+  }
+
+  return errors;
+}
+
 function hasUnreviewedDynamicLoading(path, source) {
   if (/\b(?:require|eval|Function)\s*\(/u.test(source)) return true;
   const tokenCount = (source.match(/\bimport\s*\(/gu) ?? []).length;
@@ -496,6 +799,10 @@ export function validateDormantMainnetActionBoundarySnapshot(snapshot) {
     typeof snapshot.specSource !== 'string' ||
     typeof snapshot.lifecycleSource !== 'string' ||
     typeof snapshot.lifecycleSpecSource !== 'string' ||
+    typeof snapshot.durablePortSource !== 'string' ||
+    typeof snapshot.postgresAdapterSource !== 'string' ||
+    typeof snapshot.postgresAdapterSpecSource !== 'string' ||
+    typeof snapshot.postgresAdapterIntegrationSpecSource !== 'string' ||
     typeof snapshot.migrationSource !== 'string' ||
     typeof snapshot.migrationSpecSource !== 'string' ||
     typeof snapshot.migrationIndexSource !== 'string' ||
@@ -507,6 +814,8 @@ export function validateDormantMainnetActionBoundarySnapshot(snapshot) {
   const errors = [];
   const source = snapshot.boundarySource;
   const lifecycleSource = snapshot.lifecycleSource;
+  const durablePortSource = snapshot.durablePortSource;
+  const postgresAdapterSource = snapshot.postgresAdapterSource;
   if (
     createHash('sha256').update(source, 'utf8').digest('hex') !== REVIEWED_ACTION_BOUNDARY_SHA256
   ) {
@@ -531,6 +840,31 @@ export function validateDormantMainnetActionBoundarySnapshot(snapshot) {
     errors.push('action lifecycle spec bytes drifted from the reviewed source');
   }
   if (
+    createHash('sha256').update(durablePortSource, 'utf8').digest('hex') !==
+    REVIEWED_ACTION_LIFECYCLE_DURABLE_PORT_SHA256
+  ) {
+    errors.push('dormant durable port bytes drifted from the reviewed source');
+  }
+  if (
+    createHash('sha256').update(postgresAdapterSource, 'utf8').digest('hex') !==
+    REVIEWED_ACTION_LIFECYCLE_POSTGRES_ADAPTER_SHA256
+  ) {
+    errors.push('dormant Postgres adapter bytes drifted from the reviewed source');
+  }
+  if (
+    createHash('sha256').update(snapshot.postgresAdapterSpecSource, 'utf8').digest('hex') !==
+    REVIEWED_ACTION_LIFECYCLE_POSTGRES_ADAPTER_SPEC_SHA256
+  ) {
+    errors.push('dormant Postgres adapter spec bytes drifted from the reviewed source');
+  }
+  if (
+    createHash('sha256')
+      .update(snapshot.postgresAdapterIntegrationSpecSource, 'utf8')
+      .digest('hex') !== REVIEWED_ACTION_LIFECYCLE_POSTGRES_ADAPTER_INTEGRATION_SPEC_SHA256
+  ) {
+    errors.push('dormant Postgres adapter integration spec bytes drifted from the reviewed source');
+  }
+  if (
     createHash('sha256').update(snapshot.migrationSource, 'utf8').digest('hex') !==
     REVIEWED_ACTION_LIFECYCLE_MIGRATION_SHA256
   ) {
@@ -553,6 +887,14 @@ export function validateDormantMainnetActionBoundarySnapshot(snapshot) {
       snapshot.migrationSource,
       snapshot.migrationSpecSource,
       snapshot.migrationIndexSource,
+    ),
+  );
+  errors.push(
+    ...validateDormantDurableLifecycleSnapshot(
+      durablePortSource,
+      postgresAdapterSource,
+      snapshot.postgresAdapterSpecSource,
+      snapshot.postgresAdapterIntegrationSpecSource,
     ),
   );
   if (!exactArray(extractActions(source), EXPECTED_ACTIONS)) {
@@ -635,10 +977,16 @@ export function validateDormantMainnetActionBoundarySnapshot(snapshot) {
   for (const [path, runtimeSource] of snapshot.runtimeSources) {
     if (typeof path !== 'string' || typeof runtimeSource !== 'string') {
       errors.push('action boundary runtime source inventory is malformed');
+    } else if (normalizedPath(path) === PROHIBITED_ACTION_LIFECYCLE_DATABASE_CODEC_PATH) {
+      errors.push('standalone dormant lifecycle database codec must remain absent');
     } else if (REVIEWED_DORMANT_SOURCE_PATHS.has(normalizedPath(path))) {
       errors.push('reviewed dormant action source was incorrectly included in runtime consumers');
     } else if (hasUnreviewedDynamicLoading(path, runtimeSource)) {
       errors.push(`runtime source contains unreviewed dynamic loading: ${path}`);
+    } else if (ACTION_LIFECYCLE_DATABASE_FUNCTION_REFERENCE.test(runtimeSource)) {
+      errors.push(
+        `migration-0033 lifecycle SQL function is referenced outside the reviewed adapter by runtime source ${path}`,
+      );
     } else if (RUNTIME_REFERENCE.test(runtimeSource)) {
       errors.push(`dormant mainnet action boundary is referenced by runtime source ${path}`);
     } else if (
@@ -732,6 +1080,16 @@ export function loadDormantMainnetActionBoundarySnapshot(repositoryRoot = REPOSI
       specSource: repositoryFile(repositoryRoot, ACTION_BOUNDARY_SPEC_PATH),
       lifecycleSource: repositoryFile(repositoryRoot, ACTION_LIFECYCLE_PATH),
       lifecycleSpecSource: repositoryFile(repositoryRoot, ACTION_LIFECYCLE_SPEC_PATH),
+      durablePortSource: repositoryFile(repositoryRoot, ACTION_LIFECYCLE_DURABLE_PORT_PATH),
+      postgresAdapterSource: repositoryFile(repositoryRoot, ACTION_LIFECYCLE_POSTGRES_ADAPTER_PATH),
+      postgresAdapterSpecSource: repositoryFile(
+        repositoryRoot,
+        ACTION_LIFECYCLE_POSTGRES_ADAPTER_SPEC_PATH,
+      ),
+      postgresAdapterIntegrationSpecSource: repositoryFile(
+        repositoryRoot,
+        ACTION_LIFECYCLE_POSTGRES_ADAPTER_INTEGRATION_SPEC_PATH,
+      ),
       migrationSource: repositoryFile(repositoryRoot, ACTION_LIFECYCLE_MIGRATION_PATH),
       migrationSpecSource: repositoryFile(repositoryRoot, ACTION_LIFECYCLE_MIGRATION_SPEC_PATH),
       migrationIndexSource: repositoryFile(repositoryRoot, DATABASE_MIGRATION_INDEX_PATH),
@@ -757,7 +1115,7 @@ if (import.meta.url === invokedPath) {
   const errors = validateDormantMainnetActionBoundaryFiles();
   if (errors.length === 0) {
     console.log(
-      'Dormant mainnet action boundary is valid: 10 candidates, 0 enabled, owner-only 0033 persistence',
+      'Dormant mainnet action boundary is valid: 10 candidates, 0 enabled, owner-only 0033 persistence, unregistered durable adapter',
     );
   } else {
     for (const error of errors) console.error(`- ${error}`);
