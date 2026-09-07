@@ -229,6 +229,41 @@ export const ADDITIONAL_DORMANT_PROVIDER_ARTIFACTS = Object.freeze([
   }),
 ]);
 
+export const DORMANT_ACCOUNT_POSITION_TRANSCRIPTS = Object.freeze([
+  Object.freeze({
+    id: 'gearbox-account-position-transcript',
+    providerId: 'gearbox',
+    path: 'apps/api/src/smart-lending/infrastructure/gearbox/gearbox-v3-account-position.transcript.ts',
+    specPath:
+      'apps/api/src/smart-lending/infrastructure/gearbox/gearbox-v3-account-position.transcript.spec.ts',
+    sha256: '653e5915302b82566b6acfd44a4ee7db6d860a0c1dde883d678a7d107ddf7ad9',
+    specSha256: '2ea638ca814e0d586b59077438def6ac2250e00646cadb045618657286bff74f',
+    className: 'DormantGearboxV3AccountPositionTranscriptEvaluator',
+    useSymbol: 'GEARBOX_V3_ACCOUNT_POSITION_TRANSCRIPT_USE',
+    use: 'DORMANT_GEARBOX_V3_ACCOUNT_POSITION_TRANSCRIPT_VALIDATION_ONLY',
+    approvalUseSymbol: 'GEARBOX_V3_ACCOUNT_POSITION_TRANSCRIPT_APPROVAL_USE',
+    approvalUse: 'CALLER_SUPPLIED_GEARBOX_V3_ACCOUNT_POSITION_TOPOLOGY_APPROVAL_ONLY',
+    semanticsId: 'gearbox-account-position-semantics',
+    minimumTests: 17,
+    imports: Object.freeze([
+      'node:buffer',
+      'node:crypto',
+      'node:util/types',
+      './gearbox-v3-ethereum-usdc.manifest',
+      './gearbox-v3-account-position.semantics',
+    ]),
+    capabilityMarkers: Object.freeze([
+      'mayEstablishRecommendationEligibility: false',
+      'mayAuthorizeFinancialAction: false',
+      'mayPersist: false',
+      'mayCreatePositionSnapshot: false',
+      'maySign: false',
+      'mayAccessWalletPrivateKey: false',
+      'mayEstablishCompletePosition: false',
+    ]),
+  }),
+]);
+
 export const DORMANT_ACCOUNT_POSITION_SEMANTICS = Object.freeze([
   Object.freeze({
     id: 'morpho-account-position-semantics',
@@ -299,7 +334,7 @@ const STANDARD_CAPABILITY_MARKERS = Object.freeze([
 ]);
 
 const UNSAFE_CAPABILITY =
-  /\b(?:mayPersist|mayEstablishRecommendationEligibility|mayEstablishCompletePosition|mayAuthorizeFinancialAction|maySign|mayAccessWalletPrivateKey)\s*:\s*true\b/u;
+  /\b(?:mayPersist|mayEstablishRecommendationEligibility|mayEstablishCompletePosition|mayAuthorizeFinancialAction|mayCreatePositionSnapshot|maySign|mayAccessWalletPrivateKey)\s*:\s*true\b/u;
 const REVIEWED_SEMANTICS_IMPORTS = Object.freeze([
   'node:crypto',
   'node:util/types',
@@ -324,6 +359,8 @@ const PINNED_DORMANT_PROVIDER_POSITION_SOURCE_PATHS = new Set(
 );
 const DORMANT_PROVIDER_POSITION_SOURCE_REFERENCE =
   /(?:[A-Za-z0-9._/-]+-provider-position\.source|Dormant[A-Za-z0-9]+ProviderPositionSource)/u;
+const GEARBOX_ACCOUNT_POSITION_TRANSCRIPT_PATH =
+  /^apps\/api\/src\/smart-lending\/infrastructure\/gearbox\/[^/]+\.transcript\.ts$/u;
 const REVIEWED_RUNTIME_DYNAMIC_IMPORTS = new Map([
   ['apps/api/src/application-root.ts', Object.freeze(['./local-development-app.module'])],
   [
@@ -348,6 +385,10 @@ function countTests(source) {
 
 function importedModules(source) {
   return [...source.matchAll(/\b(?:from\s+|import\s*)['"]([^'"]+)['"]/gu)].map((match) => match[1]);
+}
+
+function sameStringList(left, right) {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
 function hasUnreviewedDynamicLoading(path, source) {
@@ -417,6 +458,12 @@ export function validateDormantProviderInventorySnapshot(snapshot) {
     new Set(ADDITIONAL_DORMANT_PROVIDER_ARTIFACTS.map(({ id }) => id)).size !== 3
   ) {
     errors.push('validator must contain exactly three distinct additional dormant artifacts');
+  }
+  if (
+    DORMANT_ACCOUNT_POSITION_TRANSCRIPTS.length !== 1 ||
+    new Set(DORMANT_ACCOUNT_POSITION_TRANSCRIPTS.map(({ id }) => id)).size !== 1
+  ) {
+    errors.push('validator must contain exactly one distinct dormant account-position transcript');
   }
   if (
     DORMANT_ACCOUNT_POSITION_SEMANTICS.length !== 5 ||
@@ -577,6 +624,71 @@ export function validateDormantProviderInventorySnapshot(snapshot) {
     }
   }
 
+  for (const transcript of DORMANT_ACCOUNT_POSITION_TRANSCRIPTS) {
+    exactArtifactPaths.add(transcript.path);
+    exactArtifactPaths.add(transcript.specPath);
+    const provider = DORMANT_PROVIDER_INVENTORY.find(({ id }) => id === transcript.providerId);
+    const semantics = DORMANT_ACCOUNT_POSITION_SEMANTICS.find(
+      ({ id }) => id === transcript.semanticsId,
+    );
+    if (provider?.id !== 'gearbox' || semantics?.providerId !== transcript.providerId) {
+      errors.push(`${transcript.id} reviewed provider or semantics identity drifted`);
+    }
+
+    const source = snapshot.artifacts.get(transcript.path);
+    const spec = snapshot.artifacts.get(transcript.specPath);
+    if (typeof source !== 'string') {
+      errors.push(`${transcript.id} artifact is missing`);
+      continue;
+    }
+    if (typeof spec !== 'string') errors.push(`${transcript.id} spec artifact is missing`);
+    if (createHash('sha256').update(source, 'utf8').digest('hex') !== transcript.sha256) {
+      errors.push(`${transcript.id} artifact bytes drifted`);
+    }
+    if (
+      typeof spec === 'string' &&
+      createHash('sha256').update(spec, 'utf8').digest('hex') !== transcript.specSha256
+    ) {
+      errors.push(`${transcript.id} spec bytes drifted`);
+    }
+    if (!source.includes(`export class ${transcript.className}`)) {
+      errors.push(`${transcript.id} class identity drifted`);
+    }
+    if (
+      !source.includes(`export const ${transcript.useSymbol}`) ||
+      !source.includes(`'${transcript.use}' as const`) ||
+      !source.includes(`export const ${transcript.approvalUseSymbol}`) ||
+      !source.includes(`'${transcript.approvalUse}' as const`)
+    ) {
+      errors.push(`${transcript.id} dormant or caller-supplied use identity drifted`);
+    }
+    for (const marker of transcript.capabilityMarkers) {
+      if (!source.includes(marker)) {
+        errors.push(`${transcript.id} is missing closed capability marker: ${marker}`);
+      }
+    }
+    if (!sameStringList(importedModules(source), transcript.imports)) {
+      errors.push(`${transcript.id} exact reviewed imports drifted`);
+    }
+    if (
+      /@(Injectable|Module|Controller)\s*\(/u.test(source) ||
+      UNSAFE_CAPABILITY.test(source) ||
+      PROHIBITED_PROVIDER_POSITION_SOURCE.test(source) ||
+      importedModules(source).some((dependency) =>
+        PROHIBITED_PROVIDER_POSITION_IMPORT.test(dependency),
+      )
+    ) {
+      errors.push(`${transcript.id} contains network, dynamic, Nest, or financial authority`);
+    }
+    if (
+      typeof spec === 'string' &&
+      (!spec.includes(`./${adapterImportStem(transcript.path)}`) ||
+        countTests(spec) < transcript.minimumTests)
+    ) {
+      errors.push(`${transcript.id} spec is detached or lacks hostile-path depth`);
+    }
+  }
+
   for (const semantics of DORMANT_ACCOUNT_POSITION_SEMANTICS) {
     exactArtifactPaths.add(semantics.path);
     exactArtifactPaths.add(semantics.specPath);
@@ -639,6 +751,28 @@ export function validateDormantProviderInventorySnapshot(snapshot) {
     }
   }
 
+  const gearboxSemantics = DORMANT_ACCOUNT_POSITION_SEMANTICS.find(
+    ({ id }) => id === 'gearbox-account-position-semantics',
+  );
+  const gearboxTranscript = DORMANT_ACCOUNT_POSITION_TRANSCRIPTS[0];
+  if (gearboxSemantics && gearboxTranscript) {
+    const permittedGearboxSemanticsImporters = new Set([
+      gearboxSemantics.specPath,
+      gearboxTranscript.path,
+      gearboxTranscript.specPath,
+    ]);
+    const semanticsImportStem = adapterImportStem(gearboxSemantics.path);
+    for (const [path, source] of snapshot.artifacts) {
+      if (
+        !permittedGearboxSemanticsImporters.has(path) &&
+        typeof source === 'string' &&
+        importedModules(source).some((dependency) => dependency.includes(semanticsImportStem))
+      ) {
+        errors.push(`unreviewed artifact imports Gearbox account-position semantics: ${path}`);
+      }
+    }
+  }
+
   for (const path of snapshot.artifacts.keys()) {
     if (!exactArtifactPaths.has(path)) errors.push(`unexpected inventory artifact: ${path}`);
   }
@@ -649,7 +783,14 @@ export function validateDormantProviderInventorySnapshot(snapshot) {
       continue;
     }
     const normalizedRuntimePath = normalizedPath(path);
-    if (PINNED_DORMANT_PROVIDER_POSITION_SOURCE_PATHS.has(normalizedRuntimePath)) {
+    const reviewedTranscript = DORMANT_ACCOUNT_POSITION_TRANSCRIPTS.find(
+      ({ path: transcriptPath }) => transcriptPath === normalizedRuntimePath,
+    );
+    if (reviewedTranscript) {
+      errors.push(`reviewed dormant account-position transcript was included as runtime: ${path}`);
+    } else if (GEARBOX_ACCOUNT_POSITION_TRANSCRIPT_PATH.test(normalizedRuntimePath)) {
+      errors.push(`unreviewed Gearbox account-position transcript artifact: ${path}`);
+    } else if (PINNED_DORMANT_PROVIDER_POSITION_SOURCE_PATHS.has(normalizedRuntimePath)) {
       errors.push(`reviewed dormant provider-position source was included as runtime: ${path}`);
     } else if (
       normalizedRuntimePath.endsWith('-provider-position.source.ts') &&
@@ -679,6 +820,15 @@ export function validateDormantProviderInventorySnapshot(snapshot) {
         source.includes(adapterImportStem(artifact.path))
       ) {
         errors.push(`${artifact.id} is referenced by runtime source ${path}`);
+      }
+    }
+    for (const transcript of DORMANT_ACCOUNT_POSITION_TRANSCRIPTS) {
+      if (
+        source.includes(transcript.className) ||
+        source.includes(transcript.useSymbol) ||
+        source.includes(adapterImportStem(transcript.path))
+      ) {
+        errors.push(`${transcript.id} is referenced by runtime source ${path}`);
       }
     }
     for (const semantics of DORMANT_ACCOUNT_POSITION_SEMANTICS) {
@@ -802,6 +952,20 @@ function loadDormantProviderInventorySnapshotInternal(repositoryRoot, afterFirst
     }
   }
 
+  for (const transcript of DORMANT_ACCOUNT_POSITION_TRANSCRIPTS) {
+    for (const path of [transcript.path, transcript.specPath]) {
+      artifacts.set(
+        path,
+        repositoryFile(
+          repositoryRoot,
+          path,
+          MAX_DORMANT_PROVIDER_ARTIFACT_BYTES,
+          afterFirstReadForTest,
+        ),
+      );
+    }
+  }
+
   for (const semantics of DORMANT_ACCOUNT_POSITION_SEMANTICS) {
     for (const path of [semantics.path, semantics.specPath]) {
       if (!artifacts.has(path)) {
@@ -821,6 +985,7 @@ function loadDormantProviderInventorySnapshotInternal(repositoryRoot, afterFirst
   const adapterPaths = new Set([
     ...DORMANT_PROVIDER_INVENTORY.map(({ adapterPath }) => adapterPath),
     ...ADDITIONAL_DORMANT_PROVIDER_ARTIFACTS.map(({ path }) => path),
+    ...DORMANT_ACCOUNT_POSITION_TRANSCRIPTS.map(({ path }) => path),
     ...DORMANT_ACCOUNT_POSITION_SEMANTICS.map(({ path }) => path),
   ]);
   const runtimeSources = new Map();
@@ -884,7 +1049,7 @@ if (import.meta.url === invokedPath) {
   const errors = validateDormantProviderInventoryFiles();
   if (errors.length === 0) {
     console.log(
-      'Dormant provider inventory is valid: 10 planned, 5 semantics foundations, 2 byte-pinned position sources, 0 enabled',
+      'Dormant provider inventory is valid: 10 planned, 5 semantics foundations, 2 byte-pinned position sources, 1 incomplete Gearbox transcript, 0 enabled',
     );
   } else {
     for (const error of errors) console.error(`- ${error}`);

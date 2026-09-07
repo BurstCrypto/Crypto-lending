@@ -14,6 +14,7 @@ import test from 'node:test';
 
 import {
   ADDITIONAL_DORMANT_PROVIDER_ARTIFACTS,
+  DORMANT_ACCOUNT_POSITION_TRANSCRIPTS,
   DORMANT_ACCOUNT_POSITION_SEMANTICS,
   DIRECTORY_PATH,
   DORMANT_PROVIDER_INVENTORY_INPUT_ERROR,
@@ -118,6 +119,10 @@ test('the exact ten planning entries have dormant adapter, hostile spec, and res
       'morpho-provider-position-source',
       'euler-provider-position-source',
     ],
+  );
+  assert.deepEqual(
+    DORMANT_ACCOUNT_POSITION_TRANSCRIPTS.map(({ id }) => id),
+    ['gearbox-account-position-transcript'],
   );
   assert.deepEqual(
     DORMANT_ACCOUNT_POSITION_SEMANTICS.map(({ providerId }) => providerId),
@@ -405,6 +410,179 @@ test('the Morpho and Euler provider-position source/spec pairs are exact and aut
       value.runtimeSources.set(artifact.path, value.artifacts.get(artifact.path));
     });
   }
+});
+
+test('the dedicated Gearbox transcript is exact, dormant, incomplete, and not source seven', () => {
+  const [transcript] = DORMANT_ACCOUNT_POSITION_TRANSCRIPTS;
+  assert.ok(transcript);
+  assert.equal(
+    transcript.path,
+    'apps/api/src/smart-lending/infrastructure/gearbox/gearbox-v3-account-position.transcript.ts',
+  );
+  assert.equal(
+    transcript.specPath,
+    'apps/api/src/smart-lending/infrastructure/gearbox/gearbox-v3-account-position.transcript.spec.ts',
+  );
+  assert.equal(
+    transcript.sha256,
+    '653e5915302b82566b6acfd44a4ee7db6d860a0c1dde883d678a7d107ddf7ad9',
+  );
+  assert.equal(
+    transcript.specSha256,
+    '2ea638ca814e0d586b59077438def6ac2250e00646cadb045618657286bff74f',
+  );
+  assert.deepEqual(transcript.imports, [
+    'node:buffer',
+    'node:crypto',
+    'node:util/types',
+    './gearbox-v3-ethereum-usdc.manifest',
+    './gearbox-v3-account-position.semantics',
+  ]);
+  assert.equal(transcript.minimumTests, 17);
+  assert.equal(ADDITIONAL_DORMANT_PROVIDER_ARTIFACTS.length, 3);
+  assert.equal(
+    ADDITIONAL_DORMANT_PROVIDER_ARTIFACTS.some(({ path }) => path === transcript.path),
+    false,
+  );
+
+  const source = baseline.artifacts.get(transcript.path);
+  const spec = baseline.artifacts.get(transcript.specPath);
+  assert.equal(typeof source, 'string');
+  assert.equal(typeof spec, 'string');
+  assert.match(source, /DORMANT_GEARBOX_V3_ACCOUNT_POSITION_TRANSCRIPT_VALIDATION_ONLY/u);
+  assert.match(source, /mayEstablishCompletePosition: false/u);
+  assert.ok([...spec.matchAll(/\b(?:it|test)\s*\(/gu)].length >= 17);
+
+  const mutations = [
+    (value) => value.artifacts.delete(transcript.path),
+    (value) => value.artifacts.delete(transcript.specPath),
+    (value) => value.artifacts.set(transcript.path, `${source}\n// byte drift`),
+    (value) => value.artifacts.set(transcript.specPath, `${spec}\n// byte drift`),
+    (value) => {
+      value.artifacts.set(
+        transcript.specPath,
+        spec.replace('./gearbox-v3-account-position.transcript', './detached-transcript'),
+      );
+    },
+    (value) => {
+      value.artifacts.set(
+        transcript.path,
+        source.replace(
+          'DORMANT_GEARBOX_V3_ACCOUNT_POSITION_TRANSCRIPT_VALIDATION_ONLY',
+          'ACTIVE_GEARBOX_V3_ACCOUNT_POSITION_TRANSCRIPT',
+        ),
+      );
+    },
+    (value) => {
+      value.artifacts.set(
+        transcript.path,
+        source.replace(
+          './gearbox-v3-account-position.semantics',
+          './unreviewed-account-position.semantics',
+        ),
+      );
+    },
+  ];
+  mutations.forEach((mutate, index) =>
+    assertMutationRejected(`Gearbox transcript identity mutation ${index}`, mutate),
+  );
+
+  for (const marker of transcript.capabilityMarkers) {
+    assertMutationRejected(`Gearbox transcript authority flip: ${marker}`, (value) => {
+      value.artifacts.set(transcript.path, source.replace(marker, marker.replace('false', 'true')));
+    });
+  }
+});
+
+test('the Gearbox transcript rejects network, dynamic, Nest, and runtime wiring', () => {
+  const [transcript] = DORMANT_ACCOUNT_POSITION_TRANSCRIPTS;
+  assert.ok(transcript);
+  const source = baseline.artifacts.get(transcript.path);
+  assert.equal(typeof source, 'string');
+
+  const sourceMutations = [
+    (value) => {
+      value.artifacts.set(transcript.path, `import { request } from 'node:https';\n${source}`);
+    },
+    (value) => {
+      value.artifacts.set(transcript.path, `${source}\nvoid import('./dynamic-transcript');`);
+    },
+    (value) => {
+      value.artifacts.set(transcript.path, `@Injectable()\n${source}`);
+    },
+  ];
+  sourceMutations.forEach((mutate, index) =>
+    assertMutationRejected(`Gearbox transcript capability mutation ${index}`, mutate),
+  );
+
+  for (const reference of [
+    transcript.className,
+    transcript.useSymbol,
+    './gearbox-v3-account-position.transcript',
+  ]) {
+    assertMutationRejected(`Gearbox transcript runtime reference: ${reference}`, (value) => {
+      value.runtimeSources.set(
+        'apps/api/src/unsafe-gearbox-transcript.module.ts',
+        `export const unsafeReference = '${reference}';`,
+      );
+    });
+  }
+  assertMutationRejected('reviewed Gearbox transcript included in runtime inventory', (value) => {
+    value.runtimeSources.set(transcript.path, source);
+  });
+  assertMutationRejected('runtime imports Gearbox account-position semantics', (value) => {
+    value.runtimeSources.set(
+      'apps/api/src/unsafe-gearbox-semantics.module.ts',
+      "import './smart-lending/infrastructure/gearbox/gearbox-v3-account-position.semantics';",
+    );
+  });
+  assertMutationRejected('another dormant artifact imports Gearbox semantics', (value) => {
+    const provider = DORMANT_PROVIDER_INVENTORY[0];
+    value.artifacts.set(
+      provider.adapterPath,
+      `import '../gearbox/gearbox-v3-account-position.semantics';\n${value.artifacts.get(provider.adapterPath)}`,
+    );
+  });
+  assertMutationRejected('unknown Gearbox transcript artifact', (value) => {
+    value.runtimeSources.set(
+      'apps/api/src/smart-lending/infrastructure/gearbox/unreviewed-account-position.transcript.ts',
+      'export const UNREVIEWED = true;',
+    );
+  });
+});
+
+test('repository loading rejects missing, BOM-prefixed, oversized, and unknown Gearbox transcripts', () => {
+  const [transcript] = DORMANT_ACCOUNT_POSITION_TRANSCRIPTS;
+  assert.ok(transcript);
+
+  for (const target of [transcript.path, transcript.specPath]) {
+    withTemporaryRepository((repositoryRoot) => {
+      const absolutePath = fixturePath(repositoryRoot, target);
+      rmSync(absolutePath);
+      assertInputRejected(repositoryRoot, absolutePath);
+    });
+  }
+
+  const source = Buffer.from(baseline.artifacts.get(transcript.path), 'utf8');
+  const invalidInputs = [
+    [transcript.path, Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), source])],
+    [transcript.specPath, Buffer.alloc(MAX_DORMANT_PROVIDER_ARTIFACT_BYTES + 1, 0x20)],
+  ];
+  for (const [target, contents] of invalidInputs) {
+    withTemporaryRepository((repositoryRoot) => {
+      const absolutePath = writeFixtureFile(repositoryRoot, target, contents);
+      assertInputRejected(repositoryRoot, absolutePath);
+    });
+  }
+
+  const unknownPath =
+    'apps/api/src/smart-lending/infrastructure/gearbox/unreviewed-account-position.transcript.ts';
+  withTemporaryRepository((repositoryRoot) => {
+    writeFixtureFile(repositoryRoot, unknownPath, 'export const UNREVIEWED = true;\n');
+    assert.deepEqual(validateDormantProviderInventoryFiles(repositoryRoot), [
+      `unreviewed Gearbox account-position transcript artifact: ${unknownPath}`,
+    ]);
+  });
 });
 
 test('unreviewed provider-position source artifacts fail closed', () => {
