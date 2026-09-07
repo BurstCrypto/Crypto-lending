@@ -16,21 +16,22 @@ describe('migration 0032 deployment-aware mainnet balance agreement evidence', (
   const down = sql(migration.downSql);
   const verifier = migration.verifySql ?? '';
 
-  it('extends the cumulative 0031 verifier and registers both variants last', () => {
+  it('extends the cumulative 0031 verifier and registers both variants before 0033', () => {
     expect(migration.id).toBe('0032');
     expect(migration.supersedesVerificationOf).toEqual(['0031']);
     expect(migration.transactional).not.toBe(false);
-    expect(DATABASE_MIGRATION_LIST.at(-1)).toBe(
+    expect(DATABASE_MIGRATION_LIST.at(-2)).toBe(
       createMainnetBalanceAgreementEvidenceV2MigrationV0032,
     );
-    expect(DATABASE_TEST_SCHEMA_MIGRATION_LIST.at(-1)).toBe(
+    expect(DATABASE_TEST_SCHEMA_MIGRATION_LIST.at(-2)).toBe(
       createMainnetBalanceAgreementEvidenceV2TestSchemaMigrationV0032,
     );
-    expect(DATABASE_MIGRATION_LIST.map(({ id }) => id).slice(-4)).toEqual([
+    expect(DATABASE_MIGRATION_LIST.map(({ id }) => id).slice(-5)).toEqual([
       '0029',
       '0030',
       '0031',
       '0032',
+      '0033',
     ]);
     expect(verifier).toContain('provider_position_chain_anchor_record_intents');
   });

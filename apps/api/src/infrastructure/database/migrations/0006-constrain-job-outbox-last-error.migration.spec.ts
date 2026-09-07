@@ -39,6 +39,7 @@ describe('constrainJobOutboxLastErrorMigration', () => {
       '0030',
       '0031',
       '0032',
+      '0033',
     ]);
     expect(DATABASE_TEST_SCHEMA_MIGRATION_LIST.map(({ id }) => id)).toEqual([
       '0001',
@@ -72,6 +73,7 @@ describe('constrainJobOutboxLastErrorMigration', () => {
       '0030',
       '0031',
       '0032',
+      '0033',
     ]);
     expect(Object.isFrozen(DATABASE_MIGRATION_LIST)).toBe(true);
     expect(Object.isFrozen(DATABASE_TEST_SCHEMA_MIGRATION_LIST)).toBe(true);

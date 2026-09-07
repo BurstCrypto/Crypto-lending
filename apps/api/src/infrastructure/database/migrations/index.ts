@@ -108,6 +108,10 @@ import {
   createMainnetBalanceAgreementEvidenceV2MigrationV0032,
   createMainnetBalanceAgreementEvidenceV2TestSchemaMigrationV0032,
 } from './0032-upgrade-mainnet-balance-agreement-evidence-v2.migration';
+import {
+  createMainnetFinancialActionLifecycleMigrationV0033,
+  createMainnetFinancialActionLifecycleTestSchemaMigrationV0033,
+} from './0033-create-mainnet-financial-action-lifecycle.migration';
 import type { DatabaseMigration } from './migration';
 
 /**
@@ -148,6 +152,7 @@ export const DATABASE_TEST_SCHEMA_MIGRATION_LIST: readonly DatabaseMigration[] =
   enforceProviderPositionChainAnchorRecordDeadlineTestSchemaMigrationV0030,
   createProviderPositionChainAnchorRecordIntentTestSchemaMigrationV0031,
   createMainnetBalanceAgreementEvidenceV2TestSchemaMigrationV0032,
+  createMainnetFinancialActionLifecycleTestSchemaMigrationV0033,
 ]);
 
 export const DATABASE_MIGRATION_LIST: readonly DatabaseMigration[] = Object.freeze([
@@ -183,6 +188,7 @@ export const DATABASE_MIGRATION_LIST: readonly DatabaseMigration[] = Object.free
   enforceProviderPositionChainAnchorRecordDeadlineMigrationV0030,
   createProviderPositionChainAnchorRecordIntentMigrationV0031,
   createMainnetBalanceAgreementEvidenceV2MigrationV0032,
+  createMainnetFinancialActionLifecycleMigrationV0033,
 ]);
 
 export type { DatabaseMigration } from './migration';
@@ -323,3 +329,9 @@ export {
   createMainnetBalanceAgreementEvidenceV2MigrationV0032,
   createMainnetBalanceAgreementEvidenceV2TestSchemaMigrationV0032,
 } from './0032-upgrade-mainnet-balance-agreement-evidence-v2.migration';
+export {
+  createMainnetFinancialActionLifecycleMigration,
+  createMainnetFinancialActionLifecycleMigrationV0033,
+  createMainnetFinancialActionLifecycleTestSchemaMigrationV0033,
+  MAINNET_ACTION_FINGERPRINT_GOLDEN_VECTORS,
+} from './0033-create-mainnet-financial-action-lifecycle.migration';
