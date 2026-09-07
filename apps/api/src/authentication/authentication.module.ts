@@ -1,6 +1,8 @@
 import { Module } from '@nestjs/common';
 
 import { CURRENT_PRINCIPAL_RESOLVER } from '../accounts/auth/current-principal';
+import { INFRASTRUCTURE_CONFIG } from '../infrastructure/config/infrastructure-config.module';
+import type { InfrastructureConfig } from '../infrastructure/config/infrastructure.config';
 import { PostgresModule } from '../infrastructure/database/postgres.module';
 import { AuthenticationService } from './application/authentication.service';
 import { AUTHENTICATION_RATE_LIMITER } from './application/ports/authentication-rate-limiter.port';
@@ -18,6 +20,7 @@ import { ManagedOidcClient } from './infrastructure/oidc/managed-oidc.client';
 import { PostgresAuthenticationRateLimiter } from './infrastructure/postgres/postgres-authentication-rate-limiter';
 import { PostgresAuthenticationRepository } from './infrastructure/postgres/postgres-authentication.repository';
 import { SessionCurrentPrincipalResolver } from './infrastructure/session-current-principal.resolver';
+import { SessionResolutionAdmission } from './infrastructure/session-resolution-admission';
 
 @Module({
   imports: [PostgresModule],
@@ -42,6 +45,12 @@ import { SessionCurrentPrincipalResolver } from './infrastructure/session-curren
         config.mode === 'oidc' ? new ManagedOidcClient(config) : null,
     },
     AuthenticationService,
+    {
+      provide: SessionResolutionAdmission,
+      inject: [INFRASTRUCTURE_CONFIG],
+      useFactory: (config: InfrastructureConfig): SessionResolutionAdmission =>
+        SessionResolutionAdmission.forDatabasePool(config.database.poolMax),
+    },
     SessionCurrentPrincipalResolver,
     { provide: CURRENT_PRINCIPAL_RESOLVER, useExisting: SessionCurrentPrincipalResolver },
   ],

@@ -1,6 +1,7 @@
 import { HttpStatus, type ExecutionContext, UnauthorizedException } from '@nestjs/common';
 
 import { parseAccountId, type AccountId } from '../domain/account-profile';
+import { AuthenticationRateLimitedError } from '../../authentication/application/authentication.errors';
 import { loggingContext } from '../../infrastructure/logging';
 import { AccountAuthGuard } from './account-auth.guard';
 import {
@@ -102,6 +103,29 @@ describe('AccountAuthGuard', () => {
 
   it('does not allow the parameter decorator to operate without the guard binding', () => {
     expect(() => requireCurrentPrincipal(httpContext({}))).toThrow(UnauthorizedException);
+  });
+
+  it('maps session-resolution admission denial to the generic bounded 429 response', async () => {
+    const headers: Record<string, string> = {};
+    const guard = new AccountAuthGuard({
+      resolve: () => {
+        throw new AuthenticationRateLimitedError(7);
+      },
+    });
+
+    let captured: unknown;
+    try {
+      await guard.canActivate(httpContext({}, headers));
+    } catch (error) {
+      captured = error;
+    }
+
+    expect((captured as { getStatus(): number }).getStatus()).toBe(HttpStatus.TOO_MANY_REQUESTS);
+    expect(headers).toEqual({
+      'Cache-Control': 'private, no-store',
+      'Retry-After': '7',
+      Vary: 'Cookie, Origin',
+    });
   });
 
   it('clears a prior binding before a repeated resolution fails closed', async () => {

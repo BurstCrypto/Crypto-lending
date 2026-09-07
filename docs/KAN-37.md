@@ -156,6 +156,18 @@ KAN-34 therefore pins the application ALB's
 `routing.http.xff_client_port.enabled` attribute to `false`; enabling it would
 emit an `address:port` value that this parser deliberately rejects.
 
+Protected-route session resolution also has a zero-queue, in-process admission
+boundary before PostgreSQL. Each API replica permits at most eight concurrent
+resolutions, or one fewer than `DATABASE_POOL_MAX` when the pool is smaller,
+and permits 300 attempts per canonical client address in each fixed one-minute
+window. Rejection uses the generic authentication `429` contract and never
+starts repository work. These limits are per replica, not a distributed edge
+limit. A shared NAT therefore shares one source budget; operators must treat
+unexpected `429` growth from a legitimate NAT as a capacity/threshold signal,
+not weaken trusted-proxy validation or accept forwarded-address lists. The API
+intentionally refuses startup when `DATABASE_POOL_MAX=1`, because it cannot
+reserve a connection for non-session work.
+
 ## Configuration and rotation rules
 
 `AUTH_MODE` defaults to `disabled` only outside production. Disabled mode keeps
