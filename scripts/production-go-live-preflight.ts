@@ -257,6 +257,7 @@ export interface ProviderPositionReadBoundaryArtifactSources {
   readonly providerPositionChainAnchorCandidateFinalityFinalizerSource: string;
   readonly providerPositionAaveV3EthereumSource: string;
   readonly providerPositionKaminoSource: string;
+  readonly providerPositionCompoundIIIEthereumSource: string;
   readonly providerPositionChainAnchorEvidenceRecorderPortSource: string;
   readonly providerPositionPostgresChainAnchorEvidenceRecorderSource: string;
   readonly providerPositionPostgresDurableChainAnchorReaderSource: string;
@@ -605,6 +606,7 @@ const PROVIDER_POSITION_READ_ARTIFACT_KEYS = Object.freeze([
   'providerPositionChainAnchorCandidateFinalityFinalizerSource',
   'providerPositionAaveV3EthereumSource',
   'providerPositionKaminoSource',
+  'providerPositionCompoundIIIEthereumSource',
   'providerPositionChainAnchorEvidenceRecorderPortSource',
   'providerPositionPostgresChainAnchorEvidenceRecorderSource',
   'providerPositionPostgresDurableChainAnchorReaderSource',
@@ -655,6 +657,8 @@ const REVIEWED_PROVIDER_POSITION_READ_ARTIFACT_SHA256 = Object.freeze({
   providerPositionAaveV3EthereumSource:
     '7bb670f1435d2a5dbd6ad707a3cfcef80b4ef3452433653a7f49a045440eaba5',
   providerPositionKaminoSource: 'eacdafa7fcd5fa5574183d0f0e2beb6a02c270cd8ecd71be6b7a120ca60355a6',
+  providerPositionCompoundIIIEthereumSource:
+    'f70dee0b5af6a5a0d137d5b580e1fcca95565c40141f96f0de79a9316e40569a',
   providerPositionChainAnchorEvidenceRecorderPortSource:
     'bd4e1a22eb2fe02540f11a2f5b28ba5eed6e71a726fe5a0027291a062f95951c',
   providerPositionPostgresChainAnchorEvidenceRecorderSource:
@@ -717,7 +721,7 @@ const REVIEWED_PROVIDER_POSITION_READ_ARTIFACT_SHA256 = Object.freeze({
     'a713200b67f0cf67c50b56c94f707f94f7383c52e3d59f4368868710b099b55d',
 } satisfies Readonly<Record<keyof ProviderPositionReadBoundaryArtifactSources, string>>);
 const MAX_PROVIDER_POSITION_READ_ARTIFACT_BYTES = 128 * 1024;
-const MAX_PROVIDER_POSITION_READ_TOTAL_BYTES = 960 * 1024;
+const MAX_PROVIDER_POSITION_READ_TOTAL_BYTES = 1024 * 1024;
 const BALANCE_CONSUMER_ARTIFACT_KEYS = Object.freeze([
   'activationSource',
   'cliSource',
@@ -5341,6 +5345,459 @@ function hasDormantKaminoProviderPositionSourceContract(
   );
 }
 
+function hasDormantCompoundIIIEthereumProviderPositionSourceContract(
+  sourceInput: string,
+  runtimeCompositionSource: string,
+  infrastructureConfigSource: string,
+  networkPolicySource: string,
+  moduleSource: string,
+  indexSource: string,
+  controllerSource: string,
+): boolean {
+  const source = sourceInput.replace(/\r\n/gu, '\n');
+  const importSources = Array.from(
+    source.matchAll(/\bfrom\s+['"]([^'"]+)['"]/gu),
+    (match) => match[1],
+  );
+  const importDeclarationCount = source.match(/^[\t ]*import\b/gmu)?.length ?? 0;
+  const forbiddenCapability =
+    /(?:\bimport\s*\(|\brequire\s*\(|(?:\bfrom\s+|\bimport\s*(?:\(\s*)?)['"](?:node:)?(?:child_process|cluster|dgram|dns|fs|http|http2|https|net|tls|worker_threads)(?:\/[^'"]*)?['"]|(?:\bfrom\s+|\bimport\s*(?:\(\s*)?)['"](?:axios|ethers|got|pg|superagent|undici|web3|@solana\/web3\.js)['"]|\b(?:fetch|setTimeout|setInterval|setImmediate|queueMicrotask|WebSocket|EventSource|XMLHttpRequest|readFileSync|writeFileSync)\s*\(|\.\s*(?:query|connect|end|execute|transaction|persist|save|write)\s*\(|\b(?:process|Deno|Bun)\s*\.\s*env\b|\bimport\s*\.\s*meta\s*\.\s*env\b|['"]https?:\/\/|(?:^|\n)[\t ]*@[A-Za-z_$]|\b(?:NestFactory|PostgresService|DataSource|EntityManager|Repository|loadInfrastructureConfig|createPostgresPool)\b|\bPromise\s*\.\s*(?:all|allSettled|any|race)\s*\()/iu;
+  const forbiddenFeatureSurface =
+    /(?:DormantCompoundIIIEthereumProviderPositionSource|CompoundIIIEthereumDurableTargetContextReaderPort|CompoundIIIEthereumFinalizedPositionTranscriptPort|COMPOUND_III_ETHEREUM_(?:DURABLE_TARGET_CONTEXT|FINALIZED_POSITION_TRANSCRIPT)|dormant-compound-iii-ethereum-provider-position\.source)/u;
+  const runtimeSurfaces = [
+    runtimeCompositionSource,
+    infrastructureConfigSource,
+    networkPolicySource,
+    moduleSource,
+    indexSource,
+    controllerSource,
+  ] as const;
+
+  const reviewedRequestStart = source.indexOf('function reviewedRequest(');
+  const contextRequestStart = source.indexOf('function contextRequest(', reviewedRequestStart);
+  const reviewedRequest =
+    reviewedRequestStart >= 0 && contextRequestStart > reviewedRequestStart
+      ? source.slice(reviewedRequestStart, contextRequestStart)
+      : '';
+  const reviewedContextStart = source.indexOf('function reviewedContext(', contextRequestStart);
+  const contextRequest =
+    contextRequestStart >= 0 && reviewedContextStart > contextRequestStart
+      ? source.slice(contextRequestStart, reviewedContextStart)
+      : '';
+  const readPlansStart = source.indexOf('function addressCallData(', reviewedContextStart);
+  const reviewedContext =
+    reviewedContextStart >= 0 && readPlansStart > reviewedContextStart
+      ? source.slice(reviewedContextStart, readPlansStart)
+      : '';
+  const transcriptRequestStart = source.indexOf('function transcriptRequest(', readPlansStart);
+  const readPlans =
+    readPlansStart >= 0 && transcriptRequestStart > readPlansStart
+      ? source.slice(readPlansStart, transcriptRequestStart)
+      : '';
+  const boundedStart = source.indexOf('function assertBoundedPlainData(', transcriptRequestStart);
+  const transcriptRequest =
+    transcriptRequestStart >= 0 && boundedStart > transcriptRequestStart
+      ? source.slice(transcriptRequestStart, boundedStart)
+      : '';
+  const headerStart = source.indexOf('function parsedHeader(', boundedStart);
+  const bounded =
+    boundedStart >= 0 && headerStart > boundedStart ? source.slice(boundedStart, headerStart) : '';
+  const codeStart = source.indexOf('function runtimeCode(', headerStart);
+  const blockBinding =
+    headerStart >= 0 && codeStart > headerStart ? source.slice(headerStart, codeStart) : '';
+  const abiStart = source.indexOf('function abiUint(', codeStart);
+  const codeReads = codeStart >= 0 && abiStart > codeStart ? source.slice(codeStart, abiStart) : '';
+  const transcriptStart = source.indexOf('function parseTranscript(', abiStart);
+  const callReads =
+    abiStart >= 0 && transcriptStart > abiStart ? source.slice(abiStart, transcriptStart) : '';
+  const ageStart = source.indexOf('function validateSelectedBlockAge(', transcriptStart);
+  const transcript =
+    transcriptStart >= 0 && ageStart > transcriptStart
+      ? source.slice(transcriptStart, ageStart)
+      : '';
+  const evidenceStart = source.indexOf('function evidence(', ageStart);
+  const classStart = source.indexOf(
+    'export class DormantCompoundIIIEthereumProviderPositionSource implements ProviderPositionAdmissionSourcePort {',
+    evidenceStart,
+  );
+  const evidence =
+    evidenceStart >= 0 && classStart > evidenceStart ? source.slice(evidenceStart, classStart) : '';
+  const publicResultStart = evidence.indexOf('return frozenNullPrototype({');
+  const publicResult = publicResultStart >= 0 ? evidence.slice(publicResultStart) : '';
+  const readTargetStart = source.indexOf('  async readTarget(', classStart);
+  const constructor =
+    classStart >= 0 && readTargetStart > classStart
+      ? source.slice(classStart, readTargetStart)
+      : '';
+  const readTarget = readTargetStart >= 0 ? source.slice(readTargetStart) : '';
+  const parsedManifestAt = constructor.indexOf(
+    'this.#manifest = parseCompoundIIIUSDCFinalizedManifest(manifestValue);',
+  );
+  const computedFingerprintAt = constructor.indexOf(
+    'this.#manifestFingerprintSha256 = compoundIIIUSDCManifestFingerprintSha256(this.#manifest);',
+    parsedManifestAt,
+  );
+  const requiredFingerprintAt = constructor.indexOf(
+    "typeof requiredManifestFingerprintSha256 !== 'string' ||",
+    computedFingerprintAt,
+  );
+  const capturedContextAt = constructor.indexOf(
+    'this.#contextReader = capturedContextReader(contextReaderValue);',
+    requiredFingerprintAt,
+  );
+  const capturedTranscriptAt = constructor.indexOf(
+    'this.#transcriptReader = capturedTranscriptReader(transcriptReaderValue);',
+    capturedContextAt,
+  );
+  const issuedContextAt = readTarget.indexOf(
+    'const issuedContextRequest = contextRequest(request);',
+  );
+  const contextReadAt = readTarget.indexOf(
+    'const contextCapability = await invoke(this.#contextReader.read, [issuedContextRequest]);',
+    issuedContextAt,
+  );
+  const contextSettledAt = readTarget.indexOf(
+    'const contextSettledAt = clockTime(this.#now);',
+    contextReadAt,
+  );
+  const contextActiveAt = readTarget.indexOf(
+    'assertActive(request, contextSettledAt, startedAt);',
+    contextSettledAt,
+  );
+  const contextReviewAt = readTarget.indexOf(
+    'invoke(this.#contextReader.review, [contextCapability, issuedContextRequest]) !==',
+    contextActiveAt,
+  );
+  const contextParseAt = readTarget.indexOf(
+    'const context = reviewedContext(contextCapability, request, this.#contextReader);',
+    contextReviewAt,
+  );
+  const issuedTranscriptAt = readTarget.indexOf(
+    'const issuedTranscriptRequest = transcriptRequest(',
+    contextParseAt,
+  );
+  const transcriptReadAt = readTarget.indexOf(
+    'const transcriptCapability = await invoke(this.#transcriptReader.read, [',
+    issuedTranscriptAt,
+  );
+  const transcriptSettledAt = readTarget.indexOf(
+    'const transcriptSettledAt = clockTime(this.#now);',
+    transcriptReadAt,
+  );
+  const transcriptActiveAt = readTarget.indexOf(
+    'assertActive(request, transcriptSettledAt, contextSettledAt);',
+    transcriptSettledAt,
+  );
+  const transcriptReviewAt = readTarget.indexOf(
+    'invoke(this.#transcriptReader.review, [transcriptCapability, issuedTranscriptRequest]) !==',
+    transcriptActiveAt,
+  );
+  const contextRereviewAt = readTarget.indexOf(
+    'invoke(this.#contextReader.review, [contextCapability, issuedContextRequest]) !==',
+    transcriptReviewAt,
+  );
+  const transcriptParseAt = readTarget.indexOf(
+    'const transcript = parseTranscript(',
+    contextRereviewAt,
+  );
+  const completedAt = readTarget.indexOf(
+    'const completedAt = clockTime(this.#now);',
+    transcriptParseAt,
+  );
+  const finalActiveAt = readTarget.indexOf(
+    'assertActive(request, completedAt, transcriptSettledAt);',
+    completedAt,
+  );
+  const ageCheckAt = readTarget.indexOf(
+    'validateSelectedBlockAge(transcript.selectedBlock, completedAt, this.#manifest);',
+    finalActiveAt,
+  );
+  const evidenceAt = readTarget.indexOf(
+    'return evidence(transcript, request, context, completedAt);',
+    ageCheckAt,
+  );
+
+  return (
+    importDeclarationCount === 8 &&
+    importSources.length === 8 &&
+    importSources[0] === 'node:crypto' &&
+    importSources[1] === 'node:util/types' &&
+    importSources[2] === '../../accounts/domain/account-profile' &&
+    importSources[3] === '../../blockchain/domain/chain-observation-policy' &&
+    importSources[4] ===
+      '../../smart-lending/infrastructure/compound/compound-iii-ethereum-usdc.manifest' &&
+    importSources[5] === '../../wallets/domain/wallet-identity' &&
+    importSources[6] === '../application/provider-position-admission.coordinator' &&
+    importSources[7] === '../domain/mainnet-provider-position-observation' &&
+    !forbiddenCapability.test(source) &&
+    !/(?:@Injectable|@Module|@Controller)\s*\(/u.test(source) &&
+    exactExecutableLineCount(
+      source,
+      'export const COMPOUND_III_ETHEREUM_DURABLE_TARGET_CONTEXT_VERSION = 1 as const;',
+    ) === 1 &&
+    source.includes("'DORMANT_COMPOUND_III_ETHEREUM_DURABLE_TARGET_CONTEXT_ONLY' as const;") &&
+    exactExecutableLineCount(
+      source,
+      'export const COMPOUND_III_ETHEREUM_FINALIZED_POSITION_TRANSCRIPT_VERSION = 1 as const;',
+    ) === 1 &&
+    source.includes(
+      "'DORMANT_COMPOUND_III_ETHEREUM_FINALIZED_POSITION_TRANSCRIPT_ONLY' as const;",
+    ) &&
+    exactExecutableLineCount(source, "const NETWORK_ID = 'eip155:1' as const;") === 1 &&
+    exactExecutableLineCount(source, "const PROVIDER_ID = 'compound' as const;") === 1 &&
+    exactExecutableLineCount(source, "const PROTOCOL_ID = 'compound-iii' as const;") === 1 &&
+    exactExecutableLineCount(source, "const MARKET_ID = 'compound-iii-ethereum-usdc' as const;") ===
+      1 &&
+    exactExecutableLineCount(source, "const EXPECTED_CHAIN_ID = '0x1' as const;") === 1 &&
+    exactExecutableLineCount(source, "const BLOCK_SELECTOR = 'finalized' as const;") === 1 &&
+    exactExecutableLineCount(
+      source,
+      "const BLOCK_BINDING = 'EIP1898_BLOCK_HASH_REQUIRE_CANONICAL' as const;",
+    ) === 1 &&
+    exactExecutableLineCount(source, "const IMPLEMENTATION_SELECTOR = '0x5c60da1b' as const;") ===
+      1 &&
+    exactExecutableLineCount(source, "const BASE_TOKEN_SELECTOR = '0xc55dae63' as const;") === 1 &&
+    exactExecutableLineCount(source, "const BASE_SCALE_SELECTOR = '0x44c1e5eb' as const;") === 1 &&
+    exactExecutableLineCount(source, "const DECIMALS_SELECTOR = '0x313ce567' as const;") === 1 &&
+    exactExecutableLineCount(source, "const BALANCE_OF_SELECTOR = '0x70a08231' as const;") === 1 &&
+    exactExecutableLineCount(
+      source,
+      "const BORROW_BALANCE_OF_SELECTOR = '0x374c49b4' as const;",
+    ) === 1 &&
+    exactExecutableLineCount(source, 'const MAX_DEADLINE_MILLISECONDS = 30_000;') === 1 &&
+    exactExecutableLineCount(source, 'const MAX_TRANSCRIPT_BYTES = 512 * 1024;') === 1 &&
+    exactExecutableLineCount(source, 'const MAX_CONTEXT_BYTES = 16 * 1024;') === 1 &&
+    exactExecutableLineCount(source, 'const MAX_DATA_NODES = 512;') === 1 &&
+    exactExecutableLineCount(source, 'const MAX_DATA_DEPTH = 12;') === 1 &&
+    exactExecutableLineCount(source, 'const MAX_STRING_BYTES = 132 * 1024;') === 1 &&
+    exactExecutableLineCount(source, 'const MAX_CODE_BYTES = 65_536;') === 1 &&
+    exactExecutableLineCount(source, 'readonly mayAuthorizeFinancialAction: false;') === 3 &&
+    exactExecutableLineCount(source, 'readonly mayPersist: false;') === 3 &&
+    exactExecutableLineCount(source, 'readonly maySign: false;') === 3 &&
+    exactExecutableLineCount(source, 'readonly mayAccessWalletPrivateKey: false;') === 3 &&
+    exactExecutableLineCount(source, 'mayAuthorizeFinancialAction: false as const,') === 3 &&
+    !/mayAuthorizeFinancialAction\s*:\s*true|mayPersist\s*:\s*true|maySign\s*:\s*true|mayAccessWalletPrivateKey\s*:\s*true/u.test(
+      source,
+    ) &&
+    source.includes(
+      'readContext(request: ReadCompoundIIIEthereumDurableTargetContextRequestV1): Promise<unknown>;',
+    ) &&
+    source.includes(
+      'readTranscript(\n    request: ReadCompoundIIIEthereumFinalizedPositionTranscriptRequestV1,\n  ): Promise<unknown>;',
+    ) &&
+    parsedManifestAt >= 0 &&
+    computedFingerprintAt > parsedManifestAt &&
+    requiredFingerprintAt > computedFingerprintAt &&
+    constructor.includes('!SHA256.test(requiredManifestFingerprintSha256) ||') &&
+    constructor.includes('requiredManifestFingerprintSha256 === ZERO_SHA256 ||') &&
+    constructor.includes('requiredManifestFingerprintSha256 !== this.#manifestFingerprintSha256') &&
+    capturedContextAt > requiredFingerprintAt &&
+    capturedTranscriptAt > capturedContextAt &&
+    constructor.includes(
+      'this.#contextReader.receiver === this.#transcriptReader.receiver ||\n        this.#contextReader.sourceFamilyId === this.#transcriptReader.sourceFamilyId ||\n        this.#contextReader.sourceId === this.#transcriptReader.sourceId',
+    ) &&
+    reviewedRequest.includes('accountId = parseAccountId(record.accountId);') &&
+    reviewedRequest.includes('record.sourceFamilyId !== reader.sourceFamilyId ||') &&
+    reviewedRequest.includes('record.sourceId !== reader.sourceId ||') &&
+    reviewedRequest.includes("record.sourceKind !== 'RPC' ||") &&
+    reviewedRequest.includes('record.providerId !== PROVIDER_ID ||') &&
+    reviewedRequest.includes('record.protocolId !== PROTOCOL_ID ||') &&
+    reviewedRequest.includes('record.marketId !== MARKET_ID ||') &&
+    reviewedRequest.includes('record.networkId !== NETWORK_ID ||') &&
+    reviewedRequest.includes('aborted(signal) ||') &&
+    reviewedRequest.includes('deadlineAt.milliseconds <= startedAt.milliseconds ||') &&
+    reviewedRequest.includes(
+      'deadlineAt.milliseconds - startedAt.milliseconds > MAX_DEADLINE_MILLISECONDS',
+    ) &&
+    source.includes("record.stablecoin !== 'USDC' ||") &&
+    source.includes('record.identity !== manifest.baseAsset.address ||') &&
+    source.includes('record.decimals !== manifest.baseAsset.decimals') &&
+    contextRequest.includes('admissionRequest: request.request,') &&
+    contextRequest.includes('accountId: request.accountId,') &&
+    contextRequest.includes('correlationId: request.correlationId,') &&
+    contextRequest.includes('deadlineAt: request.deadlineAt.timestamp,') &&
+    contextRequest.includes('signal: request.signal,') &&
+    contextRequest.includes('sourceFamilyId: request.sourceFamilyId,') &&
+    contextRequest.includes('sourceId: request.sourceId,') &&
+    contextRequest.includes("sourceKind: 'RPC' as const,") &&
+    contextRequest.includes('walletId: request.walletId,') &&
+    contextRequest.includes('providerId: PROVIDER_ID,') &&
+    contextRequest.includes('protocolId: PROTOCOL_ID,') &&
+    contextRequest.includes('marketId: MARKET_ID,') &&
+    contextRequest.includes('networkId: NETWORK_ID,') &&
+    reviewedContext.includes('assertBoundedPlainData(capability, MAX_CONTEXT_BYTES);') &&
+    reviewedContext.includes('record.contextSourceFamilyId !== reader.sourceFamilyId ||') &&
+    reviewedContext.includes('record.contextSourceId !== reader.sourceId') &&
+    reviewedContext.includes(
+      "assertBoundIdentity(record, request, 'COMPOUND_III_ETHEREUM_POSITION_SOURCE_UNAVAILABLE');",
+    ) &&
+    reviewedContext.includes('walletAddress = parseEvmWalletAddress(record.walletAddress);') &&
+    reviewedContext.includes('continuityFloor: evmAnchor(') &&
+    readPlans.includes("return `${selector}${'0'.repeat(24)}${address.slice(2)}`;") &&
+    readPlans.includes("operationId: 'comet-proxy-code' as const,") &&
+    readPlans.includes('expectedRuntimeCodeSha256: manifest.runtimeCodeSha256.cometProxy,') &&
+    readPlans.includes("operationId: 'comet-implementation-code' as const,") &&
+    readPlans.includes('expectedRuntimeCodeSha256: manifest.runtimeCodeSha256.implementation,') &&
+    readPlans.includes("operationId: 'base-usdc-code' as const,") &&
+    readPlans.includes('expectedRuntimeCodeSha256: manifest.runtimeCodeSha256.baseAsset,') &&
+    readPlans.includes("operationId: 'proxy-implementation' as const,") &&
+    readPlans.includes('data: IMPLEMENTATION_SELECTOR,') &&
+    readPlans.includes("operationId: 'base-token' as const,") &&
+    readPlans.includes('data: BASE_TOKEN_SELECTOR,') &&
+    readPlans.includes('data: BASE_SCALE_SELECTOR,') &&
+    exactExecutableLineCount(readPlans, 'data: DECIMALS_SELECTOR,') === 2 &&
+    readPlans.includes("operationId: 'usdc-supply' as const,") &&
+    readPlans.includes("positionKind: 'SUPPLY' as const,") &&
+    readPlans.includes('data: addressCallData(BALANCE_OF_SELECTOR, walletAddress),') &&
+    readPlans.includes("operationId: 'usdc-borrow' as const,") &&
+    readPlans.includes("positionKind: 'BORROW' as const,") &&
+    readPlans.includes('data: addressCallData(BORROW_BALANCE_OF_SELECTOR, walletAddress),') &&
+    transcriptRequest.includes('admissionRequest: request.request,') &&
+    transcriptRequest.includes('contextRequest: contextRequestValue,') &&
+    transcriptRequest.includes('contextCapability: context.capability,') &&
+    transcriptRequest.includes('accountId: request.accountId,') &&
+    transcriptRequest.includes('correlationId: request.correlationId,') &&
+    transcriptRequest.includes('deadlineAt: request.deadlineAt.timestamp,') &&
+    transcriptRequest.includes('signal: request.signal,') &&
+    transcriptRequest.includes('sourceFamilyId: request.sourceFamilyId,') &&
+    transcriptRequest.includes('sourceId: request.sourceId,') &&
+    transcriptRequest.includes("sourceKind: 'RPC' as const,") &&
+    transcriptRequest.includes('walletId: request.walletId,') &&
+    transcriptRequest.includes('providerId: PROVIDER_ID,') &&
+    transcriptRequest.includes('protocolId: PROTOCOL_ID,') &&
+    transcriptRequest.includes('marketId: MARKET_ID,') &&
+    transcriptRequest.includes('networkId: NETWORK_ID,') &&
+    transcriptRequest.includes('walletAddress: context.walletAddress,') &&
+    transcriptRequest.includes('expectedChainId: EXPECTED_CHAIN_ID,') &&
+    transcriptRequest.includes('blockSelector: BLOCK_SELECTOR,') &&
+    transcriptRequest.includes('blockBinding: BLOCK_BINDING,') &&
+    transcriptRequest.includes(
+      'floorBlockSelector: decimalToHex(context.continuityFloor.blockNumber),',
+    ) &&
+    transcriptRequest.includes('continuityFloor: context.continuityFloor,') &&
+    transcriptRequest.includes('manifest,') &&
+    transcriptRequest.includes('manifestFingerprintSha256,') &&
+    transcriptRequest.includes("'chain-id-before',") &&
+    transcriptRequest.includes("'selected-block-before',") &&
+    transcriptRequest.includes("'floor-block-before',") &&
+    transcriptRequest.includes("'floor-block-after',") &&
+    transcriptRequest.includes("'selected-block-after',") &&
+    transcriptRequest.includes("'chain-id-after',") &&
+    bounded.includes('if (nodes > MAX_DATA_NODES || depth > MAX_DATA_DEPTH)') &&
+    bounded.includes('if (length > MAX_STRING_BYTES)') &&
+    bounded.includes('isProxy(candidate) || seen.has(candidate) || !Object.isFrozen(candidate)') &&
+    bounded.includes('if (Object.getOwnPropertySymbols(candidate).length > 0)') &&
+    bounded.includes('if (bytes > maximumBytes)') &&
+    blockBinding.includes("record.method !== 'eth_getBlockByNumber' ||") &&
+    blockBinding.includes('record.selector !== expectedSelector ||') &&
+    blockBinding.includes('record.includeTransactions !== false') &&
+    blockBinding.includes('left.numberHex === right.numberHex &&') &&
+    blockBinding.includes('left.hash === right.hash &&') &&
+    blockBinding.includes('left.stateRoot === right.stateRoot &&') &&
+    blockBinding.includes(
+      'record.blockHash !== selectedBlockHash || record.requireCanonical !== true',
+    ) &&
+    codeReads.includes("record.method !== 'eth_getCode' ||") &&
+    codeReads.includes('record.address !== expected.address') &&
+    codeReads.includes('runtimeCode(record.result, expected.expectedRuntimeCodeSha256);') &&
+    codeReads.includes("createHash('sha256')") &&
+    codeReads.includes(".update(Buffer.from(value.slice(2), 'hex'))") &&
+    codeReads.includes('if (actual !== expectedSha256)') &&
+    !callReads.includes('const ABI_WORD =') &&
+    exactExecutableLineCount(source, 'const ABI_WORD = /^0x[0-9a-f]{64}$/u;') === 1 &&
+    callReads.includes("record.method !== 'eth_call' ||") &&
+    callReads.includes('record.to !== expected.to ||') &&
+    callReads.includes('record.data !== expected.data ||') &&
+    callReads.includes('record.from !== expected.from') &&
+    callReads.includes(
+      "abiAddress(results.get('proxy-implementation')) !== request.manifest.implementation ||",
+    ) &&
+    callReads.includes(
+      "abiAddress(results.get('base-token')) !== request.manifest.baseAsset.address ||",
+    ) &&
+    callReads.includes(
+      "abiUint(results.get('base-scale')) !== BigInt(request.manifest.baseAsset.scale) ||",
+    ) &&
+    callReads.includes('if (values.length !== request.accountReads.length)') &&
+    callReads.includes('results.set(expected.operationId, abiUint(record.result).toString(10));') &&
+    callReads.includes("const supplyAtomic = results.get('usdc-supply');") &&
+    callReads.includes("const borrowAtomic = results.get('usdc-borrow');") &&
+    callReads.includes("(supplyAtomic !== '0' && borrowAtomic !== '0')") &&
+    transcript.includes('assertBoundedPlainData(capability, MAX_TRANSCRIPT_BYTES);') &&
+    transcript.includes('TRANSCRIPT_CAPABILITY_KEYS,') &&
+    transcript.includes('record.manifestFingerprintSha256 !== manifestFingerprintSha256 ||') &&
+    transcript.includes('record.chainIdBefore !== EXPECTED_CHAIN_ID ||') &&
+    transcript.includes('record.chainIdAfter !== EXPECTED_CHAIN_ID ||') &&
+    transcript.includes("record.status !== 'COMPLETE' ||") &&
+    transcript.includes(
+      "record.zeroPositionSemantics !== 'EXACT_ZERO_RESULT_FOR_BOTH_COMET_BASE_BALANCE_CALLS'",
+    ) &&
+    transcript.includes(
+      "assertBoundIdentity(record, request, 'COMPOUND_III_ETHEREUM_POSITION_SOURCE_UNAVAILABLE');",
+    ) &&
+    transcript.includes(
+      'const selectedAfter = parsedBlockRead(record.selectedBlockAfter, selectedBefore.numberHex);',
+    ) &&
+    transcript.includes('!sameHeader(selectedBefore, selectedAfter) ||') &&
+    transcript.includes('!sameHeader(floorBefore, floorAfter) ||') &&
+    transcript.includes('floorBefore.numberDecimal !== context.continuityFloor.blockNumber ||') &&
+    transcript.includes('floorBefore.hash !== context.continuityFloor.blockHash ||') &&
+    transcript.includes(
+      'BigInt(selectedBefore.numberDecimal) < BigInt(floorBefore.numberDecimal) ||',
+    ) &&
+    transcript.includes(
+      'selectedBefore.numberDecimal === floorBefore.numberDecimal &&\n      selectedBefore.hash !== floorBefore.hash',
+    ) &&
+    transcript.includes('matchCodeReads(record.codeReads, issuedRequest, selectedBefore.hash);') &&
+    transcript.includes(
+      'matchIdentityReads(record.identityReads, issuedRequest, selectedBefore.hash);',
+    ) &&
+    transcript.includes(
+      'const balances = matchAccountReads(record.accountReads, issuedRequest, selectedBefore.hash);',
+    ) &&
+    evidence.includes('mayAuthorizeFinancialAction: false as const,') &&
+    evidence.includes("status: 'COMPLETE' as const,") &&
+    evidence.includes('continuityFloor: context.continuityFloor,') &&
+    evidence.includes('blockNumber: transcript.selectedBlock.numberDecimal,') &&
+    evidence.includes('blockHash: transcript.selectedBlock.hash,') &&
+    publicResult.length > 0 &&
+    !/(?:walletAddress|manifestFingerprintSha256|manifest\b|cometProxy|implementation|proxyAdmin)/u.test(
+      publicResult,
+    ) &&
+    issuedContextAt >= 0 &&
+    contextReadAt > issuedContextAt &&
+    contextSettledAt > contextReadAt &&
+    contextActiveAt > contextSettledAt &&
+    contextReviewAt > contextActiveAt &&
+    contextParseAt > contextReviewAt &&
+    issuedTranscriptAt > contextParseAt &&
+    transcriptReadAt > issuedTranscriptAt &&
+    transcriptSettledAt > transcriptReadAt &&
+    transcriptActiveAt > transcriptSettledAt &&
+    transcriptReviewAt > transcriptActiveAt &&
+    contextRereviewAt > transcriptReviewAt &&
+    transcriptParseAt > contextRereviewAt &&
+    completedAt > transcriptParseAt &&
+    finalActiveAt > completedAt &&
+    ageCheckAt > finalActiveAt &&
+    evidenceAt > ageCheckAt &&
+    readTarget.includes('this.#manifestFingerprintSha256,') &&
+    exactExecutableLineCount(
+      readTarget,
+      'invoke(this.#contextReader.review, [contextCapability, issuedContextRequest]) !==',
+    ) === 2 &&
+    exactExecutableLineCount(
+      source,
+      "super('Compound III Ethereum provider-position source is unavailable.');",
+    ) === 1 &&
+    readTarget.includes(
+      'if (error instanceof DormantCompoundIIIEthereumProviderPositionSourceError) throw error;',
+    ) &&
+    !/\b(?:console|logger)\s*\.|\berror\s*\./u.test(source) &&
+    runtimeSurfaces.every((runtimeSource) => !forbiddenFeatureSurface.test(runtimeSource))
+  );
+}
+
 function hasDormantProviderPositionReadBoundaryContract(
   sources: ProviderPositionReadBoundaryArtifactSources,
 ): boolean {
@@ -5358,6 +5815,10 @@ function hasDormantProviderPositionReadBoundaryContract(
     sources.providerPositionChainAnchorCandidateFinalityFinalizerSource.replace(/\r\n/gu, '\n');
   const aaveV3EthereumSource = sources.providerPositionAaveV3EthereumSource.replace(/\r\n/gu, '\n');
   const kaminoSource = sources.providerPositionKaminoSource.replace(/\r\n/gu, '\n');
+  const compoundIIIEthereumSource = sources.providerPositionCompoundIIIEthereumSource.replace(
+    /\r\n/gu,
+    '\n',
+  );
   const chainAnchorEvidenceRecorderPort =
     sources.providerPositionChainAnchorEvidenceRecorderPortSource.replace(/\r\n/gu, '\n');
   const postgresChainAnchorEvidenceRecorder =
@@ -6323,6 +6784,15 @@ function hasDormantProviderPositionReadBoundaryContract(
     ) &&
     hasDormantKaminoProviderPositionSourceContract(
       kaminoSource,
+      runtimeComposition,
+      infrastructureConfig,
+      mainnetLaunchNetworkPolicy,
+      moduleSource,
+      indexSource,
+      controller,
+    ) &&
+    hasDormantCompoundIIIEthereumProviderPositionSourceContract(
+      compoundIIIEthereumSource,
       runtimeComposition,
       infrastructureConfig,
       mainnetLaunchNetworkPolicy,
@@ -13172,6 +13642,13 @@ export function loadRepositoryProductionPreflightInput(
         resolve(
           repositoryRoot,
           'apps/api/src/mainnet-platforms/infrastructure/dormant-kamino-provider-position-admission.source.ts',
+        ),
+        'utf8',
+      ),
+      providerPositionCompoundIIIEthereumSource: readFileSync(
+        resolve(
+          repositoryRoot,
+          'apps/api/src/mainnet-platforms/infrastructure/dormant-compound-iii-ethereum-provider-position.source.ts',
         ),
         'utf8',
       ),

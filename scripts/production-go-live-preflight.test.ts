@@ -478,6 +478,13 @@ const PROVIDER_POSITION_READ_ARTIFACTS = Object.freeze({
     ),
     'utf8',
   ),
+  providerPositionCompoundIIIEthereumSource: readFileSync(
+    resolve(
+      __dirname,
+      '../apps/api/src/mainnet-platforms/infrastructure/dormant-compound-iii-ethereum-provider-position.source.ts',
+    ),
+    'utf8',
+  ),
   providerPositionChainAnchorEvidenceRecorderPortSource: readFileSync(
     resolve(
       __dirname,
@@ -1210,7 +1217,7 @@ function mutateProviderPositionReadArtifact(
 }
 
 test('provider-position read inspection pins the exact dormant critical source slice', () => {
-  assert.equal(Object.keys(PROVIDER_POSITION_READ_ARTIFACTS).length, 40);
+  assert.equal(Object.keys(PROVIDER_POSITION_READ_ARTIFACTS).length, 41);
   const inspected = inspectProviderPositionReadBoundaryArtifacts(PROVIDER_POSITION_READ_ARTIFACTS);
   assert.deepEqual(inspected, EXPECTED_DORMANT_PROVIDER_POSITION_READ_BOUNDARY);
   assert.equal(Object.isFrozen(inspected), true);
@@ -1268,9 +1275,13 @@ test('provider-position read semantic gate contains no disabled-check bypass', (
     'function hasDormantKaminoProviderPositionSourceContract(',
     aaveV3EthereumStart,
   );
+  const compoundIIIEthereumStart = source.indexOf(
+    'function hasDormantCompoundIIIEthereumProviderPositionSourceContract(',
+    kaminoStart,
+  );
   const start = source.indexOf(
     'function hasDormantProviderPositionReadBoundaryContract(',
-    kaminoStart,
+    compoundIIIEthereumStart,
   );
   const end = source.indexOf('\nfunction ', start + 1);
   assert.ok(
@@ -1283,7 +1294,8 @@ test('provider-position read semantic gate contains no disabled-check bypass', (
       reconciliationLifecycleStart > reconciliationStart &&
       aaveV3EthereumStart > reconciliationLifecycleStart &&
       kaminoStart > aaveV3EthereumStart &&
-      start > kaminoStart &&
+      compoundIIIEthereumStart > kaminoStart &&
+      start > compoundIIIEthereumStart &&
       end > start,
   );
   const semanticGateSource = source
@@ -2108,6 +2120,261 @@ test('provider-position read inspection rejects dormant Kamino source drift', ()
       'mainnetPlatformsControllerSource',
       'constructor(private readonly directory: MainnetPlatformDirectoryService) {}',
       'constructor(private readonly source: DormantKaminoProviderPositionAdmissionSource) {}',
+    ],
+  ];
+
+  for (const [key, approved, rejected] of mutations) {
+    assert.deepEqual(
+      inspectProviderPositionReadBoundaryArtifacts(
+        mutateProviderPositionReadArtifact(key, approved, rejected),
+      ),
+      INVALID_PROVIDER_POSITION_READ_BOUNDARY,
+      `${key}: ${approved}`,
+    );
+  }
+});
+
+test('provider-position read inspection rejects dormant Compound III Ethereum source drift', () => {
+  const mutations: readonly (readonly [
+    keyof ProviderPositionReadBoundaryArtifactSources,
+    string,
+    string,
+  ])[] = [
+    [
+      'providerPositionCompoundIIIEthereumSource',
+      "import { createHash } from 'node:crypto';",
+      "import { request } from 'node:https';",
+    ],
+    [
+      'providerPositionCompoundIIIEthereumSource',
+      'this.#manifest = parseCompoundIIIUSDCFinalizedManifest(manifestValue);',
+      'this.#manifest = manifestValue as CompoundIIIUSDCFinalizedManifest;',
+    ],
+    [
+      'providerPositionCompoundIIIEthereumSource',
+      'this.#manifestFingerprintSha256 = compoundIIIUSDCManifestFingerprintSha256(this.#manifest);',
+      'this.#manifestFingerprintSha256 = compoundIIIUSDCManifestFingerprintSha256(manifestValue);',
+    ],
+    [
+      'providerPositionCompoundIIIEthereumSource',
+      'requiredManifestFingerprintSha256 !== this.#manifestFingerprintSha256',
+      'requiredManifestFingerprintSha256 === this.#manifestFingerprintSha256',
+    ],
+    [
+      'providerPositionCompoundIIIEthereumSource',
+      'this.#contextReader.receiver === this.#transcriptReader.receiver ||',
+      'this.#contextReader.receiver !== this.#transcriptReader.receiver ||',
+    ],
+    [
+      'providerPositionCompoundIIIEthereumSource',
+      'const contextCapability = await invoke(this.#contextReader.read, [issuedContextRequest]);',
+      'const contextCapability = await invoke(this.#transcriptReader.read, [issuedContextRequest]);',
+    ],
+    [
+      'providerPositionCompoundIIIEthereumSource',
+      'invoke(this.#contextReader.review, [contextCapability, issuedContextRequest]) !==',
+      'invoke(this.#contextReader.review, [contextCapability, { ...issuedContextRequest }]) !==',
+    ],
+    [
+      'providerPositionCompoundIIIEthereumSource',
+      'contextRequest: contextRequestValue,',
+      'contextRequest: { ...contextRequestValue },',
+    ],
+    [
+      'providerPositionCompoundIIIEthereumSource',
+      'contextCapability: context.capability,',
+      'contextCapability: Object.freeze({}),',
+    ],
+    [
+      'providerPositionCompoundIIIEthereumSource',
+      'invoke(this.#transcriptReader.review, [transcriptCapability, issuedTranscriptRequest]) !==',
+      'invoke(this.#transcriptReader.review, [transcriptCapability, { ...issuedTranscriptRequest }]) !==',
+    ],
+    [
+      'providerPositionCompoundIIIEthereumSource',
+      "const BLOCK_SELECTOR = 'finalized' as const;",
+      "const BLOCK_SELECTOR = 'latest' as const;",
+    ],
+    [
+      'providerPositionCompoundIIIEthereumSource',
+      "const BLOCK_BINDING = 'EIP1898_BLOCK_HASH_REQUIRE_CANONICAL' as const;",
+      "const BLOCK_BINDING = 'BLOCK_NUMBER_ONLY' as const;",
+    ],
+    [
+      'providerPositionCompoundIIIEthereumSource',
+      'record.blockHash !== selectedBlockHash || record.requireCanonical !== true',
+      'record.blockHash !== selectedBlockHash || record.requireCanonical !== false',
+    ],
+    [
+      'providerPositionCompoundIIIEthereumSource',
+      'record.chainIdAfter !== EXPECTED_CHAIN_ID ||',
+      'record.chainIdAfter === EXPECTED_CHAIN_ID ||',
+    ],
+    [
+      'providerPositionCompoundIIIEthereumSource',
+      'expectedRuntimeCodeSha256: manifest.runtimeCodeSha256.cometProxy,',
+      "expectedRuntimeCodeSha256: '0'.repeat(64),",
+    ],
+    [
+      'providerPositionCompoundIIIEthereumSource',
+      'if (actual !== expectedSha256) {',
+      'if (actual === expectedSha256) {',
+    ],
+    [
+      'providerPositionCompoundIIIEthereumSource',
+      "abiAddress(results.get('proxy-implementation')) !== request.manifest.implementation ||",
+      "abiAddress(results.get('proxy-implementation')) === request.manifest.implementation ||",
+    ],
+    [
+      'providerPositionCompoundIIIEthereumSource',
+      "abiAddress(results.get('base-token')) !== request.manifest.baseAsset.address ||",
+      "abiAddress(results.get('base-token')) === request.manifest.baseAsset.address ||",
+    ],
+    [
+      'providerPositionCompoundIIIEthereumSource',
+      "const BALANCE_OF_SELECTOR = '0x70a08231' as const;",
+      "const BALANCE_OF_SELECTOR = '0x313ce567' as const;",
+    ],
+    [
+      'providerPositionCompoundIIIEthereumSource',
+      "const BORROW_BALANCE_OF_SELECTOR = '0x374c49b4' as const;",
+      "const BORROW_BALANCE_OF_SELECTOR = '0x70a08231' as const;",
+    ],
+    [
+      'providerPositionCompoundIIIEthereumSource',
+      "return `${selector}${'0'.repeat(24)}${address.slice(2)}`;",
+      "return `${selector}${'0'.repeat(22)}${address.slice(2)}`;",
+    ],
+    [
+      'providerPositionCompoundIIIEthereumSource',
+      'const ABI_WORD = /^0x[0-9a-f]{64}$/u;',
+      'const ABI_WORD = /^0x[0-9a-f]+$/u;',
+    ],
+    [
+      'providerPositionCompoundIIIEthereumSource',
+      'if (values.length !== request.accountReads.length) {',
+      'if (values.length < request.accountReads.length) {',
+    ],
+    [
+      'providerPositionCompoundIIIEthereumSource',
+      'record.data !== expected.data ||',
+      'record.data === expected.data ||',
+    ],
+    [
+      'providerPositionCompoundIIIEthereumSource',
+      'results.set(expected.operationId, abiUint(record.result).toString(10));',
+      'results.set(expected.operationId, abiUint(record.result).toString(16));',
+    ],
+    [
+      'providerPositionCompoundIIIEthereumSource',
+      "record.status !== 'COMPLETE' ||",
+      "record.status !== 'PARTIAL' ||",
+    ],
+    [
+      'providerPositionCompoundIIIEthereumSource',
+      "record.zeroPositionSemantics !== 'EXACT_ZERO_RESULT_FOR_BOTH_COMET_BASE_BALANCE_CALLS'",
+      "record.zeroPositionSemantics !== 'OMIT_ZERO_RESULTS'",
+    ],
+    [
+      'providerPositionCompoundIIIEthereumSource',
+      "(supplyAtomic !== '0' && borrowAtomic !== '0')",
+      "(supplyAtomic !== '0' || borrowAtomic !== '0')",
+    ],
+    [
+      'providerPositionCompoundIIIEthereumSource',
+      '!sameHeader(selectedBefore, selectedAfter) ||',
+      'sameHeader(selectedBefore, selectedAfter) ||',
+    ],
+    [
+      'providerPositionCompoundIIIEthereumSource',
+      '!sameHeader(floorBefore, floorAfter) ||',
+      'sameHeader(floorBefore, floorAfter) ||',
+    ],
+    [
+      'providerPositionCompoundIIIEthereumSource',
+      'floorBefore.hash !== context.continuityFloor.blockHash ||',
+      'floorBefore.hash === context.continuityFloor.blockHash ||',
+    ],
+    [
+      'providerPositionCompoundIIIEthereumSource',
+      'BigInt(selectedBefore.numberDecimal) < BigInt(floorBefore.numberDecimal) ||',
+      'BigInt(selectedBefore.numberDecimal) > BigInt(floorBefore.numberDecimal) ||',
+    ],
+    [
+      'providerPositionCompoundIIIEthereumSource',
+      'selectedBefore.hash !== floorBefore.hash)',
+      'selectedBefore.hash === floorBefore.hash)',
+    ],
+    [
+      'providerPositionCompoundIIIEthereumSource',
+      'assertBoundedPlainData(capability, MAX_TRANSCRIPT_BYTES);',
+      'void capability;',
+    ],
+    [
+      'providerPositionCompoundIIIEthereumSource',
+      'positions: Object.freeze(positions),',
+      'walletAddress: context.walletAddress,\n    positions: Object.freeze(positions),',
+    ],
+    [
+      'providerPositionCompoundIIIEthereumSource',
+      'positions: Object.freeze(positions),',
+      'manifestFingerprintSha256: transcript.manifestFingerprintSha256,\n    positions: Object.freeze(positions),',
+    ],
+    [
+      'providerPositionCompoundIIIEthereumSource',
+      'use: PROVIDER_POSITION_ADMISSION_SOURCE_USE,\n    mayAuthorizeFinancialAction: false as const,',
+      'use: PROVIDER_POSITION_ADMISSION_SOURCE_USE,\n    mayAuthorizeFinancialAction: true as const,',
+    ],
+    [
+      'providerPositionCompoundIIIEthereumSource',
+      'const MAX_DEADLINE_MILLISECONDS = 30_000;',
+      'const MAX_DEADLINE_MILLISECONDS = 300_000;',
+    ],
+    ['providerPositionCompoundIIIEthereumSource', 'aborted(signal) ||', 'aborted(signal) &&'],
+    [
+      'providerPositionCompoundIIIEthereumSource',
+      'assertActive(request, completedAt, transcriptSettledAt);',
+      'void completedAt;',
+    ],
+    [
+      'providerPositionCompoundIIIEthereumSource',
+      'const transcriptCapability = await invoke(this.#transcriptReader.read, [',
+      'const transcriptCapability = invoke(this.#transcriptReader.read, [',
+    ],
+    [
+      'providerPositionCompoundIIIEthereumSource',
+      "super('Compound III Ethereum provider-position source is unavailable.');",
+      'super(`Compound source failed: ${code}`);',
+    ],
+    [
+      'providerPositionRuntimeCompositionSource',
+      'const DEPENDENCY_KEYS = Object.freeze([',
+      'type DormantCompoundIIIEthereumProviderPositionSource = unknown;\nconst DEPENDENCY_KEYS = Object.freeze([',
+    ],
+    [
+      'providerPositionInfrastructureConfigSource',
+      'export interface InfrastructureConfig {',
+      'type CompoundIIIEthereumFinalizedPositionTranscriptPort = unknown;\nexport interface InfrastructureConfig {',
+    ],
+    [
+      'mainnetLaunchNetworkPolicySource',
+      'export const MAINNET_LAUNCH_NETWORK_IDS = Object.freeze([',
+      'type DormantCompoundIIIEthereumProviderPositionSource = unknown;\nexport const MAINNET_LAUNCH_NETWORK_IDS = Object.freeze([',
+    ],
+    [
+      'mainnetPlatformsModuleSource',
+      'providers: [MainnetPlatformDirectoryService, MainnetPlatformsPrivacyInterceptor],',
+      'providers: [MainnetPlatformDirectoryService, DormantCompoundIIIEthereumProviderPositionSource],',
+    ],
+    [
+      'mainnetPlatformsIndexSource',
+      "export { MainnetPlatformDirectoryService } from './application/mainnet-platform-directory.service';",
+      "export { DormantCompoundIIIEthereumProviderPositionSource } from './infrastructure/dormant-compound-iii-ethereum-provider-position.source';",
+    ],
+    [
+      'mainnetPlatformsControllerSource',
+      'constructor(private readonly directory: MainnetPlatformDirectoryService) {}',
+      'constructor(private readonly source: DormantCompoundIIIEthereumProviderPositionSource) {}',
     ],
   ];
 
@@ -3728,7 +3995,7 @@ test('provider-position read artifact shape and private brand fail closed', () =
     Object.fromEntries(
       Object.keys(PROVIDER_POSITION_READ_ARTIFACTS).map((key) => [
         key,
-        'x'.repeat(Math.floor((960 * 1024) / 40) + 1),
+        'x'.repeat(Math.floor((1024 * 1024) / 41) + 1),
       ]),
     ),
     accessor,
