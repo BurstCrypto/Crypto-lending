@@ -755,6 +755,13 @@ const PROVIDER_POSITION_READ_ARTIFACTS = Object.freeze({
     resolve(__dirname, '../apps/api/src/blockchain/domain/mainnet-launch-network-policy.ts'),
     'utf8',
   ),
+  providerPositionRuntimeRegistrationSource: readFileSync(
+    resolve(
+      __dirname,
+      '../apps/api/src/mainnet-platforms/infrastructure/provider-position-read-runtime.registration.ts',
+    ),
+    'utf8',
+  ),
   mainnetPlatformsModuleSource: readFileSync(
     resolve(__dirname, '../apps/api/src/mainnet-platforms/mainnet-platforms.module.ts'),
     'utf8',
@@ -802,21 +809,23 @@ const EXPECTED_DORMANT_BALANCE_CONSUMER_BLOCKERS = Object.freeze([
 const EXPECTED_DORMANT_PROVIDER_POSITION_READ_BOUNDARY = Object.freeze({
   inspected: true,
   contractValid: true,
-  readerFeatureRegistration: 'MISSING',
-  trustedAssessmentFeatureRegistration: 'MISSING',
-  deadlineRunnerFeatureRegistration: 'MISSING',
+  runtimeFeatureRegistration: 'REGISTERED_INERT',
+  activationPolicy: 'NOT_APPROVED',
+  approvedSourceBindings: 'MISSING',
+  deployedEvidence: 'MISSING',
 } as const);
 const EXPECTED_DORMANT_PROVIDER_POSITION_READ_BOUNDARY_BLOCKERS = Object.freeze([
-  'PROVIDER_POSITION_READER_FEATURE_REGISTRATION_MISSING',
-  'PROVIDER_POSITION_TRUSTED_ASSESSMENT_FEATURE_REGISTRATION_MISSING',
-  'PROVIDER_POSITION_DEADLINE_RUNNER_FEATURE_REGISTRATION_MISSING',
+  'PROVIDER_POSITION_RUNTIME_ACTIVATION_POLICY_NOT_APPROVED',
+  'PROVIDER_POSITION_APPROVED_SOURCE_BINDINGS_MISSING',
+  'PROVIDER_POSITION_DEPLOYED_EVIDENCE_MISSING',
 ] satisfies readonly ProductionPreflightBlockerId[]);
 const INVALID_PROVIDER_POSITION_READ_BOUNDARY = Object.freeze({
   inspected: true,
   contractValid: false,
-  readerFeatureRegistration: 'INVALID',
-  trustedAssessmentFeatureRegistration: 'INVALID',
-  deadlineRunnerFeatureRegistration: 'INVALID',
+  runtimeFeatureRegistration: 'INVALID',
+  activationPolicy: 'INVALID',
+  approvedSourceBindings: 'INVALID',
+  deployedEvidence: 'INVALID',
 } as const);
 const PREFLIGHT_SCRIPT_PATH = resolve(__dirname, 'production-go-live-preflight.ts');
 const RDS_MANAGED_DATABASE_TEMPLATE = APPLICATION_BASELINE;
@@ -1365,8 +1374,8 @@ function mutateProviderPositionReadArtifact(
   };
 }
 
-test('provider-position read inspection pins the exact dormant critical source slice', () => {
-  assert.equal(Object.keys(PROVIDER_POSITION_READ_ARTIFACTS).length, 42);
+test('provider-position read inspection pins the exact inert critical source slice', () => {
+  assert.equal(Object.keys(PROVIDER_POSITION_READ_ARTIFACTS).length, 43);
   const inspected = inspectProviderPositionReadBoundaryArtifacts(PROVIDER_POSITION_READ_ARTIFACTS);
   assert.deepEqual(inspected, EXPECTED_DORMANT_PROVIDER_POSITION_READ_BOUNDARY);
   assert.equal(Object.isFrozen(inspected), true);
@@ -1432,9 +1441,13 @@ test('provider-position read semantic gate contains no disabled-check bypass', (
     'function hasDormantSparkLendEthereumProviderPositionSourceContract(',
     compoundIIIEthereumStart,
   );
+  const inertRegistrationStart = source.indexOf(
+    'function hasInertProviderPositionReadRuntimeRegistrationContract(',
+    sparkLendEthereumStart,
+  );
   const start = source.indexOf(
     'function hasDormantProviderPositionReadBoundaryContract(',
-    sparkLendEthereumStart,
+    inertRegistrationStart,
   );
   const end = source.indexOf('\nfunction ', start + 1);
   assert.ok(
@@ -1449,7 +1462,8 @@ test('provider-position read semantic gate contains no disabled-check bypass', (
       kaminoStart > aaveV3EthereumStart &&
       compoundIIIEthereumStart > kaminoStart &&
       sparkLendEthereumStart > compoundIIIEthereumStart &&
-      start > sparkLendEthereumStart &&
+      inertRegistrationStart > sparkLendEthereumStart &&
+      start > inertRegistrationStart &&
       end > start,
   );
   const semanticGateSource = source
@@ -1699,8 +1713,8 @@ test('provider-position read inspection rejects dormant two-source evidence prod
     ],
     [
       'mainnetPlatformsModuleSource',
-      'providers: [MainnetPlatformDirectoryService, MainnetPlatformsPrivacyInterceptor],',
-      'providers: [MainnetPlatformDirectoryService, MainnetPlatformsPrivacyInterceptor, DormantProviderPositionChainAnchorEvidenceProducer],',
+      '    ProviderPositionReadRuntimeRegistration,\n',
+      '    ProviderPositionReadRuntimeRegistration,\n    DormantProviderPositionChainAnchorEvidenceProducer,\n',
     ],
     [
       'mainnetPlatformsIndexSource',
@@ -1863,8 +1877,8 @@ test('provider-position read inspection rejects dormant candidate-finality drift
     ],
     [
       'mainnetPlatformsModuleSource',
-      'providers: [MainnetPlatformDirectoryService, MainnetPlatformsPrivacyInterceptor],',
-      'providers: [MainnetPlatformDirectoryService, DormantProviderPositionChainAnchorCandidateFinalityFinalizer],',
+      '    ProviderPositionReadRuntimeRegistration,\n',
+      '    ProviderPositionReadRuntimeRegistration,\n    DormantProviderPositionChainAnchorCandidateFinalityFinalizer,\n',
     ],
     [
       'mainnetPlatformsIndexSource',
@@ -2057,8 +2071,8 @@ test('provider-position read inspection rejects dormant Aave V3 Ethereum source 
     ],
     [
       'mainnetPlatformsModuleSource',
-      'providers: [MainnetPlatformDirectoryService, MainnetPlatformsPrivacyInterceptor],',
-      'providers: [MainnetPlatformDirectoryService, DormantAaveV3EthereumProviderPositionSource],',
+      '    ProviderPositionReadRuntimeRegistration,\n',
+      '    ProviderPositionReadRuntimeRegistration,\n    DormantAaveV3EthereumProviderPositionSource,\n',
     ],
     [
       'mainnetPlatformsIndexSource',
@@ -2262,8 +2276,8 @@ test('provider-position read inspection rejects dormant Kamino source drift', ()
     ],
     [
       'mainnetPlatformsModuleSource',
-      'providers: [MainnetPlatformDirectoryService, MainnetPlatformsPrivacyInterceptor],',
-      'providers: [MainnetPlatformDirectoryService, DormantKaminoProviderPositionAdmissionSource],',
+      '    ProviderPositionReadRuntimeRegistration,\n',
+      '    ProviderPositionReadRuntimeRegistration,\n    DormantKaminoProviderPositionAdmissionSource,\n',
     ],
     [
       'mainnetPlatformsIndexSource',
@@ -2517,8 +2531,8 @@ test('provider-position read inspection rejects dormant Compound III Ethereum so
     ],
     [
       'mainnetPlatformsModuleSource',
-      'providers: [MainnetPlatformDirectoryService, MainnetPlatformsPrivacyInterceptor],',
-      'providers: [MainnetPlatformDirectoryService, DormantCompoundIIIEthereumProviderPositionSource],',
+      '    ProviderPositionReadRuntimeRegistration,\n',
+      '    ProviderPositionReadRuntimeRegistration,\n    DormantCompoundIIIEthereumProviderPositionSource,\n',
     ],
     [
       'mainnetPlatformsIndexSource',
@@ -2751,8 +2765,8 @@ test('provider-position read inspection rejects dormant SparkLend Ethereum sourc
     ],
     [
       'mainnetPlatformsModuleSource',
-      'providers: [MainnetPlatformDirectoryService, MainnetPlatformsPrivacyInterceptor],',
-      'providers: [MainnetPlatformDirectoryService, DormantSparkLendEthereumProviderPositionSource],',
+      '    ProviderPositionReadRuntimeRegistration,\n',
+      '    ProviderPositionReadRuntimeRegistration,\n    DormantSparkLendEthereumProviderPositionSource,\n',
     ],
     [
       'mainnetPlatformsIndexSource',
@@ -2965,8 +2979,8 @@ test('provider-position read inspection rejects dormant chain-anchor recorder V2
     ],
     [
       'mainnetPlatformsModuleSource',
-      'providers: [MainnetPlatformDirectoryService, MainnetPlatformsPrivacyInterceptor],',
-      'providers: [MainnetPlatformDirectoryService, PostgresProviderPositionChainAnchorEvidenceRecorder],',
+      '    ProviderPositionReadRuntimeRegistration,\n',
+      '    ProviderPositionReadRuntimeRegistration,\n    PostgresProviderPositionChainAnchorEvidenceRecorder,\n',
     ],
     [
       'mainnetPlatformsIndexSource',
@@ -3287,8 +3301,8 @@ test('provider-position read inspection rejects deadline-bound evidence migratio
     ],
     [
       'mainnetPlatformsModuleSource',
-      'providers: [MainnetPlatformDirectoryService, MainnetPlatformsPrivacyInterceptor],',
-      'providers: [MainnetPlatformDirectoryService, ProviderPositionChainAnchorRecordDeadline],',
+      '    ProviderPositionReadRuntimeRegistration,\n',
+      '    ProviderPositionReadRuntimeRegistration,\n    ProviderPositionChainAnchorRecordDeadline,\n',
     ],
     [
       'mainnetPlatformsIndexSource',
@@ -3451,8 +3465,8 @@ test('provider-position read inspection rejects record-intent reconciliation dri
     ],
     [
       'mainnetPlatformsModuleSource',
-      'providers: [MainnetPlatformDirectoryService, MainnetPlatformsPrivacyInterceptor],',
-      'providers: [MainnetPlatformDirectoryService, PostgresProviderPositionChainAnchorRecordIntentReconciliationProcessor],',
+      '    ProviderPositionReadRuntimeRegistration,\n',
+      '    ProviderPositionReadRuntimeRegistration,\n    PostgresProviderPositionChainAnchorRecordIntentReconciliationProcessor,\n',
     ],
     [
       'mainnetPlatformsIndexSource',
@@ -3530,8 +3544,8 @@ test('provider-position read inspection rejects reconciliation lifecycle drift',
     ],
     [
       'mainnetPlatformsModuleSource',
-      'providers: [MainnetPlatformDirectoryService, MainnetPlatformsPrivacyInterceptor],',
-      'providers: [MainnetPlatformDirectoryService, DormantProviderPositionChainAnchorRecordIntentReconciliationLifecycle],',
+      '    ProviderPositionReadRuntimeRegistration,\n',
+      '    ProviderPositionReadRuntimeRegistration,\n    DormantProviderPositionChainAnchorRecordIntentReconciliationLifecycle,\n',
     ],
     [
       'mainnetPlatformsIndexSource',
@@ -4245,34 +4259,50 @@ test('provider-position read inspection rejects trust, runtime bounds, coverage,
     ['providerPositionCoverageSource', "if (target.status !== 'COMPLETE') {", 'if (false) {'],
     ['providerPositionObservationSource', 'chainAssessmentVerifier.verify(', 'Boolean('],
     [
-      'mainnetPlatformsModuleSource',
-      'providers: [MainnetPlatformDirectoryService, MainnetPlatformsPrivacyInterceptor],',
-      'providers: [MainnetPlatformDirectoryService, MainnetPlatformsPrivacyInterceptor, MAINNET_PROVIDER_POSITION_READER],',
+      'providerPositionRuntimeRegistrationSource',
+      "approvalStatus: 'NOT_APPROVED' as const,",
+      "approvalStatus: 'APPROVED' as const,",
+    ],
+    [
+      'providerPositionRuntimeRegistrationSource',
+      "activationStatus: 'DISABLED' as const,",
+      "activationStatus: 'ENABLED' as const,",
+    ],
+    [
+      'providerPositionRuntimeRegistrationSource',
+      'registrations: Object.freeze([]) as readonly never[],',
+      "registrations: Object.freeze([{ providerId: 'unreviewed' }]) as never,",
+    ],
+    [
+      'providerPositionRuntimeRegistrationSource',
+      "'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp',",
+      "'eip155:8453',",
+    ],
+    ['providerPositionRuntimeRegistrationSource', 'void request;', 'void request.accountId;'],
+    [
+      'providerPositionRuntimeRegistrationSource',
+      'return unavailable();',
+      'return Promise.resolve({} as MainnetProviderPositionReadResultV3);',
     ],
     [
       'mainnetPlatformsModuleSource',
-      'providers: [MainnetPlatformDirectoryService, MainnetPlatformsPrivacyInterceptor],',
-      'providers: [MainnetPlatformDirectoryService, MainnetPlatformsPrivacyInterceptor, NodeProviderPositionAdmissionDeadlineRunner],',
+      'provide: MAINNET_PROVIDER_POSITION_READER,',
+      'provide: ProviderPositionReadRuntimeRegistration,',
     ],
     [
       'mainnetPlatformsModuleSource',
-      'providers: [MainnetPlatformDirectoryService, MainnetPlatformsPrivacyInterceptor],',
-      'providers: [MainnetPlatformDirectoryService, MainnetPlatformsPrivacyInterceptor, createDormantProviderPositionAdmissionRuntimeResource],',
+      'useFactory: (registration: ProviderPositionReadRuntimeRegistration) => registration.reader,',
+      'useFactory: (registration: ProviderPositionReadRuntimeRegistration) => registration,',
     ],
     [
       'mainnetPlatformsModuleSource',
-      'providers: [MainnetPlatformDirectoryService, MainnetPlatformsPrivacyInterceptor],',
-      'providers: [MainnetPlatformDirectoryService, MainnetPlatformsPrivacyInterceptor, createDormantProviderPositionAdmissionRuntimeComposition],',
+      'ProviderPositionReadRuntimeRegistration,',
+      'NodeProviderPositionAdmissionDeadlineRunner,',
     ],
     [
       'mainnetPlatformsModuleSource',
-      'providers: [MainnetPlatformDirectoryService, MainnetPlatformsPrivacyInterceptor],',
-      'providers: [MainnetPlatformDirectoryService, MainnetPlatformsPrivacyInterceptor, DormantProviderPositionTrustedChainAssessmentAssembler],',
-    ],
-    [
-      'mainnetPlatformsModuleSource',
-      'providers: [MainnetPlatformDirectoryService, MainnetPlatformsPrivacyInterceptor],',
-      'providers: [MainnetPlatformDirectoryService, MainnetPlatformsPrivacyInterceptor, PostgresProviderPositionDurableChainAnchorReader],',
+      'controllers: [MainnetPlatformsController],',
+      'controllers: [MainnetPlatformsController, ProviderPositionsController],',
     ],
     [
       'mainnetPlatformsIndexSource',
@@ -4382,7 +4412,7 @@ test('provider-position read artifact shape and private brand fail closed', () =
     Object.fromEntries(
       Object.keys(PROVIDER_POSITION_READ_ARTIFACTS).map((key) => [
         key,
-        'x'.repeat(Math.floor((1088 * 1024) / 42) + 1),
+        'x'.repeat(Math.floor((1088 * 1024) / 43) + 1),
       ]),
     ),
     accessor,
@@ -6543,14 +6573,14 @@ test('repository loader brands the bounded full API runtime absence attestation'
   assert.equal(Object.isFrozen(attestation), true);
   assert.deepEqual(attestation, {
     inspected: true,
-    sourceFileCount: 388,
-    sourceBytes: 5_864_621,
+    sourceFileCount: 389,
+    sourceBytes: 5_869_308,
     repositorySnapshotSha256: attestation?.repositorySnapshotSha256,
     concreteDeploymentIdentityRegistration: 'ABSENT',
   });
   assert.equal(
     attestation?.repositorySnapshotSha256,
-    '941a7469b770f21cc37f1b39425061694b56e6198c9afb79e099313ecf5f1769',
+    'a1479da28d229c2add6e07a9f4de88d74c6fceeac99e108bf558e47326ffe4c4',
   );
 });
 

@@ -605,14 +605,22 @@ PostgreSQL recorder, record-intent reconciliation processor, bounded
 reconciliation lifecycle, trusted assembly, deadline runner, runtime-budget
 resource, or runtime composition.
 
-The current exact source passes local inspection. The dormant runtime-budget
-resource constructs a lazy pool from its owned reviewed API configuration and
-returns that pool with the exact frozen admission-options snapshot. A private
-dormant composition now consumes that exact pool and options object into the
-concrete PostgreSQL -> wallet repository -> wallet service -> portfolio wallet
-reader -> deadline runner -> private PostgreSQL durable reader -> private trusted
-assembler -> coordinator
-graph. Its outer facade retains
+The current exact source passes local inspection. The mainnet feature module now
+registers only a lifecycle owner and its narrow reader-v3 token. The owner's
+source-authored mainnet registry is exactly Ethereum plus Solana, empty,
+`NOT_APPROVED`, and `DISABLED`; it cannot be populated through environment or
+secret input. Its frozen null-prototype reader rejects as unavailable without
+inspecting the request and owns no provider, endpoint, credential, database,
+timer, writer, or asynchronous work. No provider-position route or transaction
+capability is exposed.
+
+Separately, the dormant runtime-budget resource constructs a lazy pool from its
+owned reviewed API configuration and returns that pool with the exact frozen
+admission-options snapshot. A private dormant composition consumes that exact
+pool and options object into the concrete PostgreSQL -> wallet repository ->
+wallet service -> portfolio wallet reader -> deadline runner -> private
+PostgreSQL durable reader -> private trusted assembler -> coordinator graph. Its
+outer facade retains
 diagnostic admission, admission-and-assembly, and memoized close operations. A
 separate frozen null-prototype reader sub-capability exposes only its three
 version fields and `readCurrentPositions`; it invokes only the
@@ -624,22 +632,21 @@ failure drains the owned PostgreSQL service when present and ends the same pool.
 Composition close first seals and aborts coordinator admission, attempts every
 captured active controller even if one abort throws, closes/drains PostgreSQL
 roster work, waits all admitted facade calls, and only then ends the pool. The
-resource and composition remain absent from the feature module, barrel, and
-controller, so this closes only the local dormant configuration-to-coordinator
-ordering gap.
+runtime-budget resource, composition, sources, assembler, durable reader,
+recorder, finalizer, and deadline runner remain absent from the feature module,
+barrel, and controller. The registered token therefore closes only the inert
+application wiring gap; it does not activate the private dormant graph.
 
 Launch readiness remains blocked by
-`PROVIDER_POSITION_READER_FEATURE_REGISTRATION_MISSING` and
-`PROVIDER_POSITION_TRUSTED_ASSESSMENT_FEATURE_REGISTRATION_MISSING`, plus
-`PROVIDER_POSITION_DEADLINE_RUNNER_FEATURE_REGISTRATION_MISSING`. The concrete
-assembler, PostgreSQL reader, and migration do not clear any registration
-blocker: the dormant producer is not composed, its checked-in production
-registry approves no pair, the finalizer is not composed, no live
-evidence-source implementation exists, and the concrete recorder and
-reconciliation processor have no owner-authorized
+`PROVIDER_POSITION_RUNTIME_ACTIVATION_POLICY_NOT_APPROVED`,
+`PROVIDER_POSITION_APPROVED_SOURCE_BINDINGS_MISSING`, and
+`PROVIDER_POSITION_DEPLOYED_EVIDENCE_MISSING`. The inert token registration does
+not clear these blockers: the dormant producer is not composed, its checked-in
+production registry approves no pair, the finalizer is not composed, no live
+evidence-source implementation exists, and the concrete assembler, PostgreSQL
+reader, recorder, and reconciliation processor have no owner-authorized
 workload, principal, credential, grant, composition, schedule, deployment, or
-populated evidence claim. The private
-composition wiring is not registered in the
+populated evidence claim. The private composition is not registered in the
 Nest/module/HTTP graph, no runtime is activated, and no deployment or live
 evidence exists. The live-provider count, `liveReadEvidenceBound`, and
 `transactionEvidenceBound` therefore all remain zero. The concrete
@@ -1051,6 +1058,11 @@ For the finality-aware provider-position preflight milestone implemented in
 slice. The later Aave, Kamino, Compound, and Spark preflight integrations are
 committed in `ecff5b9`, `b41cc62`, `91bd9bc`, and `2978367`; the resulting exact
 42-artifact slice passed all 68 cases in a current focused rerun.
+Registration commit `7617800` adds the separately pinned inert runtime owner and
+module wiring; the resulting 43-artifact slice passes all 81 focused cases. The
+reviewed whole-API runtime snapshot now contains 389 files and 5,869,308 bytes
+with SHA-256
+`a1479da28d229c2add6e07a9f4de88d74c6fceeac99e108bf558e47326ffe4c4`.
 The record-intent migration was also exercised
 in a disposable local PostgreSQL 16 instance: all six focused integration cases
 passed, covering clean up/down/up migration verification, Ethereum and Solana

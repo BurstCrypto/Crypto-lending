@@ -78,9 +78,9 @@ export type ProductionPreflightBlockerId =
   | 'BALANCE_CONSUMER_SOLANA_PYUSD_TOKEN_2022_POLICY_EVIDENCE_MISSING'
   | 'BALANCE_CONSUMER_DEPLOYMENT_MANIFEST_FINGERPRINT_APPROVAL_MISSING'
   | 'PROVIDER_POSITION_READ_BOUNDARY_INSPECTION_FAILED'
-  | 'PROVIDER_POSITION_READER_FEATURE_REGISTRATION_MISSING'
-  | 'PROVIDER_POSITION_TRUSTED_ASSESSMENT_FEATURE_REGISTRATION_MISSING'
-  | 'PROVIDER_POSITION_DEADLINE_RUNNER_FEATURE_REGISTRATION_MISSING'
+  | 'PROVIDER_POSITION_RUNTIME_ACTIVATION_POLICY_NOT_APPROVED'
+  | 'PROVIDER_POSITION_APPROVED_SOURCE_BINDINGS_MISSING'
+  | 'PROVIDER_POSITION_DEPLOYED_EVIDENCE_MISSING'
   | 'AUTH_DEPLOYED_EVIDENCE_MISSING'
   | 'AUTH_PRODUCTION_CONFIGURATION_NOT_WIRED'
   | 'AUTH_PRODUCTION_SECRET_REFERENCES_NOT_WIRED'
@@ -330,6 +330,7 @@ export interface ProviderPositionReadBoundaryArtifactSources {
   readonly providerPositionChainAssessmentSource: string;
   readonly providerPositionObservationPolicySource: string;
   readonly mainnetLaunchNetworkPolicySource: string;
+  readonly providerPositionRuntimeRegistrationSource: string;
   readonly mainnetPlatformsModuleSource: string;
   readonly mainnetPlatformsIndexSource: string;
   readonly mainnetPlatformsControllerSource: string;
@@ -338,9 +339,10 @@ export interface ProviderPositionReadBoundaryArtifactSources {
 export interface ProviderPositionReadBoundaryInput {
   readonly inspected: boolean;
   readonly contractValid: boolean;
-  readonly readerFeatureRegistration: 'INVALID' | 'MISSING';
-  readonly trustedAssessmentFeatureRegistration: 'INVALID' | 'MISSING';
-  readonly deadlineRunnerFeatureRegistration: 'INVALID' | 'MISSING';
+  readonly runtimeFeatureRegistration: 'INVALID' | 'REGISTERED_INERT';
+  readonly activationPolicy: 'INVALID' | 'NOT_APPROVED';
+  readonly approvedSourceBindings: 'INVALID' | 'MISSING';
+  readonly deployedEvidence: 'INVALID' | 'MISSING';
 }
 
 const VERIFIED_PROVIDER_POSITION_READ_BOUNDARIES = new WeakSet<ProviderPositionReadBoundaryInput>();
@@ -716,6 +718,7 @@ const PROVIDER_POSITION_READ_ARTIFACT_KEYS = Object.freeze([
   'providerPositionChainAssessmentSource',
   'providerPositionObservationPolicySource',
   'mainnetLaunchNetworkPolicySource',
+  'providerPositionRuntimeRegistrationSource',
   'mainnetPlatformsModuleSource',
   'mainnetPlatformsIndexSource',
   'mainnetPlatformsControllerSource',
@@ -798,7 +801,9 @@ const REVIEWED_PROVIDER_POSITION_READ_ARTIFACT_SHA256 = Object.freeze({
     '10896fb907d937aa88ee0da570331faccce77f46642732e6676385676c6a7ea3',
   mainnetLaunchNetworkPolicySource:
     '922305d75e17b9519ffae415c139514bc0fce2e162f0d764c6c24b895911f15b',
-  mainnetPlatformsModuleSource: '52a2817a03db43b6842fa42e0c8264f760250f8364511607d0329677f535e045',
+  providerPositionRuntimeRegistrationSource:
+    '7f43b819c461a8d770befe2b858dc745ad7478fe3797f6babf5aa2d927a84e06',
+  mainnetPlatformsModuleSource: 'af02f6bc3f20ee932513bfdee0709b63ce26848c5db11ce431d410dd769158d6',
   mainnetPlatformsIndexSource: '9bb69ec94f17d4336bfbb60da946e84af89812a07431b3870656f02d2a542365',
   mainnetPlatformsControllerSource:
     'a713200b67f0cf67c50b56c94f707f94f7383c52e3d59f4368868710b099b55d',
@@ -1530,9 +1535,10 @@ export function evaluateProductionPreflight(
     providerPositionReadBoundaryInspected =
       providerPositionReadBoundary?.inspected === true &&
       providerPositionReadBoundary.contractValid === true &&
-      providerPositionReadBoundary.readerFeatureRegistration === 'MISSING' &&
-      providerPositionReadBoundary.trustedAssessmentFeatureRegistration === 'MISSING' &&
-      providerPositionReadBoundary.deadlineRunnerFeatureRegistration === 'MISSING' &&
+      providerPositionReadBoundary.runtimeFeatureRegistration === 'REGISTERED_INERT' &&
+      providerPositionReadBoundary.activationPolicy === 'NOT_APPROVED' &&
+      providerPositionReadBoundary.approvedSourceBindings === 'MISSING' &&
+      providerPositionReadBoundary.deployedEvidence === 'MISSING' &&
       VERIFIED_PROVIDER_POSITION_READ_BOUNDARIES.has(providerPositionReadBoundary);
   } catch {
     // Initialized fail-closed values are preserved for malformed or hostile inputs.
@@ -1541,9 +1547,9 @@ export function evaluateProductionPreflight(
     providerPositionReadBoundaryBlockers.push('PROVIDER_POSITION_READ_BOUNDARY_INSPECTION_FAILED');
   } else {
     providerPositionReadBoundaryBlockers.push(
-      'PROVIDER_POSITION_READER_FEATURE_REGISTRATION_MISSING',
-      'PROVIDER_POSITION_TRUSTED_ASSESSMENT_FEATURE_REGISTRATION_MISSING',
-      'PROVIDER_POSITION_DEADLINE_RUNNER_FEATURE_REGISTRATION_MISSING',
+      'PROVIDER_POSITION_RUNTIME_ACTIVATION_POLICY_NOT_APPROVED',
+      'PROVIDER_POSITION_APPROVED_SOURCE_BINDINGS_MISSING',
+      'PROVIDER_POSITION_DEPLOYED_EVIDENCE_MISSING',
     );
   }
 
@@ -6588,6 +6594,135 @@ function hasDormantSparkLendEthereumProviderPositionSourceContract(
   );
 }
 
+function hasInertProviderPositionReadRuntimeRegistrationContract(
+  registrationSourceInput: string,
+  moduleSourceInput: string,
+  indexSourceInput: string,
+  controllerSourceInput: string,
+): boolean {
+  const registration = registrationSourceInput.replace(/\r\n/gu, '\n');
+  const moduleSource = moduleSourceInput.replace(/\r\n/gu, '\n');
+  const indexSource = indexSourceInput.replace(/\r\n/gu, '\n');
+  const controller = controllerSourceInput.replace(/\r\n/gu, '\n');
+  const registrationImports = sortedTypeScriptImportTargets(registration);
+  const moduleImports = sortedTypeScriptImportTargets(moduleSource);
+  const forbiddenRegistrationCapability =
+    /(?:\bimport\s*\(|\brequire\s*\(|(?:\bfrom\s+|\bimport\s*(?:\(\s*)?)['"](?:node:)?(?:child_process|cluster|dgram|dns|fs|http|http2|https|net|tls|worker_threads)(?:\/[^'"]*)?['"]|(?:\bfrom\s+|\bimport\s*(?:\(\s*)?)['"](?:axios|ethers|got|pg|superagent|undici|web3|@solana\/web3\.js)['"]|\b(?:fetch|setTimeout|setInterval|setImmediate|queueMicrotask|WebSocket|EventSource|XMLHttpRequest|readFileSync|writeFileSync)\s*\(|\.\s*(?:query|connect|end|execute|transaction|persist|save|write)\s*\(|\b(?:process|Deno|Bun)\s*\.\s*env\b|\bimport\s*\.\s*meta\s*\.\s*env\b|['"]https?:\/\/|\b(?:NestFactory|PostgresService|DataSource|EntityManager|Repository|Pool|createPostgresPool|createDormantProviderPositionAdmissionRuntimeComposition|NodeProviderPositionAdmissionDeadlineRunner|DormantProviderPositionTrustedChainAssessmentAssembler|PostgresProviderPositionDurableChainAnchorReader)\b)/u;
+  const forbiddenModuleCapability =
+    /(?:provider-position-admission-runtime\.(?:composition|bounds)|node-provider-position-admission-deadline\.runner|dormant-provider-position-trusted-chain-assessment\.assembler|postgres-provider-position-durable-chain-anchor\.reader|\b(?:NestFactory|PostgresService|Pool|createPostgresPool|createDormantProviderPositionAdmissionRuntimeComposition|NodeProviderPositionAdmissionDeadlineRunner|DormantProviderPositionTrustedChainAssessmentAssembler|PostgresProviderPositionDurableChainAnchorReader)\b)/u;
+  const expectedRegistrationImports = [
+    '@nestjs/common',
+    '../application/ports/mainnet-provider-position-reader.port',
+    '../domain/mainnet-provider-position-coverage',
+    '../domain/mainnet-provider-position-observation',
+  ].sort(compareUtf8);
+  const expectedModuleImports = [
+    '../accounts/accounts.module',
+    '../authentication/authentication.module',
+    './application/mainnet-platform-directory.service',
+    './application/ports/mainnet-provider-position-reader.port',
+    './http/mainnet-platforms.controller',
+    './http/mainnet-platforms-privacy.interceptor',
+    './infrastructure/provider-position-read-runtime.registration',
+    '@nestjs/common',
+  ].sort(compareUtf8);
+
+  return (
+    registrationImports.join('\0') === expectedRegistrationImports.join('\0') &&
+    moduleImports.join('\0') === expectedModuleImports.join('\0') &&
+    !forbiddenRegistrationCapability.test(registration) &&
+    !forbiddenModuleCapability.test(moduleSource) &&
+    exactExecutableLineCount(
+      registration,
+      "'PROVIDER_POSITION_READ_RUNTIME_REGISTRATION_ONLY' as const;",
+    ) === 1 &&
+    exactExecutableLineCount(registration, "'eip155:1',") === 1 &&
+    exactExecutableLineCount(registration, "'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp',") === 1 &&
+    !registration.includes('eip155:8453') &&
+    !registration.includes('eip155:42161') &&
+    exactExecutableLineCount(registration, "readonly environment: 'MAINNET';") === 1 &&
+    exactExecutableLineCount(registration, "readonly approvalStatus: 'NOT_APPROVED';") === 1 &&
+    exactExecutableLineCount(registration, "readonly activationStatus: 'DISABLED';") === 1 &&
+    exactExecutableLineCount(registration, 'readonly mayAuthorizeFinancialAction: false;') === 1 &&
+    exactExecutableLineCount(registration, 'readonly mayPersist: false;') === 1 &&
+    exactExecutableLineCount(registration, 'readonly registrations: readonly never[];') === 1 &&
+    exactExecutableLineCount(registration, "approvalStatus: 'NOT_APPROVED' as const,") === 1 &&
+    exactExecutableLineCount(registration, "activationStatus: 'DISABLED' as const,") === 1 &&
+    exactExecutableLineCount(registration, 'mayAuthorizeFinancialAction: false as const,') === 1 &&
+    exactExecutableLineCount(registration, 'mayPersist: false as const,') === 1 &&
+    exactExecutableLineCount(
+      registration,
+      'registrations: Object.freeze([]) as readonly never[],',
+    ) === 1 &&
+    exactExecutableLineCount(
+      registration,
+      "readonly code = 'PROVIDER_POSITION_READ_RUNTIME_NOT_APPROVED' as const;",
+    ) === 1 &&
+    exactExecutableLineCount(
+      registration,
+      'return Promise.reject(new ProviderPositionReadRuntimeUnavailableError());',
+    ) === 1 &&
+    exactExecutableLineCount(
+      registration,
+      'return Object.freeze(Object.assign(Object.create(null) as T, members));',
+    ) === 1 &&
+    exactExecutableLineCount(registration, '@Injectable()') === 1 &&
+    exactExecutableLineCount(
+      registration,
+      'export class ProviderPositionReadRuntimeRegistration implements OnApplicationShutdown {',
+    ) === 1 &&
+    exactExecutableLineCount(
+      registration,
+      'this.reader = frozenNullPrototype<MainnetProviderPositionReaderV3>({',
+    ) === 1 &&
+    exactExecutableLineCount(
+      registration,
+      'readerVersion: MAINNET_PROVIDER_POSITION_READER_VERSION,',
+    ) === 1 &&
+    exactExecutableLineCount(
+      registration,
+      'positionSchemaVersion: MAINNET_PROVIDER_POSITION_SCHEMA_VERSION,',
+    ) === 1 &&
+    exactExecutableLineCount(
+      registration,
+      'coverageVersion: MAINNET_PROVIDER_POSITION_COVERAGE_VERSION,',
+    ) === 1 &&
+    exactExecutableLineCount(registration, 'void request;') === 1 &&
+    exactExecutableLineCount(registration, 'return unavailable();') === 1 &&
+    exactExecutableLineCount(registration, 'onApplicationShutdown(): void {') === 1 &&
+    exactExecutableLineCount(
+      moduleSource,
+      "import { MAINNET_PROVIDER_POSITION_READER } from './application/ports/mainnet-provider-position-reader.port';",
+    ) === 1 &&
+    exactExecutableLineCount(
+      moduleSource,
+      "import { ProviderPositionReadRuntimeRegistration } from './infrastructure/provider-position-read-runtime.registration';",
+    ) === 1 &&
+    exactExecutableLineCount(moduleSource, 'ProviderPositionReadRuntimeRegistration,') === 1 &&
+    exactExecutableLineCount(moduleSource, 'provide: MAINNET_PROVIDER_POSITION_READER,') === 1 &&
+    exactExecutableLineCount(moduleSource, 'inject: [ProviderPositionReadRuntimeRegistration],') ===
+      1 &&
+    exactExecutableLineCount(
+      moduleSource,
+      'useFactory: (registration: ProviderPositionReadRuntimeRegistration) => registration.reader,',
+    ) === 1 &&
+    exactExecutableLineCount(
+      moduleSource,
+      'exports: [MainnetPlatformDirectoryService, MAINNET_PROVIDER_POSITION_READER],',
+    ) === 1 &&
+    exactExecutableLineCount(moduleSource, 'controllers: [MainnetPlatformsController],') === 1 &&
+    !indexSource.includes('provider-position-read-runtime.registration') &&
+    !indexSource.includes('ProviderPositionReadRuntimeRegistration') &&
+    !controller.includes('MAINNET_PROVIDER_POSITION_READER') &&
+    !controller.includes('MainnetProviderPositionReader') &&
+    !controller.includes('ProviderPositionReadRuntimeRegistration') &&
+    exactExecutableLineCount(
+      controller,
+      'constructor(private readonly directory: MainnetPlatformDirectoryService) {}',
+    ) === 1
+  );
+}
+
 function hasDormantProviderPositionReadBoundaryContract(
   sources: ProviderPositionReadBoundaryArtifactSources,
 ): boolean {
@@ -6679,6 +6814,10 @@ function hasDormantProviderPositionReadBoundaryContract(
   const chainAssessment = sources.providerPositionChainAssessmentSource.replace(/\r\n/gu, '\n');
   const policy = sources.providerPositionObservationPolicySource.replace(/\r\n/gu, '\n');
   const mainnetLaunchNetworkPolicy = sources.mainnetLaunchNetworkPolicySource.replace(
+    /\r\n/gu,
+    '\n',
+  );
+  const runtimeRegistration = sources.providerPositionRuntimeRegistrationSource.replace(
     /\r\n/gu,
     '\n',
   );
@@ -7521,14 +7660,22 @@ function hasDormantProviderPositionReadBoundaryContract(
     'if (record.sourceObservationId !== expectedSourceObservationId) {',
     coordinatorCanonicalSourceIdentity,
   );
-  const forbiddenRuntimeIdentity =
-    /\b(?:MAINNET_PROVIDER_POSITION_READER|DormantProviderPositionAdmissionCoordinator|ProviderPositionTrustedChainAssessmentAssemblyPort|ProviderPositionDurableChainAnchorReaderPort|ProviderPositionChainAnchorEvidenceSourcePort|DormantProviderPositionChainAnchorEvidenceProducer|ProviderPositionChainAnchorEvidenceRecorderPort|PostgresProviderPositionChainAnchorEvidenceRecorder|DormantProviderPositionTrustedChainAssessmentAssembler|PostgresProviderPositionDurableChainAnchorReader|NodeProviderPositionAdmissionDeadlineRunner|createDormantProviderPositionAdmissionRuntimeResource|DormantProviderPositionAdmissionRuntimeResource|ProviderPositionAdmissionRuntimeBoundsError|createDormantProviderPositionAdmissionRuntimeComposition|DormantProviderPositionAdmissionRuntimeComposition|ProviderPositionAdmissionRuntimeCompositionError|PROVIDER_POSITION_TRUSTED_CHAIN_ASSESSMENT_ASSEMBLY_USE|PROVIDER_POSITION_DURABLE_CHAIN_ANCHOR_READER_VERSION|PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_SOURCE_PAIR_REGISTRY_V1|PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_PRODUCER_VERSION|PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_RECORDER_VERSION)\b/u;
+  const forbiddenModuleRuntimeIdentity =
+    /\b(?:DormantProviderPositionAdmissionCoordinator|ProviderPositionTrustedChainAssessmentAssemblyPort|ProviderPositionDurableChainAnchorReaderPort|ProviderPositionChainAnchorEvidenceSourcePort|DormantProviderPositionChainAnchorEvidenceProducer|ProviderPositionChainAnchorEvidenceRecorderPort|PostgresProviderPositionChainAnchorEvidenceRecorder|DormantProviderPositionTrustedChainAssessmentAssembler|PostgresProviderPositionDurableChainAnchorReader|NodeProviderPositionAdmissionDeadlineRunner|createDormantProviderPositionAdmissionRuntimeResource|DormantProviderPositionAdmissionRuntimeResource|ProviderPositionAdmissionRuntimeBoundsError|createDormantProviderPositionAdmissionRuntimeComposition|DormantProviderPositionAdmissionRuntimeComposition|ProviderPositionAdmissionRuntimeCompositionError|PROVIDER_POSITION_TRUSTED_CHAIN_ASSESSMENT_ASSEMBLY_USE|PROVIDER_POSITION_DURABLE_CHAIN_ANCHOR_READER_VERSION|PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_SOURCE_PAIR_REGISTRY_V1|PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_PRODUCER_VERSION|PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_RECORDER_VERSION)\b/u;
+  const forbiddenControllerRuntimeIdentity =
+    /\b(?:MAINNET_PROVIDER_POSITION_READER|ProviderPositionReadRuntimeRegistration|DormantProviderPositionAdmissionCoordinator|ProviderPositionTrustedChainAssessmentAssemblyPort|ProviderPositionDurableChainAnchorReaderPort|ProviderPositionChainAnchorEvidenceSourcePort|DormantProviderPositionChainAnchorEvidenceProducer|ProviderPositionChainAnchorEvidenceRecorderPort|PostgresProviderPositionChainAnchorEvidenceRecorder|DormantProviderPositionTrustedChainAssessmentAssembler|PostgresProviderPositionDurableChainAnchorReader|NodeProviderPositionAdmissionDeadlineRunner|createDormantProviderPositionAdmissionRuntimeResource|DormantProviderPositionAdmissionRuntimeResource|ProviderPositionAdmissionRuntimeBoundsError|createDormantProviderPositionAdmissionRuntimeComposition|DormantProviderPositionAdmissionRuntimeComposition|ProviderPositionAdmissionRuntimeCompositionError|PROVIDER_POSITION_TRUSTED_CHAIN_ASSESSMENT_ASSEMBLY_USE|PROVIDER_POSITION_DURABLE_CHAIN_ANCHOR_READER_VERSION|PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_SOURCE_PAIR_REGISTRY_V1|PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_PRODUCER_VERSION|PROVIDER_POSITION_CHAIN_ANCHOR_EVIDENCE_RECORDER_VERSION)\b/u;
   const forbiddenBarrelImplementation =
     /(?:DormantProviderPositionAdmissionCoordinator|ProviderPositionTrustedChainAssessmentAssemblyPort|ProviderPositionDurableChainAnchorReaderPort|ProviderPositionChainAnchorEvidenceSourcePort|DormantProviderPositionChainAnchorEvidenceProducer|ProviderPositionChainAnchorEvidenceRecorderPort|PostgresProviderPositionChainAnchorEvidenceRecorder|DormantProviderPositionTrustedChainAssessmentAssembler|PostgresProviderPositionDurableChainAnchorReader|NodeProviderPositionAdmissionDeadlineRunner|createDormantProviderPositionAdmissionRuntimeResource|createDormantProviderPositionAdmissionRuntimeComposition|provider-position-admission\.coordinator|provider-position-trusted-chain-assessment-assembly\.port|provider-position-durable-chain-anchor-reader\.port|provider-position-chain-anchor-evidence-source\.port|provider-position-chain-anchor-evidence-recorder\.port|dormant-provider-position-chain-anchor-evidence\.producer|postgres-provider-position-chain-anchor-evidence\.recorder|dormant-provider-position-trusted-chain-assessment\.assembler|postgres-provider-position-durable-chain-anchor\.reader|node-provider-position-admission-deadline\.runner|provider-position-admission-runtime-bounds|provider-position-admission-runtime\.composition)/u;
   const forbiddenCoordinatorRuntimeBoundsConsumption =
     /(?:createDormantProviderPositionAdmissionRuntimeResource|provider-position-admission-runtime-bounds)/u;
 
   return (
+    hasInertProviderPositionReadRuntimeRegistrationContract(
+      runtimeRegistration,
+      moduleSource,
+      indexSource,
+      controller,
+    ) &&
     hasDormantProviderPositionChainAnchorEvidenceMigrationContract(
       chainAnchorEvidenceMigration,
       migrationIndex,
@@ -8775,13 +8922,8 @@ function hasDormantProviderPositionReadBoundaryContract(
       policy,
       'export const MAINNET_PROVIDER_POSITION_OBSERVATION_POLICY_VERSION = 1 as const;',
     ) === 1 &&
-    exactExecutableLineCount(
-      moduleSource,
-      'providers: [MainnetPlatformDirectoryService, MainnetPlatformsPrivacyInterceptor],',
-    ) === 1 &&
-    exactExecutableLineCount(moduleSource, 'exports: [MainnetPlatformDirectoryService],') === 1 &&
-    !forbiddenRuntimeIdentity.test(moduleSource) &&
-    !forbiddenRuntimeIdentity.test(controller) &&
+    !forbiddenModuleRuntimeIdentity.test(moduleSource) &&
+    !forbiddenControllerRuntimeIdentity.test(controller) &&
     !forbiddenBarrelImplementation.test(indexSource) &&
     !indexSource.includes('isIssuedProviderPositionAdmissionReadOnlyAssemblyV1') &&
     exactExecutableLineCount(indexSource, 'MainnetProviderPositionReadResultV3,') === 1 &&
@@ -8812,7 +8954,7 @@ const API_RUNTIME_PINNED_INPUT_PATHS = Object.freeze([
   'tsconfig.json',
 ]);
 const REVIEWED_API_RUNTIME_REPOSITORY_SNAPSHOT_SHA256 =
-  '941a7469b770f21cc37f1b39425061694b56e6198c9afb79e099313ecf5f1769';
+  'a1479da28d229c2add6e07a9f4de88d74c6fceeac99e108bf558e47326ffe4c4';
 const API_RUNTIME_OWNED_DEPLOYMENT_IDENTITY_PATHS = new Set([
   'blockchain-sync/infrastructure/rpc/ethereum-mainnet-balance-deployment-identity.verifier.ts',
   'blockchain-sync/infrastructure/rpc/ethereum-mainnet-balance-deployment.manifest.ts',
@@ -15321,10 +15463,10 @@ export function inspectBalanceConsumerDeploymentArtifacts(
 }
 
 /**
- * Recognizes only the exact source-authored, dormant provider-position read
- * boundary and private composition. Passing this inspection neither
- * instantiates nor registers that graph and does not authorize provider,
- * network, persistence, or financial capabilities.
+ * Recognizes only the exact source-authored provider-position read boundary,
+ * private dormant composition, and inert Nest registration. Passing this
+ * inspection does not activate that graph or authorize provider, network,
+ * persistence, or financial capabilities.
  */
 export function inspectProviderPositionReadBoundaryArtifacts(
   value: unknown,
@@ -15333,9 +15475,10 @@ export function inspectProviderPositionReadBoundaryArtifacts(
     Object.freeze({
       inspected,
       contractValid: false,
-      readerFeatureRegistration: 'INVALID',
-      trustedAssessmentFeatureRegistration: 'INVALID',
-      deadlineRunnerFeatureRegistration: 'INVALID',
+      runtimeFeatureRegistration: 'INVALID',
+      activationPolicy: 'INVALID',
+      approvedSourceBindings: 'INVALID',
+      deployedEvidence: 'INVALID',
     });
   try {
     const sources = snapshotProviderPositionReadBoundaryArtifactSources(value);
@@ -15347,9 +15490,10 @@ export function inspectProviderPositionReadBoundaryArtifacts(
     const result: ProviderPositionReadBoundaryInput = Object.freeze({
       inspected: true,
       contractValid: true,
-      readerFeatureRegistration: 'MISSING',
-      trustedAssessmentFeatureRegistration: 'MISSING',
-      deadlineRunnerFeatureRegistration: 'MISSING',
+      runtimeFeatureRegistration: 'REGISTERED_INERT',
+      activationPolicy: 'NOT_APPROVED',
+      approvedSourceBindings: 'MISSING',
+      deployedEvidence: 'MISSING',
     });
     VERIFIED_PROVIDER_POSITION_READ_BOUNDARIES.add(result);
     return result;
@@ -16603,6 +16747,13 @@ export function loadRepositoryProductionPreflightInput(
       ),
       mainnetLaunchNetworkPolicySource: readFileSync(
         resolve(repositoryRoot, 'apps/api/src/blockchain/domain/mainnet-launch-network-policy.ts'),
+        'utf8',
+      ),
+      providerPositionRuntimeRegistrationSource: readFileSync(
+        resolve(
+          repositoryRoot,
+          'apps/api/src/mainnet-platforms/infrastructure/provider-position-read-runtime.registration.ts',
+        ),
         'utf8',
       ),
       mainnetPlatformsModuleSource: readFileSync(
