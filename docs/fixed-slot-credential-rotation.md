@@ -64,7 +64,7 @@ master-credential operation must prove the live database/secret identity,
 master-session drain, new authentication, old-password denial, runtime-login
 continuity, and recovery behavior. Those operational identities and exact
 results belong only in the nested schema-v1 `rdsMasterLifecycleEvidence` record
-covered by the outer two-role-signed schema-v2 bundle. Its primary
+covered by the outer two-role-signed schema-v3 bundle. Its primary
 database/secret/key identities must exactly match the schema-v2 deployment
 target's closed `rds` block; the outer signatures also cover the v2 target
 digest, which includes that block's CloudFormation stack identity. Exact `active` statuses,

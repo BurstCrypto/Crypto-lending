@@ -474,7 +474,7 @@
     },
     {
       "id": "DATA-019",
-      "name": "Release candidate, deployment-destination, deployed-target, post-provision target-identity enrollment, technical-evidence, RDS supporting-capture, and public-launch decision records",
+      "name": "Release candidate, deployment-destination, deployed-target, post-provision target-identity enrollment, technical-evidence, RDS/provider supporting-capture, and public-launch decision records",
       "classification": "INTERNAL",
       "cia": { "confidentiality": "MEDIUM", "integrity": "HIGH", "availability": "HIGH" },
       "stores": [
@@ -482,9 +482,9 @@
         "Short-lived CI release artifacts",
         "Separately controlled canonical signed target-identity enrollment claims",
         "Separately controlled canonical signed evidence files",
-        "Separately retained canonical sanitized RDS lifecycle capture files"
+        "Separately retained canonical sanitized RDS lifecycle and provider live-read capture files"
       ],
-      "retention": "DECISION_AND_EXPIRY_BOUND; GENERATED_ARTIFACT_14_DAYS; RDS_CAPTURE_RETENTION_PENDING",
+      "retention": "DECISION_AND_EXPIRY_BOUND; GENERATED_ARTIFACT_14_DAYS; RDS_AND_PROVIDER_CAPTURE_RETENTION_PENDING",
       "logging": "BOUNDED_PUBLIC_IDENTIFIERS_DIGESTS_ROLES_AND_OUTCOMES_ONLY; NO_PRIVATE_KEYS_CREDENTIALS_CUSTOMER_DATA_OR_LOCAL_PATHS",
       "owner": "Release, Security, and SRE",
       "evidence": [
@@ -633,7 +633,7 @@
       ],
       "injection": "RDS-managed Secrets Manager boundary whose compatibility output contains only the ARN; separate IAM and KMS authorization is required, checked-in application task definitions omit it, and migration-task use is prohibited but still requires deployed origin and IAM-denial evidence",
       "storage": "RDS-managed secret encrypted with the application data customer-managed KMS key and the database verifier; lifecycle-coupled to the database and never application configuration, logs, or review evidence",
-      "rotation": "RDS-owned default seven-day managed rotation through the RDS lifecycle only; authorized results belong to a nested schema-v1 RDS_MASTER_LIFECYCLE_EVIDENCE record covered by the outer two-role-signed schema-v2 bundle. Its primary database, resource, managed-secret, and application-key identities exactly match the schema-v2 target registry's closed rds block and v2 target digest; active statuses, AWSPREVIOUS/AWSCURRENT stages, and ordered access/rotation/restore timestamps are closed fields. Schema-v1 supportingCapture metadata commits to the separately retained canonical sanitized capture through captureSha256; validation does not open that file, so both roles independently calculate and match the digest before signing. Repository/no-bundle or forged/unbranded input emits RDS_MASTER_LIFECYCLE_EVIDENCE_MISSING; malformed, already stale, or counterfeit material is rejected before a report as PRODUCTION_PREFLIGHT_EVIDENCE_BUNDLE_INVALID; later staleness restores the RDS blocker and can additionally invalidate a bound public-authority decision",
+      "rotation": "RDS-owned default seven-day managed rotation through the RDS lifecycle only; authorized results belong to a nested schema-v1 RDS_MASTER_LIFECYCLE_EVIDENCE record covered by the outer two-role-signed schema-v3 bundle. Its primary database, resource, managed-secret, and application-key identities exactly match the schema-v2 target registry's closed rds block and v2 target digest; active statuses, AWSPREVIOUS/AWSCURRENT stages, and ordered access/rotation/restore timestamps are closed fields. Schema-v1 supportingCapture metadata commits to the separately retained canonical sanitized capture through captureSha256; validation does not open that file, so both roles independently calculate and match the digest before signing. Repository/no-bundle or forged/unbranded input emits RDS_MASTER_LIFECYCLE_EVIDENCE_MISSING; malformed, already stale, or counterfeit material is rejected before a report as PRODUCTION_PREFLIGHT_EVIDENCE_BUNDLE_INVALID; later staleness restores the RDS blocker and can additionally invalidate a bound public-authority decision",
       "owner": "Database and SRE",
       "evidence": [
         "docs/KAN-34.md",
@@ -1221,7 +1221,7 @@
         "Authentication overlap remains at version one until authorized external secret staging, a schema-owner policy transition, new-fleet proof, and old single-digest function denial exist",
         "Migration 0022 provides dormant wallet identity overlap and alias controls, the runtime supports exact-version challenge overlap, and migration 0024 provides a dormant schema-owner-only metadata rewrap boundary",
         "RDS owns the KMS-bound master secret and default seven-day password rotation; the compatibility output exposes only its ARN, checked-in application task definitions omit it, and deployed migration-secret origin plus IAM denial remain external gates",
-        "The nested schema-v1 RDS_MASTER_LIFECYCLE_EVIDENCE record is covered by the outer two-role-signed schema-v2 bundle; its primary identities exactly match the schema-v2 target registry's closed rds block and v2 digest, its active statuses, AWSPREVIOUS/AWSCURRENT stages, and ordered timestamps are closed, and schema-v1 supportingCapture metadata binds the separately retained canonical sanitized capture by captureSha256",
+        "The nested schema-v1 RDS_MASTER_LIFECYCLE_EVIDENCE record is covered by the outer two-role-signed schema-v3 bundle; its primary identities exactly match the schema-v2 target registry's closed rds block and v2 digest, its active statuses, AWSPREVIOUS/AWSCURRENT stages, and ordered timestamps are closed, and schema-v1 supportingCapture metadata binds the separately retained canonical sanitized capture by captureSha256",
         "The validator checks the supporting-capture metadata and digest shape but does not open the capture file, so both signing roles independently calculate and match captureSha256 before signing; repository/no-bundle or forged/unbranded input emits RDS_MASTER_LIFECYCLE_EVIDENCE_MISSING, malformed, already stale, or counterfeit material is rejected before a report as PRODUCTION_PREFLIGHT_EVIDENCE_BUNDLE_INVALID, and later staleness restores the RDS blocker and can additionally invalidate a bound public-authority decision"
       ],
       "owner": "Security, Identity, Database, and SRE",
@@ -1244,7 +1244,7 @@
         "scripts/production-go-live-preflight.ts"
       ],
       "residualRisk": "The auth/wallet and Redis-operator VersionId transition guards are locally implemented and deployment-integrated, but both production authority registries are intentionally empty; external key custody and staged secret population, independently signed operational records, a deployed Redis candidate/old-credential denial and continuity exercise, deployed old-function denial and auth/wallet rotation evidence, wallet identity policy activation, exercised challenge overlap, wallet metadata rewrap activation, and acceptable live RDS master IAM/KMS, isolation, rotation, denial, continuity, snapshot-restore rebinding, and independently matched supporting-capture evidence remain absent.",
-      "followUp": "Obtain KAN-50/KAN-235 custody and rotation review, add separately controlled reviewed production trust anchors for the auth/wallet and Redis-operator guards, authorize external secret staging, independently sign exact adoption/transition records, activate schema-owner controls, run deployed auth/wallet and disabled-operator Redis rotation, continuity, recovery, and old-credential denial drills, and perform the authorized RDS-managed master rotation/recovery exercise before both technical-evidence signing roles independently match the separately retained canonical capture digest and sign the outer schema-v2 bundle that covers the nested schema-v1 lifecycle record"
+      "followUp": "Obtain KAN-50/KAN-235 custody and rotation review, add separately controlled reviewed production trust anchors for the auth/wallet and Redis-operator guards, authorize external secret staging, independently sign exact adoption/transition records, activate schema-owner controls, run deployed auth/wallet and disabled-operator Redis rotation, continuity, recovery, and old-credential denial drills, and perform the authorized RDS-managed master rotation/recovery exercise before both technical-evidence signing roles independently match the separately retained canonical capture digest and sign the outer schema-v3 bundle that covers the nested schema-v1 lifecycle record"
     },
     {
       "id": "THR-SECRETS-003",
@@ -1395,6 +1395,8 @@
         "Migration 0017 and its unregistered repository preserve source-specific append-only decisions, optimistic revisions, last-good finalized facts, non-refreshing advancement time, and sticky quarantine without granting API write access",
         "Bounded two-source continuity backfill and single-use state-bound quarantine recovery can advance the dormant checkpoint without skipping or rewriting history",
         "Provider-position snapshots cannot represent missing work as zero: every exact wallet and approved-market target must be complete, agreeing, current, and fingerprint-bound before conservative liquid, supply, and borrow composition",
+        "The closed READ_ONLY outer schema-v3 technical-evidence bundle and v3 signing domain cover one schema-v2 live-read index with the exact ordered six-Ethereum/four-Solana provider scope and one nested schema-v1 provider record per fixed provider/protocol/network tuple; each record binds deployment/runtime/market identities, asset/oracle/pause-and-cap/code digests, distinct source/operator identities, finality/freshness, fail-closed read-only adapter behavior, a sanitized-capture digest, risk and independent decisions, kill-switch exercises, monitoring, spend, and runbook evidence",
+        "The live-read index must match the outer source revision and active platform-directory digest, provider identities and retained captures cannot be reused across records, observations expire with the bundle, mainnet-write evidence remains null, and the intentionally empty production signer registry prevents repository-local activation",
         "Aave and DefiLlama observations are corroboration only and cannot establish recommendation eligibility or authorize a financial action",
         "Production feed activation is rejected, no HTTP recommendation route exists, and required production input adapters remain unavailable"
       ],
@@ -1413,10 +1415,12 @@
         "apps/api/src/infrastructure/database/migrations/0017-create-aave-finalized-checkpoints.migration.ts",
         "apps/api/src/mainnet-platforms/domain/mainnet-provider-position-coverage.ts",
         "apps/api/src/portfolio/domain/mainnet-provider-portfolio-composition.ts",
+        "scripts/production-evidence-bundle.ts",
+        "scripts/production-evidence-bundle.test.ts",
         "docs/smart-lending-allocation-policy.md"
       ],
-      "residualRisk": "Provider authenticity beyond TLS, approved runtime-code hashes and source-pair independence, real historical readers, a cryptographic recovery-authorization service, live checkpoint/finality behavior, live provider-position adapters, schema-drift operations, and independent provider review are absent.",
-      "followUp": "Approve exact RPC and feed egress, provider/source-pair evidence, runtime-code hashes, and operational owners; implement the approved live readers and authorization service; then exercise checkpoint, recovery, provider-position coverage, and agreement boundaries under independent review before activation"
+      "residualRisk": "The schema validates signed identifiers, hashes, references, statuses, and timelines but does not fetch retained captures, query a live chain, authenticate a named RPC/indexing operator, prove that two sources are operationally independent, or establish that a referenced decision or exercise occurred. Provider authenticity beyond TLS, approved runtime-code observations, real historical readers, a cryptographic recovery-authorization service, live checkpoint/finality behavior, live provider-position adapters, schema-drift operations, and independent provider review are absent.",
+      "followUp": "Approve exact RPC and feed egress, independently controlled source pairs, provider deployment and runtime-code observations, retained captures, risk/operations evidence, and accountable owners; implement the approved live readers and authorization service; then have both technical roles independently verify the underlying evidence and exercise checkpoint, recovery, provider-position coverage, and agreement boundaries before signing and activation"
     },
     {
       "id": "THR-WALLET-004",

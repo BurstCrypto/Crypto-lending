@@ -389,7 +389,7 @@ database, managed-secret, VersionId, compatibility-output, and KMS identities
 plus the exact IAM/KMS, isolation, session-drain, rotation, authentication,
 denial, continuity, and rebinding results in the nested schema-v1
 `rdsMasterLifecycleEvidence` record covered by the outer two-role-signed
-schema-v2 bundle. The primary database ARN/resource ID, RDS-managed secret ARN,
+schema-v3 bundle. The primary database ARN/resource ID, RDS-managed secret ARN,
 and application-key ARN must exactly match the schema-v2 target registry's
 closed `rds` block; the outer signatures also cover the v2 target digest, which
 includes its CloudFormation stack ID. Primary, rotated, and rebound secret statuses must be `active`, with
@@ -477,7 +477,7 @@ template deliberately does not launch the task.
   API reads from the exact pinned VersionId, task replacement, rotation drill,
   and a dedicated reviewed version-transition guard remain live or external
   evidence; this template deliberately provisions neither resource.
-- The outer two-role-signed schema-v2 bundle, nested schema-v1 lifecycle record,
+- The outer two-role-signed schema-v3 bundle, nested schema-v1 lifecycle record,
   separately retained capture digest, and
   `RDS_MASTER_LIFECYCLE_EVIDENCE_MISSING` blocker provide a fail-closed carrier
   for sanitized RDS master rotation and recovery results. They do not perform a
@@ -516,7 +516,7 @@ managed secret, prove KMS readability, and verify new authentication,
 old-password denial, master-session cleanup, and runtime-login continuity. Its
 primary/restored identity and exact results must populate the nested schema-v1
 `rdsMasterLifecycleEvidence` record covered by the outer two-role-signed
-schema-v2 bundle, with an independently matched digest of the separately
+schema-v3 bundle, with an independently matched digest of the separately
 retained canonical capture, before the dedicated blocker can clear.
 Retained artifacts remain billable, and encrypted snapshots depend on retained
 keys. Database deletion protection must be deliberately disabled before a

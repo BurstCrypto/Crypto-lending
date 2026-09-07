@@ -386,8 +386,15 @@ there is no public launch at all.
 
 ## Per-provider evidence required for counting
 
-A provider increments the live read-only count only when one evidence bundle
-contains all of:
+The outer schema-v3 technical bundle contains one schema-v2
+`PRODUCTION_LIVE_READ_EVIDENCE_INDEX`. That index must contain the exact ordered
+ten-provider scope and one nested schema-v1
+`PRODUCTION_PROVIDER_LIVE_READ_EVIDENCE` record per provider: Aave V3,
+Compound III, Euler V2, Gearbox V3, Jupiter Lend, Kamino Lend, Morpho Blue,
+marginfi V2 (`project-0`), Save Lend, and SparkLend. Those records are fixed to
+six Ethereum-mainnet and four Solana-mainnet provider/protocol/network tuples.
+A provider increments the live read-only count only when its record contains
+all of:
 
 - canonical provider/protocol ID and an exact CAIP-2 network ID;
 - deployment, proxy implementation, market, asset address or mint, decimals,
@@ -403,8 +410,20 @@ contains all of:
   alarms, integration tests, and an independent acceptance decision bound to
   the deployed revision.
 
-A provider increments the transaction-enabled count only after the same bundle
-also contains an approved action allowlist, exact transaction meaning and
+The index source revision and platform-directory digest must match the outer
+bundle, and each observation/capture timeline must remain within the signed
+freshness window. Unique deployment, runtime, market, capture, and independent
+acceptance identities prevent one record from being copied across providers.
+The validator checks the canonical record and its bindings; it does not fetch
+the retained capture, query a live chain, authenticate the named RPC/indexing
+operators, prove that two sources are operationally independent, or establish
+that a referenced approval or exercise occurred. The technical signers must
+independently obtain and match that external evidence before signing.
+
+Outer schema v3 is read-only and requires `mainnetWriteEvidenceIndex: null`, so
+it can never increment the transaction-enabled count. A provider can increment
+that count only under a future, separately versioned and approved write-authority
+schema containing an action allowlist, exact transaction meaning and
 calldata/program constraints, simulation, allowance policy, gas/fee reserve,
 zero-default per-action/per-wallet/global limits, durable idempotent intent and
 reconciliation state, finality/reorg handling, withdrawal/recovery testing,
@@ -646,7 +665,7 @@ recovery path. Because the managed secret follows the database lifecycle, the
 restore exercise must rediscover and bind the restored secret rather than
 assuming that the original compatibility output or credential survived.
 
-The outer two-role-signed schema-v2 technical bundle covers a closed nested
+The outer two-role-signed schema-v3 technical bundle covers a closed nested
 schema-v1 `rdsMasterLifecycleEvidence` record with type
 `RDS_MASTER_LIFECYCLE_EVIDENCE` and status `ACCEPTED` for that exercise. It
 binds `crypto_admin` and the primary and restored database, managed-secret,
@@ -1052,9 +1071,10 @@ rg -n 'PUBLIC ACCESS IS NOT APPROVED|NOT_AUTHORIZED|NOT_APPROVED|NO_EXTERNAL_EGR
 
 - **No-go for any public launch** while the public/legal, authentication,
   egress, RPC/indexing, production-read, or operations/security gate is open.
-- **No-go for claims of ten live providers** until all ten exact Ethereum and
-  Solana live read-only evidence bundles pass. Base and BNB provider bundles do
-  not count toward this release.
+- **No-go for claims of ten live providers** until the exact schema-v2 index and
+  all ten nested Ethereum/Solana schema-v1 live-read records pass inside one
+  verified schema-v3 technical bundle. Base and BNB providers do not count
+  toward this release.
 - **No-go for any real-value action** while any write gate is open. Hide or
   remove transaction controls; do not ship a disabled-looking control wired to
   an executable route.

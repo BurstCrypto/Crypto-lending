@@ -721,13 +721,29 @@ recomputes the fixed release components. The signed
 same branded manifest and source state are revalidated after bundle verification
 and immediately before evidence application.
 
-The closed schema-v2 bundle is `READ_ONLY`. It binds canonical issuance/expiry
+The closed schema-v3 bundle is `READ_ONLY`. It binds canonical issuance/expiry
 timestamps, the branded release candidate, platform-directory SHA-256, a
 checked-in deployment-target ID and SHA-256, direct authentication-deployment,
 RDS-master-lifecycle, external-egress, and RPC-live observations, and the
-live-read evidence index. The v2 signing domain covers the complete new shape;
-a legacy schema-v1 bundle or v1-domain signature fails closed rather than being
-silently upgraded.
+live-read evidence index. The v3 signing domain covers the complete new shape;
+a legacy schema-v1/v2 bundle or v1/v2-domain signature fails closed rather than
+being silently upgraded.
+
+The nested live-read index is schema v2 and has one exact, ordered
+schema-v1 provider record for each of the fixed ten-provider scope: six on
+Ethereum mainnet and four on Solana mainnet. Each record binds its exact
+provider/protocol/network tuple; deployment, runtime, and market identities;
+asset, oracle, pause/cap, and code evidence digests; distinct source and
+operator identifiers; finalized anchor, freshness, and finality evidence;
+read-only fail-closed adapter behavior; a retained sanitized-capture digest;
+risk acceptance; provider/network kill-switch exercises; monitoring, spend,
+and outage/runbook evidence; and a separate independent acceptance decision.
+The index source revision and directory digest must equal the outer bundle and
+the active platform directory, and its observation deadlines are revalidated
+with the bundle. These hashes and references are signed attestations, not live
+chain probes: validation does not open the retained captures, establish source
+operator independence, or prove that any referenced deployment, observation,
+decision, or exercise occurred.
 Arbitrary evidence paths, reference IDs, and caller-asserted artifact hashes are
 not part of an authority decision. `mainnetWriteEvidenceIndex` must be literal
 `null`; write scope, action-binding, simulation, reconciliation, or financial-
@@ -795,7 +811,7 @@ override the repository's authentication wiring inspection, RDS-managed-master
 template inspection, egress policy status or mode, RPC
 decision/approval/runtime status, platform directory, or any other local
 approval boundary. A signed claim therefore cannot turn `NOT_APPROVED` into
-`APPROVED`; those repository-side blockers continue to win. Schema v2 always
+`APPROVED`; those repository-side blockers continue to win. Outer schema v3 always
 sets supplied write evidence to `null` and cannot affect mainnet-write
 readiness.
 
@@ -989,7 +1005,7 @@ recovery exercise must establish and bind the restored or replacement
 database's managed-secret ARN; the original secret need not survive. Those
 items remain deployed evidence and recovery gates.
 
-The outer two-role-signed schema-v2 bundle now covers the closed nested
+The outer two-role-signed schema-v3 bundle now covers the closed nested
 schema-v1 `rdsMasterLifecycleEvidence` record with type
 `RDS_MASTER_LIFECYCLE_EVIDENCE` and status `ACCEPTED`. It binds the literal
 `crypto_admin` master username, primary and restored database identities,
@@ -1021,7 +1037,7 @@ rotation.completedAt <= restore.startedAt < restore.completedAt =
 collectionCompletedAt = observedAt`, within a maximum 24-hour capture window.
 
 Preflight accepts that nested record only through the current outer
-two-role-signed schema-v2 bundle bound to the exact release and deployment
+two-role-signed schema-v3 bundle bound to the exact release and deployment
 target. Repository/no-bundle input, an absent or forged acceptance flag, and an
 unbranded structural copy emit `RDS_MASTER_LIFECYCLE_EVIDENCE_MISSING`. A
 malformed, already stale, counterfeit, wrong-artifact/status/field, or

@@ -115,7 +115,7 @@ VersionId in sanitized execution evidence, but that observation is not a stack
 parameter, an A/B slot, or permission to pin or roll back the RDS credential.
 
 The closed nested schema-v1 `rdsMasterLifecycleEvidence` record is covered by
-the outer two-role-signed schema-v2 production-evidence bundle. It binds the
+the outer two-role-signed schema-v3 production-evidence bundle. It binds the
 primary and restored database, managed-secret, VersionId,
 compatibility-output, and KMS identities plus exact IAM/KMS,
 workload-isolation, session-drain, rotation, authentication-denial,
@@ -400,7 +400,7 @@ complete:
   continuity, KMS access, and snapshot restore/rebinding behavior without
   recording secret bytes, followed by a separately controlled canonical capture
   and a current nested schema-v1 `rdsMasterLifecycleEvidence` record, covered by
-  the outer two-role-signed schema-v2 bundle, whose independently matched
+  the outer two-role-signed schema-v3 bundle, whose independently matched
   `captureSha256`, exact target identity, statuses, stages, ordered timestamps,
   and `PASS` results bind the exercise to the release and deployment target;
 - deployed verification that schema-v3 adoption bound the six A/B versions and
