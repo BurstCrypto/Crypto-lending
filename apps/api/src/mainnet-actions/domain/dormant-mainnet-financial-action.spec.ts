@@ -78,6 +78,21 @@ function expectCode(
 }
 
 describe('dormant mainnet financial action boundary', () => {
+  it('uses the canonical provider and protocol identities from the lending boundaries', () => {
+    expect(MAINNET_FINANCIAL_ACTION_PROVIDER_CANDIDATES).toEqual([
+      { providerId: 'aave', protocolId: 'aave-v3', networkId: ETHEREUM },
+      { providerId: 'morpho', protocolId: 'morpho-blue', networkId: ETHEREUM },
+      { providerId: 'compound', protocolId: 'compound-iii', networkId: ETHEREUM },
+      { providerId: 'spark', protocolId: 'sparklend', networkId: ETHEREUM },
+      { providerId: 'euler', protocolId: 'euler-v2', networkId: ETHEREUM },
+      { providerId: 'gearbox', protocolId: 'gearbox-v3', networkId: ETHEREUM },
+      { providerId: 'kamino', protocolId: 'kamino-lend', networkId: SOLANA },
+      { providerId: 'save', protocolId: 'save-lend', networkId: SOLANA },
+      { providerId: 'project-0', protocolId: 'marginfi-v2', networkId: SOLANA },
+      { providerId: 'jupiter', protocolId: 'jupiter-lend', networkId: SOLANA },
+    ]);
+  });
+
   it('normalizes a fully bound Ethereum candidate without granting authority', () => {
     const parsed = parseDormantMainnetFinancialActionIntent(input(), NOW);
 

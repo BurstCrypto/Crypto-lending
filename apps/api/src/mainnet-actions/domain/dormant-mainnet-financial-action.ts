@@ -43,7 +43,7 @@ export type MainnetFinancialActionProtocolId =
   | 'euler-v2'
   | 'gearbox-v3'
   | 'kamino-lend'
-  | 'save-lending'
+  | 'save-lend'
   | 'marginfi-v2'
   | 'jupiter-lend';
 
@@ -66,7 +66,7 @@ export const MAINNET_FINANCIAL_ACTION_PROVIDER_CANDIDATES: readonly MainnetFinan
     candidate('euler', 'euler-v2', 'eip155:1'),
     candidate('gearbox', 'gearbox-v3', 'eip155:1'),
     candidate('kamino', 'kamino-lend', 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp'),
-    candidate('save', 'save-lending', 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp'),
+    candidate('save', 'save-lend', 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp'),
     candidate('project-0', 'marginfi-v2', 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp'),
     candidate('jupiter', 'jupiter-lend', 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp'),
   ]);
