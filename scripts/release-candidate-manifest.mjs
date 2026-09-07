@@ -210,6 +210,12 @@ export const RELEASE_COMPONENTS = Object.freeze([
     requiredFiles: Object.freeze(['.']),
   }),
   Object.freeze({
+    name: 'production-deployment-chain-protocol-validator',
+    path: 'infra/aws/validate-production-deployment-chain-protocol.mjs',
+    kind: 'file',
+    requiredFiles: Object.freeze(['.']),
+  }),
+  Object.freeze({
     name: 'production-deployment-intent-strict-json-runtime',
     path: 'infra/shared/parse-strict-json.mjs',
     kind: 'file',

@@ -57,6 +57,7 @@ const BUILDER = Object.freeze({
 const DEPLOYMENT_RUNTIME_ENTRIES = Object.freeze([
   'infra/aws/validate-production-deployment-intent.mjs',
   'scripts/production-deployment-enrollment.mjs',
+  'infra/aws/validate-production-deployment-chain-protocol.mjs',
 ]);
 const DEPLOYMENT_RUNTIME_MODULE_POLICY = Object.freeze({
   [DEPLOYMENT_RUNTIME_ENTRIES[0]]: Object.freeze({
@@ -82,6 +83,10 @@ const DEPLOYMENT_RUNTIME_MODULE_POLICY = Object.freeze({
       'node:perf_hooks|performance',
       'node:util|TextDecoder,types as utilTypes',
     ]),
+    processMembers: Object.freeze([]),
+  }),
+  [DEPLOYMENT_RUNTIME_ENTRIES[2]]: Object.freeze({
+    imports: Object.freeze(['node:crypto|createHash', 'node:util|types as utilTypes']),
     processMembers: Object.freeze([]),
   }),
   'infra/shared/parse-strict-json.mjs': Object.freeze({
@@ -704,6 +709,12 @@ test('binds the production deployment runtimes and inert intent example exactly'
       requiredFiles: ['.'],
     },
     {
+      name: 'production-deployment-chain-protocol-validator',
+      path: 'infra/aws/validate-production-deployment-chain-protocol.mjs',
+      kind: 'file',
+      requiredFiles: ['.'],
+    },
+    {
       name: 'production-deployment-intent-strict-json-runtime',
       path: 'infra/shared/parse-strict-json.mjs',
       kind: 'file',
@@ -753,7 +764,7 @@ test('binds the production deployment runtimes and inert intent example exactly'
   }
 });
 
-test('stages both exact offline deployment module closures with reviewed direct capabilities', () => {
+test('stages all exact offline deployment module closures with reviewed direct capabilities', () => {
   const expectedClosures = Object.freeze({
     [DEPLOYMENT_RUNTIME_ENTRIES[0]]: Object.freeze([
       'infra/aws/validate-production-deployment-intent.mjs',
@@ -767,6 +778,9 @@ test('stages both exact offline deployment module closures with reviewed direct 
       'infra/shared/validate-ed25519-public-key.mjs',
       'scripts/production-deployment-enrollment.mjs',
       'scripts/production-deployment-target.mjs',
+    ]),
+    [DEPLOYMENT_RUNTIME_ENTRIES[2]]: Object.freeze([
+      'infra/aws/validate-production-deployment-chain-protocol.mjs',
     ]),
   });
   for (const entry of DEPLOYMENT_RUNTIME_ENTRIES) {
