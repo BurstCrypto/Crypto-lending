@@ -904,6 +904,7 @@ function completeInput(directory: unknown): ProductionPreflightInput {
     },
     platforms: {
       directory,
+      dormantActionBoundaryValidationPassed: true,
       sourceRevision: SOURCE_REVISION,
       liveReadEvidenceIndex: readEvidence(directory),
       mainnetWriteEvidenceIndex: null,
@@ -1015,6 +1016,7 @@ test('current repository is a bootstrap blocker audit and exits nonzero for both
   assert.equal(readOnly.checks.find(({ id }) => id === 'RPC_INDEXING')?.localValidation, 'PASS');
   assert.equal(input.rpcProviders.dormantInventoryValidationPassed, true);
   assert.equal(input.rpcProviders.activeScopeResearchCaptureValidationPassed, true);
+  assert.equal(input.platforms.dormantActionBoundaryValidationPassed, true);
   assert.deepEqual(
     readOnly.checks.find(({ id }) => id === 'PRODUCTION_INFRASTRUCTURE'),
     {
@@ -1207,6 +1209,40 @@ test('RPC provider decision, dormant inventory, and research capture fail indepe
         .find(({ id }) => id === 'RPC_INDEXING')
         ?.blockerIds.includes('RPC_PROVIDER_ACTIVE_SCOPE_RESEARCH_CAPTURE_LOCAL_VALIDATION_FAILED'),
     );
+  }
+});
+
+test('dormant mainnet action boundary fails the isolation and write gates independently', () => {
+  const baseline = completeInput(platformDirectory('LIVE_READ_ONLY'));
+  const { dormantActionBoundaryValidationPassed: omitted, ...withoutActionBoundaryResult } =
+    baseline.platforms;
+  assert.equal(omitted, true);
+
+  for (const dormantActionBoundaryValidationPassed of [false, undefined, 'true', 1, null]) {
+    const report = evaluateProductionPreflight({
+      ...baseline,
+      platforms: {
+        ...withoutActionBoundaryResult,
+        dormantActionBoundaryValidationPassed,
+      } as unknown as ProductionPreflightInput['platforms'],
+    });
+
+    assert.equal(report.checks.find(({ id }) => id === 'RPC_INDEXING')?.localValidation, 'PASS');
+    assert.deepEqual(
+      report.checks.find(({ id }) => id === 'READ_ONLY_ISOLATION'),
+      {
+        id: 'READ_ONLY_ISOLATION',
+        localValidation: 'FAIL',
+        launchReadiness: 'BLOCKED',
+        blockerIds: ['MAINNET_ACTION_BOUNDARY_LOCAL_VALIDATION_FAILED'],
+      },
+    );
+    assert.ok(
+      report.checks
+        .find(({ id }) => id === 'MAINNET_WRITES')
+        ?.blockerIds.includes('MAINNET_ACTION_BOUNDARY_LOCAL_VALIDATION_FAILED'),
+    );
+    assert.equal(report.selectedTargetReadiness, 'BLOCKED');
   }
 });
 

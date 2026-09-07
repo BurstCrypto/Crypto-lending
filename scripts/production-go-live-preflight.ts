@@ -101,6 +101,7 @@ export type ProductionPreflightBlockerId =
   | 'LIVE_READ_EVIDENCE_INDEX_INVALID'
   | 'LIVE_READ_EVIDENCE_INDEX_MISSING'
   | 'LIVE_READ_EVIDENCE_REVISION_MISMATCH'
+  | 'MAINNET_ACTION_BOUNDARY_LOCAL_VALIDATION_FAILED'
   | 'READ_ONLY_ISOLATION_LOCAL_VALIDATION_FAILED'
   | 'READ_ONLY_TRANSACTION_CAPABILITY_EXPOSED'
   | 'PUBLIC_LAUNCH_AUTHORITY_DECISION_MISSING'
@@ -323,6 +324,7 @@ interface RpcProviderInput {
 
 interface PlatformInput {
   readonly directory: unknown;
+  readonly dormantActionBoundaryValidationPassed: boolean;
   readonly sourceRevision: string | null;
   liveReadEvidenceIndex: unknown | null;
   mainnetWriteEvidenceIndex: unknown | null;
@@ -1562,6 +1564,8 @@ export function evaluateProductionPreflight(
   }
 
   const directory = validatePlatformDirectory(input.platforms.directory);
+  const dormantMainnetActionBoundaryLocalValidationPassed =
+    input.platforms.dormantActionBoundaryValidationPassed === true;
   const directoryBlockers: ProductionPreflightBlockerId[] = [];
   if (!directory.valid) directoryBlockers.push('PLATFORM_DIRECTORY_LOCAL_VALIDATION_FAILED');
   if (!directory.providerTargetMet) {
@@ -1593,6 +1597,9 @@ export function evaluateProductionPreflight(
   }
 
   const isolationBlockers: ProductionPreflightBlockerId[] = [];
+  if (!dormantMainnetActionBoundaryLocalValidationPassed) {
+    isolationBlockers.push('MAINNET_ACTION_BOUNDARY_LOCAL_VALIDATION_FAILED');
+  }
   if (!directory.valid) {
     isolationBlockers.push('READ_ONLY_ISOLATION_LOCAL_VALIDATION_FAILED');
   }
@@ -1611,6 +1618,9 @@ export function evaluateProductionPreflight(
     input.platforms.mainnetWriteEvidenceIndex !== null,
     writeEvidence,
   );
+  if (!dormantMainnetActionBoundaryLocalValidationPassed) {
+    writeBlockers.push('MAINNET_ACTION_BOUNDARY_LOCAL_VALIDATION_FAILED');
+  }
   if (!directory.mayAuthorizeFinancialAction) {
     writeBlockers.push('MAINNET_FINANCIAL_ACTIONS_DISABLED');
   }
@@ -1675,13 +1685,21 @@ export function evaluateProductionPreflight(
     ),
     check('PLATFORM_DIRECTORY', directory.valid ? 'PASS' : 'FAIL', directoryBlockers),
     check('PLATFORM_LIVE_READS', readEvidence.valid ? 'PASS' : 'FAIL', readBlockers),
-    check('READ_ONLY_ISOLATION', directory.valid ? 'PASS' : 'FAIL', isolationBlockers),
+    check(
+      'READ_ONLY_ISOLATION',
+      directory.valid && dormantMainnetActionBoundaryLocalValidationPassed ? 'PASS' : 'FAIL',
+      isolationBlockers,
+    ),
     check(
       'PUBLIC_LAUNCH_AUTHORITIES',
       publicLaunchAuthorities.localValidation,
       publicLaunchAuthorities.blockers,
     ),
-    check('MAINNET_WRITES', writeEvidence.valid ? 'PASS' : 'FAIL', writeBlockers),
+    check(
+      'MAINNET_WRITES',
+      writeEvidence.valid && dormantMainnetActionBoundaryLocalValidationPassed ? 'PASS' : 'FAIL',
+      writeBlockers,
+    ),
   ]);
 
   const readinessFor = (
@@ -14308,16 +14326,20 @@ export function loadRepositoryProductionPreflightInput(
   let dormantProviderInventoryValidationPassed = false;
   try {
     const inventoryErrors = validateDormantProviderInventoryFiles(repositoryRoot) as unknown;
+    dormantProviderInventoryValidationPassed =
+      Array.isArray(inventoryErrors) && inventoryErrors.length === 0;
+  } catch {
+    // The evaluator emits a distinct closed inventory-validation blocker.
+  }
+  let dormantMainnetActionBoundaryValidationPassed = false;
+  try {
     const actionBoundaryErrors = validateDormantMainnetActionBoundaryFiles(
       repositoryRoot,
     ) as unknown;
-    dormantProviderInventoryValidationPassed =
-      Array.isArray(inventoryErrors) &&
-      inventoryErrors.length === 0 &&
-      Array.isArray(actionBoundaryErrors) &&
-      actionBoundaryErrors.length === 0;
+    dormantMainnetActionBoundaryValidationPassed =
+      Array.isArray(actionBoundaryErrors) && actionBoundaryErrors.length === 0;
   } catch {
-    // The evaluator emits a distinct closed inventory-validation blocker.
+    // The evaluator emits a distinct closed action-boundary-validation blocker.
   }
   let activeScopeProviderResearchCaptureValidationPassed = false;
   try {
@@ -14363,6 +14385,7 @@ export function loadRepositoryProductionPreflightInput(
     }),
     platforms: {
       directory: MAINNET_PLATFORM_DIRECTORY,
+      dormantActionBoundaryValidationPassed: dormantMainnetActionBoundaryValidationPassed,
       // Bootstrap mode cannot prove a clean worktree without a trusted build manifest.
       sourceRevision: null,
       // Bootstrap mode deliberately does not ingest controlled external evidence.
@@ -14420,6 +14443,8 @@ export function applyVerifiedProductionEvidenceBundle(
       }),
       platforms: Object.freeze({
         directory: input.platforms.directory,
+        dormantActionBoundaryValidationPassed:
+          input.platforms.dormantActionBoundaryValidationPassed,
         sourceRevision: bundle.content.sourceRevision,
         liveReadEvidenceIndex: bundle.content.liveReadEvidenceIndex,
         // Evidence schema v2 is read-only and can never supplement write evidence.

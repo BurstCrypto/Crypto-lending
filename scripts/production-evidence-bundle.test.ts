@@ -1651,6 +1651,7 @@ test('unbranded bundles cannot alter repository approvals or supply write eviden
     },
     platforms: {
       directory: {},
+      dormantActionBoundaryValidationPassed: false,
       sourceRevision: null,
       liveReadEvidenceIndex: null,
       mainnetWriteEvidenceIndex: null,

@@ -688,7 +688,10 @@ adapter class or import-stem reference elsewhere in the bounded API runtime
 source scan. Artifact reads are capped at 2 MiB each, and the runtime scan is
 capped at 4,096 files and 24 MiB total. Decision validation and dormant-inventory
 validation have distinct blockers, and both must pass for `RPC_INDEXING` local
-validation to pass. A third independent local result validates the closed,
+validation to pass. The separately validated dormant mainnet action boundary
+must pass `READ_ONLY_ISOLATION` and `MAINNET_WRITES`; its failure emits
+`MAINNET_ACTION_BOUNDARY_LOCAL_VALIDATION_FAILED`, never an RPC inventory blocker.
+A third independent local result validates the closed,
 reviewed four-provider capture packet for Compound, Euler, Gearbox, and Jupiter,
 including its exact compiled SHA-256 and sidecar. This packet covers the four
 dated captures that completed the research set; it is not a substitute for the

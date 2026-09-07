@@ -14,8 +14,11 @@ Runtime source files are scanned for every exact adapter class/import stem and e
 
 Passing this validator proves only local artifact completeness and dormancy. It does not approve a provider, market, asset, endpoint, source pair, risk decision, recommendation, transaction, or production activation. All ten remain unavailable and the production live-provider count remains zero.
 
-The offline production preflight invokes this same bounded validator and keeps
-its result separate from KAN-62 decision-record validation. Either failure makes
-`RPC_INDEXING` local validation fail; an inventory failure is reported as
-`RPC_PROVIDER_DORMANT_INVENTORY_LOCAL_VALIDATION_FAILED`. This integration adds
-no network, provider, cloud, secret, transaction, or filesystem-write action.
+The offline production preflight invokes both bounded validators and keeps their
+results separate from each other and from KAN-62 decision-record validation. An
+inventory failure makes `RPC_INDEXING` local validation fail with
+`RPC_PROVIDER_DORMANT_INVENTORY_LOCAL_VALIDATION_FAILED`. An action-boundary
+failure instead blocks `READ_ONLY_ISOLATION` and `MAINNET_WRITES` with
+`MAINNET_ACTION_BOUNDARY_LOCAL_VALIDATION_FAILED`; it is never misreported as an
+RPC inventory failure. This integration adds no network, provider, cloud,
+secret, transaction, or filesystem-write action.
