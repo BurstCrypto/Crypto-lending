@@ -337,6 +337,7 @@ describe('completeSolanaWalletOwnershipRegistration', () => {
     };
     const challenge = issuedChallenge();
     const signed = signature(challenge);
+    const controller = new AbortController();
     const adapter: WalletAdapter = {
       connectorId: 'phantom',
       namespace: 'solana',
@@ -352,7 +353,12 @@ describe('completeSolanaWalletOwnershipRegistration', () => {
     };
 
     await expect(
-      completeSolanaWalletOwnershipRegistration({ adapter, connection, client }),
+      completeSolanaWalletOwnershipRegistration({
+        adapter,
+        connection,
+        client,
+        signal: controller.signal,
+      }),
     ).resolves.toEqual(registrationResponse());
     expect(client.issueChallenge).toHaveBeenCalledWith(
       {
@@ -360,10 +366,19 @@ describe('completeSolanaWalletOwnershipRegistration', () => {
         address: ADDRESS,
         registryEnvironment: 'MAINNET',
       },
-      undefined,
+      controller.signal,
     );
-    expect(adapter.signOwnershipChallenge).toHaveBeenCalledWith(connection.connectionId, challenge);
-    expect(client.submitProof).toHaveBeenCalledWith({ challenge, signature: signed }, undefined);
+    expect(adapter.signOwnershipChallenge).toHaveBeenCalledWith(
+      connection.connectionId,
+      challenge,
+      {
+        signal: controller.signal,
+      },
+    );
+    expect(client.submitProof).toHaveBeenCalledWith(
+      { challenge, signature: signed },
+      controller.signal,
+    );
   });
 
   it('rejects a devnet connection before issuing a challenge', async () => {

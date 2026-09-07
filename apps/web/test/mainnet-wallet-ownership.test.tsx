@@ -22,11 +22,17 @@ import {
   type EvmWalletOwnershipClient,
 } from '@/lib/wallets/eip1193/ownership';
 import type { Eip1193Provider, Eip1193RequestArguments } from '@/lib/wallets/eip1193/provider';
+import { MAINNET_WALLET_REGISTRY } from '@/lib/wallets/mainnet-network-policy';
 import {
   MainnetWalletRosterError,
   type MainnetRegisteredWalletSummary,
   type MainnetWalletRosterClient,
 } from '@/lib/wallets/mainnet-wallet-roster-client';
+import type {
+  IssuedSolanaOwnershipChallenge,
+  RegisteredSolanaWalletResult,
+  SolanaWalletOwnershipClient,
+} from '@/lib/wallets/solana/ownership';
 
 const METAMASK: InjectedProviderDescriptor = Object.freeze({
   selectionId: 'metamask-selection',
@@ -61,6 +67,7 @@ const RESULT: MainnetWalletVerificationResult = Object.freeze({
 });
 
 const EVM_ADDRESS = '0x1111111111111111111111111111111111111111';
+const SOLANA_ADDRESS = '11111111111111111111111111111112';
 const ETHEREUM_WALLET: MainnetRegisteredWalletSummary = Object.freeze({
   walletId: '11111111-1111-4111-8111-111111111111',
   chainId: 'eip155:1',
@@ -88,6 +95,14 @@ function announceMetaMask(target: EventTarget, provider: Eip1193Provider): void 
       },
     }),
   );
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
 }
 
 function runtimeHarness(
@@ -1110,6 +1125,109 @@ describe('createMainnetWalletOwnershipRuntime', () => {
       ),
     ).rejects.toMatchObject({ code: 'CONNECTION_CHANGED' });
     expect(provider.removeListener).toHaveBeenCalledTimes(3);
+    runtime.dispose();
+  });
+
+  it('recovers on Solana after canceling a never-settling EVM provider request', async () => {
+    const target = new EventTarget();
+    const staleChainRead = deferred<unknown>();
+    let chainReads = 0;
+    const evmProvider: Eip1193Provider = {
+      request: vi.fn(async ({ method }: Eip1193RequestArguments) => {
+        if (method === 'eth_chainId') {
+          chainReads += 1;
+          return chainReads === 1 ? staleChainRead.promise : '0x1';
+        }
+        if (method === 'eth_requestAccounts' || method === 'eth_accounts') return [EVM_ADDRESS];
+        throw new Error('Unexpected provider method');
+      }),
+      on: vi.fn(),
+      removeListener: vi.fn(),
+    };
+    target.addEventListener(EIP6963_REQUEST_PROVIDER, () => announceMetaMask(target, evmProvider));
+
+    const publicKey = Object.freeze({ toBase58: () => SOLANA_ADDRESS });
+    const phantomProvider = {
+      isPhantom: true,
+      publicKey,
+      connect: vi.fn(async () => ({ publicKey })),
+      disconnect: vi.fn(async () => undefined),
+      signMessage: vi.fn(async () => ({
+        publicKey,
+        signature: new Uint8Array(64).fill(7),
+      })),
+      on: vi.fn(),
+      off: vi.fn(),
+    };
+    const windowValue: Record<string, unknown> = { isSecureContext: true };
+    windowValue.self = windowValue;
+    windowValue.top = windowValue;
+    windowValue.phantom = { solana: phantomProvider };
+
+    const solanaChallenge: IssuedSolanaOwnershipChallenge = Object.freeze({
+      id: '11111111-1111-4111-8111-111111111111',
+      format: 'siws-message',
+      chainId: 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp',
+      address: SOLANA_ADDRESS,
+      nonce: 'solana123456',
+      expiresAt: '2026-09-06T23:05:00.000Z',
+      message: 'exact server-issued Solana ownership message',
+      registryEnvironment: 'MAINNET',
+      registryVersion: MAINNET_WALLET_REGISTRY.version,
+      registryFingerprintSha256: MAINNET_WALLET_REGISTRY.fingerprintSha256,
+    });
+    const solanaResult: RegisteredSolanaWalletResult = Object.freeze({
+      status: 'registered',
+      walletId: '33333333-3333-4333-8333-333333333333',
+      chainId: solanaChallenge.chainId,
+      address: SOLANA_ADDRESS,
+      registeredAt: '2026-09-06T23:01:00.000Z',
+      registryEnvironment: 'MAINNET',
+      registryVersion: MAINNET_WALLET_REGISTRY.version,
+      registryFingerprintSha256: MAINNET_WALLET_REGISTRY.fingerprintSha256,
+    });
+    const solanaClient: SolanaWalletOwnershipClient = {
+      issueChallenge: vi.fn(async () => solanaChallenge),
+      submitProof: vi.fn(async () => solanaResult),
+    };
+    let opaqueTokenIndex = 0;
+    const runtime = createMainnetWalletOwnershipRuntime({
+      target,
+      windowValue,
+      solanaClient,
+      createSelectionId: () => METAMASK.selectionId,
+      createConnectionId: () => 'mainnet-connection',
+      createOpaqueToken: () => `opaque-${++opaqueTokenIndex}`,
+    });
+    runtime.start();
+
+    const staleConnection = runtime.connect(
+      'eip155:1',
+      'metamask',
+      METAMASK.selectionId,
+      new AbortController().signal,
+    );
+    runtime.cancel();
+    await expect(staleConnection).rejects.toMatchObject({ code: 'INJECTED_EVM_ABORTED' });
+
+    const currentConnection = await runtime.connect(
+      solanaChallenge.chainId,
+      'phantom',
+      null,
+      new AbortController().signal,
+    );
+    staleChainRead.resolve('0x1');
+    await Promise.resolve();
+
+    await expect(
+      runtime.verify(
+        currentConnection.connectionToken,
+        currentConnection.accounts[0]!.accountToken,
+        new AbortController().signal,
+      ),
+    ).resolves.toMatchObject({ chainId: solanaChallenge.chainId, walletId: solanaResult.walletId });
+    expect(solanaClient.submitProof).toHaveBeenCalledOnce();
+    expect(phantomProvider.signMessage).toHaveBeenCalledOnce();
     runtime.dispose();
   });
 });

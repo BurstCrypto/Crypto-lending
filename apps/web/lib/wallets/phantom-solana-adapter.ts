@@ -15,7 +15,9 @@ import {
   type WalletConnection,
   type WalletEvent,
   type WalletProviderError,
+  type WalletSignOptions,
 } from './wallet-adapter';
+import { waitForAbortSignal } from '../http/bounded-response';
 
 export const PHANTOM_SOLANA_CONNECTOR_ID = 'phantom';
 
@@ -481,10 +483,14 @@ class DefaultPhantomSolanaAdapter implements WalletAdapter {
 
     let result: unknown;
     try {
-      result = await Reflect.apply(access.connect, access.raw, [
-        restored ? Object.freeze({ onlyIfTrusted: true }) : undefined,
-      ]);
+      const operation = Promise.resolve(
+        Reflect.apply(access.connect, access.raw, [
+          restored ? Object.freeze({ onlyIfTrusted: true }) : undefined,
+        ]),
+      );
+      result = signal === undefined ? await operation : await waitForAbortSignal(operation, signal);
     } catch (error) {
+      throwIfAborted(signal);
       const failure = providerFailure(error, 'PROVIDER_FAILURE');
       if (
         restored &&
@@ -521,7 +527,7 @@ class DefaultPhantomSolanaAdapter implements WalletAdapter {
       return connection;
     } catch (error) {
       if (this.provider === access) this.clearLocalConnection();
-      await this.bestEffortDisconnect(access);
+      void this.bestEffortDisconnect(access);
       throw providerFailure(error, 'ACCOUNT_INVALID');
     }
   }
@@ -669,7 +675,9 @@ class DefaultPhantomSolanaAdapter implements WalletAdapter {
   async signOwnershipChallenge(
     connectionId: string,
     challenge: OwnershipChallenge,
+    options: WalletSignOptions = {},
   ): Promise<OwnershipSignature> {
+    throwIfAborted(options.signal);
     const connection = this.connection;
     const access = this.provider;
     if (connection === null || access === null || connection.connectionId !== connectionId) {
@@ -688,10 +696,18 @@ class DefaultPhantomSolanaAdapter implements WalletAdapter {
       const signedMessage = new TextEncoder().encode(challenge.message);
       let result: unknown;
       try {
-        result = await Reflect.apply(access.signMessage, access.raw, [signedMessage, 'utf8']);
+        const operation = Promise.resolve(
+          Reflect.apply(access.signMessage, access.raw, [signedMessage, 'utf8']),
+        );
+        result =
+          options.signal === undefined
+            ? await operation
+            : await waitForAbortSignal(operation, options.signal);
       } catch (error) {
+        throwIfAborted(options.signal);
         throw providerFailure(error, 'PROVIDER_FAILURE');
       }
+      throwIfAborted(options.signal);
       this.assertConnectionRevision(connection, access);
       if (!isObject(result)) throw new PhantomSolanaAdapterError('SIGNATURE_INVALID');
       const signerAddress = addressFromPublicKey(
@@ -720,10 +736,16 @@ class DefaultPhantomSolanaAdapter implements WalletAdapter {
     const input = cloneSignInInput(challenge.input);
     let result: unknown;
     try {
-      result = await Reflect.apply(access.signIn, access.raw, [input]);
+      const operation = Promise.resolve(Reflect.apply(access.signIn, access.raw, [input]));
+      result =
+        options.signal === undefined
+          ? await operation
+          : await waitForAbortSignal(operation, options.signal);
     } catch (error) {
+      throwIfAborted(options.signal);
       throw providerFailure(error, 'PROVIDER_FAILURE');
     }
+    throwIfAborted(options.signal);
     this.assertConnectionRevision(connection, access);
     const candidate = Array.isArray(result) && result.length === 1 ? result[0] : result;
     if (!isObject(candidate)) throw new PhantomSolanaAdapterError('SIGNATURE_INVALID');

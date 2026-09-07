@@ -295,9 +295,12 @@ describe('Phantom Solana adapter', () => {
         publicKey: publicKey(ADDRESS_A),
       },
     });
+    const pendingDisconnect = deferred<undefined>();
+    provider.disconnect.mockImplementationOnce(async () => pendingDisconnect.promise);
     await expect(adapter(provider).connect()).rejects.toMatchObject({ code: 'WRONG_CLUSTER' });
     expect(provider.disconnect).toHaveBeenCalledTimes(1);
     expect(provider.on).not.toHaveBeenCalled();
+    pendingDisconnect.resolve(undefined);
   });
 
   it('accepts a matching Wallet Standard account claim and rejects ambiguous accounts', async () => {
@@ -519,6 +522,38 @@ describe('Phantom Solana adapter', () => {
     });
   });
 
+  it('releases a structured sign-in whose provider never settles and ignores its late result', async () => {
+    const provider = fakeProvider();
+    const signIn = provider.signIn;
+    if (signIn === undefined) throw new Error('expected structured sign-in fake');
+    const staleResult = {
+      account: { address: ADDRESS_A, publicKey: new Uint8Array(PUBLIC_KEY_A) },
+      signedMessage: new TextEncoder().encode('stale wallet-constructed SIWS'),
+      signature: new Uint8Array(64).fill(5),
+      signatureType: 'ed25519',
+    };
+    const staleSignature = deferred<typeof staleResult>();
+    signIn.mockImplementationOnce(async () => staleSignature.promise);
+    const wallet = adapter(provider);
+    const connection = await wallet.connect();
+    const controller = new AbortController();
+
+    const signing = wallet.signOwnershipChallenge(connection.connectionId, signInChallenge(), {
+      signal: controller.signal,
+    });
+    controller.abort();
+
+    await expect(signing).rejects.toMatchObject({ code: 'ABORTED' });
+    await expect(
+      wallet.signOwnershipChallenge(connection.connectionId, signInChallenge()),
+    ).resolves.toMatchObject({ format: 'siws-sign-in' });
+    staleSignature.resolve(staleResult);
+    await Promise.resolve();
+
+    expect(await wallet.connect()).toBe(connection);
+    expect(signIn).toHaveBeenCalledTimes(2);
+  });
+
   it('rejects a structured sign-in cluster outside its injected network binding', async () => {
     const provider = fakeProvider();
     const wallet = adapter(provider);
@@ -583,6 +618,36 @@ describe('Phantom Solana adapter', () => {
     await expect(signing).rejects.toMatchObject({ code: 'CONNECTION_NOT_FOUND' });
   });
 
+  it('releases a signature whose provider never settles and ignores its late result', async () => {
+    const provider = fakeProvider();
+    const staleSignature = deferred<{
+      publicKey: ReturnType<typeof publicKey>;
+      signature: Uint8Array<ArrayBuffer>;
+    }>();
+    provider.signMessage.mockImplementationOnce(async () => staleSignature.promise);
+    const wallet = adapter(provider);
+    const connection = await wallet.connect();
+    const controller = new AbortController();
+
+    const signing = wallet.signOwnershipChallenge(connection.connectionId, messageChallenge(), {
+      signal: controller.signal,
+    });
+    controller.abort();
+
+    await expect(signing).rejects.toMatchObject({ code: 'ABORTED' });
+    await expect(
+      wallet.signOwnershipChallenge(connection.connectionId, messageChallenge()),
+    ).resolves.toMatchObject({ format: 'siws-message' });
+    staleSignature.resolve({
+      publicKey: publicKey(ADDRESS_A),
+      signature: new Uint8Array(64).fill(1),
+    });
+    await Promise.resolve();
+
+    expect(await wallet.connect()).toBe(connection);
+    expect(provider.signMessage).toHaveBeenCalledTimes(2);
+  });
+
   it('never reads or retains provider error messages, causes, or payloads', async () => {
     const provider = fakeProvider();
     const wallet = adapter(provider);
@@ -610,20 +675,24 @@ describe('Phantom Solana adapter', () => {
     expect(JSON.stringify(failure)).not.toContain('provider-controlled-secret');
   });
 
-  it('clears a provider session that resolves after the caller aborts', async () => {
+  it('releases a connect whose provider never settles and ignores its late result', async () => {
     const provider = fakeProvider();
     const pending = deferred<{ publicKey: ReturnType<typeof publicKey> }>();
-    provider.connect.mockImplementation(async () => pending.promise);
+    provider.connect.mockImplementationOnce(async () => pending.promise);
     const wallet = adapter(provider);
     const controller = new AbortController();
 
     const connection = wallet.connect({ signal: controller.signal });
     controller.abort();
-    pending.resolve({ publicKey: publicKey(ADDRESS_A) });
 
     await expect(connection).rejects.toMatchObject({ code: 'ABORTED' });
-    expect(provider.disconnect).toHaveBeenCalledTimes(1);
-    expect(provider.on).not.toHaveBeenCalled();
+    const current = await wallet.connect();
+    pending.resolve({ publicKey: publicKey(ADDRESS_A) });
+    await Promise.resolve();
+
+    expect(await wallet.connect()).toBe(current);
+    expect(provider.disconnect).not.toHaveBeenCalled();
+    expect(provider.on).toHaveBeenCalledTimes(2);
   });
 
   it('isolates listener failures from cleanup and remaining subscribers', async () => {

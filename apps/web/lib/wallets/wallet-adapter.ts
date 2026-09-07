@@ -59,6 +59,10 @@ export interface WalletDisconnectOptions {
   readonly signal?: AbortSignal;
 }
 
+export interface WalletSignOptions {
+  readonly signal?: AbortSignal;
+}
+
 interface OwnershipChallengeBase {
   readonly id: string;
   readonly chainId: ChainId;
@@ -239,6 +243,7 @@ export interface WalletAdapter {
   signOwnershipChallenge(
     connectionId: string,
     challenge: OwnershipChallenge,
+    options?: WalletSignOptions,
   ): Promise<OwnershipSignature>;
 
   /** Registers one normalized listener and returns exact cleanup for it. */

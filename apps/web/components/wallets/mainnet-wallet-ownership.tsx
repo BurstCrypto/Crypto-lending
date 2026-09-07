@@ -172,7 +172,8 @@ export function createMainnetWalletOwnershipRuntime(
     if (disposed) throw new MainnetWalletRuntimeError('CONNECTOR_UNAVAILABLE');
   }
 
-  function clearPending(): void {
+  function clearPending(expected?: PendingConnection): void {
+    if (expected !== undefined && pending !== expected) return;
     const current = pending;
     pending = null;
     if (current?.kind === 'EVM') {
@@ -325,7 +326,7 @@ export function createMainnetWalletOwnershipRuntime(
           });
         } catch (error) {
           if (connection !== null) {
-            await adapter.disconnect(connection.connectionId).catch(() => undefined);
+            void adapter.disconnect(connection.connectionId).catch(() => undefined);
           }
           throw error;
         }
@@ -389,7 +390,7 @@ export function createMainnetWalletOwnershipRuntime(
           ),
         });
       } finally {
-        clearPending();
+        clearPending(current);
         finishOperation(operation);
       }
     },

@@ -483,10 +483,12 @@ export async function completeSolanaWalletOwnershipRegistration(
     input.signal,
   );
   throwIfAborted(input.signal);
-  const signature = await input.adapter.signOwnershipChallenge(
-    input.connection.connectionId,
-    challenge,
-  );
+  const signature =
+    input.signal === undefined
+      ? await input.adapter.signOwnershipChallenge(input.connection.connectionId, challenge)
+      : await input.adapter.signOwnershipChallenge(input.connection.connectionId, challenge, {
+          signal: input.signal,
+        });
   if (signature.format !== 'siws-message') {
     fail(WALLET_OWNERSHIP_HANDOFF_ERROR_CODES.rejected);
   }

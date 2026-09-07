@@ -514,13 +514,20 @@ describe('completeEvmWalletOwnershipRegistration', () => {
     const adapter = signingAdapter(provider);
     const connection = await adapter.connect();
     const result = registrationResponse();
+    const controller = new AbortController();
+    const signOwnershipChallenge = vi.spyOn(adapter, 'signOwnershipChallenge');
     const client: EvmWalletOwnershipClient = {
       issueChallenge: vi.fn(async () => issuedChallenge()),
       submitProof: vi.fn(async () => result),
     };
 
     await expect(
-      completeEvmWalletOwnershipRegistration({ adapter, connection, client }),
+      completeEvmWalletOwnershipRegistration({
+        adapter,
+        connection,
+        client,
+        signal: controller.signal,
+      }),
     ).resolves.toEqual(result);
     expect(client.issueChallenge).toHaveBeenCalledWith(
       {
@@ -528,7 +535,14 @@ describe('completeEvmWalletOwnershipRegistration', () => {
         address: ADDRESS,
         registryEnvironment: 'MAINNET',
       },
-      undefined,
+      controller.signal,
+    );
+    expect(signOwnershipChallenge).toHaveBeenCalledWith(
+      connection.connectionId,
+      issuedChallenge(),
+      {
+        signal: controller.signal,
+      },
     );
     expect(client.submitProof).toHaveBeenCalledWith(
       {
@@ -541,7 +555,7 @@ describe('completeEvmWalletOwnershipRegistration', () => {
           signature: SIGNATURE,
         },
       },
-      undefined,
+      controller.signal,
     );
   });
 

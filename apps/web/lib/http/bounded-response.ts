@@ -40,7 +40,7 @@ function isAborted(signal: AbortSignal | undefined): signal is AbortSignal {
   return signal?.aborted === true;
 }
 
-function waitForSignal<T>(operation: PromiseLike<T>, signal: AbortSignal): Promise<T> {
+export function waitForAbortSignal<T>(operation: PromiseLike<T>, signal: AbortSignal): Promise<T> {
   if (signal.aborted) {
     void Promise.resolve(operation).catch(() => undefined);
     return Promise.reject(abortReason(signal));
@@ -106,7 +106,7 @@ export function createRequestDeadline(
       globalThis.clearTimeout(timeout);
       callerSignal?.removeEventListener('abort', forwardCallerAbort);
     },
-    waitFor: <T>(operation: PromiseLike<T>) => waitForSignal(operation, controller.signal),
+    waitFor: <T>(operation: PromiseLike<T>) => waitForAbortSignal(operation, controller.signal),
   });
 }
 

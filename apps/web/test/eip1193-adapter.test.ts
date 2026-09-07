@@ -88,6 +88,14 @@ function challenge(overrides: Partial<SiweOwnershipChallenge> = {}): SiweOwnersh
   };
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
+
 describe('InjectedEip1193WalletAdapter connection state', () => {
   it('normalizes an explicit MetaMask selection and prevents duplicate connections', async () => {
     const provider = new FakeProvider();
@@ -225,6 +233,30 @@ describe('InjectedEip1193WalletAdapter connection state', () => {
     });
     expect(provider.request).not.toHaveBeenCalled();
   });
+
+  it('releases a connect whose provider request never settles and ignores its late result', async () => {
+    const provider = new FakeProvider();
+    const staleChainRead = deferred<unknown>();
+    let chainReads = 0;
+    provider.handlers.set('eth_chainId', async () => {
+      chainReads += 1;
+      return chainReads === 1 ? staleChainRead.promise : provider.chainId;
+    });
+    const wallet = adapter(provider);
+    const controller = new AbortController();
+
+    const staleConnection = wallet.connect({ signal: controller.signal });
+    controller.abort();
+
+    await expect(staleConnection).rejects.toMatchObject({
+      code: INJECTED_EVM_ERROR_CODES.aborted,
+    });
+    const currentConnection = await wallet.connect();
+    staleChainRead.resolve(provider.chainId);
+    await Promise.resolve();
+
+    expect(wallet.currentConnection()).toBe(currentConnection);
+  });
 });
 
 describe('InjectedEip1193WalletAdapter ownership signing', () => {
@@ -253,6 +285,36 @@ describe('InjectedEip1193WalletAdapter ownership signing', () => {
     expect(
       provider.request.mock.calls.filter(([request]) => request.method === 'personal_sign'),
     ).toHaveLength(1);
+  });
+
+  it('releases a signature request whose provider never settles without consuming its challenge', async () => {
+    const provider = new FakeProvider();
+    const staleSignature = deferred<unknown>();
+    let signatureRequests = 0;
+    provider.handlers.set('personal_sign', async () => {
+      signatureRequests += 1;
+      return signatureRequests === 1 ? staleSignature.promise : SIGNATURE;
+    });
+    const wallet = adapter(provider);
+    const connection = await wallet.connect();
+    const issued = challenge();
+    const controller = new AbortController();
+
+    const staleSigning = wallet.signOwnershipChallenge(connection.connectionId, issued, {
+      signal: controller.signal,
+    });
+    await vi.waitFor(() => expect(signatureRequests).toBe(1));
+    controller.abort();
+
+    await expect(staleSigning).rejects.toMatchObject({ code: INJECTED_EVM_ERROR_CODES.aborted });
+    await expect(wallet.signOwnershipChallenge(connection.connectionId, issued)).resolves.toEqual(
+      expect.objectContaining({ signature: SIGNATURE.toLowerCase() }),
+    );
+    staleSignature.resolve(SIGNATURE);
+    await Promise.resolve();
+
+    expect(wallet.currentConnection()).toBe(connection);
+    expect(signatureRequests).toBe(2);
   });
 
   it('rejects wrong account, wrong chain, expired, and malformed provider results', async () => {

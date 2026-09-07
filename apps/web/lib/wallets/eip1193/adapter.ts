@@ -9,7 +9,9 @@ import {
   type WalletEvent,
   type WalletProviderError,
   type WalletRestoreOptions,
+  type WalletSignOptions,
 } from '../wallet-adapter';
+import { waitForAbortSignal } from '../../http/bounded-response';
 import type {
   InjectedEvmConnectorId,
   InjectedProviderDescriptor,
@@ -358,8 +360,10 @@ export class InjectedEip1193WalletAdapter implements WalletAdapter {
   async signOwnershipChallenge(
     connectionId: string,
     challenge: OwnershipChallenge,
+    options: WalletSignOptions = {},
   ): Promise<OwnershipSignature> {
     this.#assertAvailable();
+    this.#checkAbort(options.signal);
     if (this.#signing) fail(INJECTED_EVM_ERROR_CODES.operationPending);
 
     const connection = this.#connection;
@@ -381,18 +385,22 @@ export class InjectedEip1193WalletAdapter implements WalletAdapter {
 
     this.#signing = true;
     try {
-      const before = await this.#readStableSnapshot(false);
+      const before = await this.#readStableSnapshot(false, options.signal);
       if (before === null || !this.#snapshotMatchesConnection(before, connection)) {
         fail(INJECTED_EVM_ERROR_CODES.connectionChanged);
       }
       const revision = this.#revision;
-      const response = await this.#request({
-        method: 'personal_sign',
-        params: [challenge.message, challenge.address],
-      });
+      const response = await this.#request(
+        {
+          method: 'personal_sign',
+          params: [challenge.message, challenge.address],
+        },
+        options.signal,
+      );
+      this.#checkAbort(options.signal);
       this.#rememberChallenge(challenge.id);
       const signature = parseSignature(response);
-      const after = await this.#readStableSnapshot(false);
+      const after = await this.#readStableSnapshot(false, options.signal);
       if (
         after === null ||
         revision !== this.#revision ||
@@ -548,7 +556,9 @@ export class InjectedEip1193WalletAdapter implements WalletAdapter {
   ): Promise<unknown> {
     this.#checkAbort(signal);
     try {
-      const result = await this.#provider.request(arguments_);
+      const operation = this.#provider.request(arguments_);
+      const result =
+        signal === undefined ? await operation : await waitForAbortSignal(operation, signal);
       this.#checkAbort(signal);
       return result;
     } catch (error) {

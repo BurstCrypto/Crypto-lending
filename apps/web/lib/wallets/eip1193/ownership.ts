@@ -547,10 +547,12 @@ export async function completeEvmWalletOwnershipRegistration(
     input.signal,
   );
   throwIfAborted(input.signal);
-  const signature = await input.adapter.signOwnershipChallenge(
-    input.connection.connectionId,
-    challenge,
-  );
+  const signature =
+    input.signal === undefined
+      ? await input.adapter.signOwnershipChallenge(input.connection.connectionId, challenge)
+      : await input.adapter.signOwnershipChallenge(input.connection.connectionId, challenge, {
+          signal: input.signal,
+        });
   if (signature.format !== 'siwe') fail(WALLET_OWNERSHIP_HANDOFF_ERROR_CODES.rejected);
   throwIfAborted(input.signal);
   return input.client.submitProof({ challenge, signature }, input.signal);
