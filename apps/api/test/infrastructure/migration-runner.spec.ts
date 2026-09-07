@@ -5,6 +5,7 @@ import { DATABASE_MIGRATION_LIST } from '../../src/infrastructure/database/migra
 import type { PostgresService } from '../../src/infrastructure/database/postgres.service';
 
 const REVERSIBLE_DATABASE_MIGRATION_LIST = DATABASE_MIGRATION_LIST.filter(({ id }) => id <= '0025');
+const IN_MEMORY_DATABASE_MIGRATION_LIST = DATABASE_MIGRATION_LIST.filter(({ id }) => id <= '0028');
 
 interface StoredMigration extends QueryResultRow {
   id: string;
@@ -35,6 +36,7 @@ class InMemoryMigrationDatabase {
   aaveCheckpointSchemaExists = false;
   balanceAddressResolverExists = false;
   financialAgreementEvidenceExists = false;
+  genericWorkerBalanceAuthoritySuspended = false;
   authenticationSchemaExists = false;
   jobOutboxExists = false;
   jobOutboxLastErrorConstraintExists = false;
@@ -57,6 +59,7 @@ class InMemoryMigrationDatabase {
   private transactionBalanceAddressResolverExistsSnapshot: boolean | undefined;
   private transactionAuthenticationSchemaExistsSnapshot: boolean | undefined;
   private transactionFinancialAgreementEvidenceExistsSnapshot: boolean | undefined;
+  private transactionGenericWorkerBalanceAuthoritySuspendedSnapshot: boolean | undefined;
   private transactionLedgerSchemaExistsSnapshot: boolean | undefined;
   private transactionLedgerFeeAdjustmentIntegrityRepairedSnapshot: boolean | undefined;
   private transactionLedgerIdempotencySchemaExistsSnapshot: boolean | undefined;
@@ -82,6 +85,8 @@ class InMemoryMigrationDatabase {
         this.transactionAuthenticationSchemaExistsSnapshot = this.authenticationSchemaExists;
         this.transactionFinancialAgreementEvidenceExistsSnapshot =
           this.financialAgreementEvidenceExists;
+        this.transactionGenericWorkerBalanceAuthoritySuspendedSnapshot =
+          this.genericWorkerBalanceAuthoritySuspended;
         this.transactionLedgerSchemaExistsSnapshot = this.ledgerSchemaExists;
         this.transactionLedgerFeeAdjustmentIntegrityRepairedSnapshot =
           this.ledgerFeeAdjustmentIntegrityRepaired;
@@ -96,6 +101,7 @@ class InMemoryMigrationDatabase {
         this.transactionBalanceAddressResolverExistsSnapshot = undefined;
         this.transactionAuthenticationSchemaExistsSnapshot = undefined;
         this.transactionFinancialAgreementEvidenceExistsSnapshot = undefined;
+        this.transactionGenericWorkerBalanceAuthoritySuspendedSnapshot = undefined;
         this.transactionLedgerSchemaExistsSnapshot = undefined;
         this.transactionLedgerFeeAdjustmentIntegrityRepairedSnapshot = undefined;
         this.transactionLedgerIdempotencySchemaExistsSnapshot = undefined;
@@ -136,6 +142,10 @@ class InMemoryMigrationDatabase {
           this.financialAgreementEvidenceExists =
             this.transactionFinancialAgreementEvidenceExistsSnapshot;
         }
+        if (this.transactionGenericWorkerBalanceAuthoritySuspendedSnapshot !== undefined) {
+          this.genericWorkerBalanceAuthoritySuspended =
+            this.transactionGenericWorkerBalanceAuthoritySuspendedSnapshot;
+        }
         if (this.transactionWalletRegistrationSchemaExistsSnapshot !== undefined) {
           this.walletRegistrationSchemaExists =
             this.transactionWalletRegistrationSchemaExistsSnapshot;
@@ -148,6 +158,7 @@ class InMemoryMigrationDatabase {
         this.transactionBalanceAddressResolverExistsSnapshot = undefined;
         this.transactionAuthenticationSchemaExistsSnapshot = undefined;
         this.transactionFinancialAgreementEvidenceExistsSnapshot = undefined;
+        this.transactionGenericWorkerBalanceAuthoritySuspendedSnapshot = undefined;
         this.transactionLedgerSchemaExistsSnapshot = undefined;
         this.transactionLedgerFeeAdjustmentIntegrityRepairedSnapshot = undefined;
         this.transactionLedgerIdempotencySchemaExistsSnapshot = undefined;
@@ -210,6 +221,24 @@ class InMemoryMigrationDatabase {
         this.authenticationSchemaExists = true;
       } else if (normalized.includes('CREATE TABLE balance_sync_financial_agreement_evidence (')) {
         this.financialAgreementEvidenceExists = true;
+      } else if (
+        normalized.startsWith(
+          'REVOKE EXECUTE ON FUNCTION read_balance_sync_checkpoint(uuid,uuid,text)',
+        ) &&
+        normalized.includes(
+          'REVOKE EXECUTE ON FUNCTION record_balance_sync_current(uuid,uuid,text,bigint,text,text,numeric,text,text,text,timestamp with time zone,timestamp with time zone,jsonb,timestamp with time zone)',
+        ) &&
+        normalized.includes(
+          'REVOKE EXECUTE ON FUNCTION mark_balance_sync_checkpoint_stale(uuid,uuid,text,bigint,timestamp with time zone,text)',
+        ) &&
+        normalized.includes(
+          'REVOKE EXECUTE ON FUNCTION replace_balance_sync_after_reorg(uuid,uuid,text,bigint,numeric,text,text,text,timestamp with time zone,text,numeric,text,text,text,timestamp with time zone,timestamp with time zone,jsonb,timestamp with time zone)',
+        ) &&
+        normalized.includes(
+          'REVOKE EXECUTE ON FUNCTION resolve_active_wallet_address_ciphertext(uuid,uuid,text) FROM "crypto_worker_runtime"',
+        )
+      ) {
+        this.genericWorkerBalanceAuthoritySuspended = true;
       } else if (normalized.includes('CREATE TABLE wallet_ownership_challenges (')) {
         this.walletRegistrationSchemaExists = true;
       } else if (normalized.includes('CREATE TABLE yield_operations (')) {
@@ -255,6 +284,19 @@ class InMemoryMigrationDatabase {
         normalized.includes('balance_sync_financial_agreement_evidence')
       ) {
         return result([{ valid: this.financialAgreementEvidenceExists }]);
+      } else if (
+        normalized.startsWith(
+          'SELECT ( prior.valid AND worker_balance_authority.valid AND dormant_balance_principals.valid',
+        ) &&
+        normalized.includes('read_balance_sync_checkpoint(uuid,uuid,text)') &&
+        normalized.includes('resolve_active_wallet_address_ciphertext(uuid,uuid,text)')
+      ) {
+        return result([
+          {
+            valid:
+              this.financialAgreementEvidenceExists && this.genericWorkerBalanceAuthoritySuspended,
+          },
+        ]);
       } else if (
         normalized.startsWith(
           'SELECT (prior.valid AND function_privileges.valid AND direct_objects.valid)',
@@ -860,7 +902,7 @@ describe('MigrationRunner', () => {
 
   it('rejects a valid same-name retention index with the wrong definition', async () => {
     const database = new InMemoryMigrationDatabase();
-    const runner = new MigrationRunner(database.pool, DATABASE_MIGRATION_LIST);
+    const runner = new MigrationRunner(database.pool, IN_MEMORY_DATABASE_MIGRATION_LIST);
     await runner.up();
 
     database.indexes.set(
@@ -875,8 +917,8 @@ describe('MigrationRunner', () => {
 
   it('includes non-transactional execution policy in the immutable checksum', async () => {
     const database = new InMemoryMigrationDatabase();
-    await new MigrationRunner(database.pool, DATABASE_MIGRATION_LIST).up();
-    const mutated = DATABASE_MIGRATION_LIST.map((migration) =>
+    await new MigrationRunner(database.pool, IN_MEMORY_DATABASE_MIGRATION_LIST).up();
+    const mutated = IN_MEMORY_DATABASE_MIGRATION_LIST.map((migration) =>
       migration.id === '0003' ? { ...migration, transactional: true } : migration,
     );
 
