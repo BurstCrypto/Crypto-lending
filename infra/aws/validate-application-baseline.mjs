@@ -34,7 +34,7 @@ const operationalAlarmLogicalIds = Object.freeze([
   'BalanceDeadLetterQueueNotEmptyAlarm',
 ]);
 const reviewedApplicationBaselineSha256 =
-  '7fa270567d03d78a833e40cc0524c968c61f00fd43df877e5e0dfdd9ea1a07be';
+  '58b040eea3858661d45ab0f1334457c0b937cfb8179bad665aa3bb649171807c';
 const reviewedWorkloadBoundariesSha256 =
   '4c74c98e73635df30570dfe1e726b41cb6f62832f0bfc2e43dcd087d384b78de';
 const reviewedObservabilitySha256 =
@@ -1759,11 +1759,17 @@ function validateKmsAndEncryptedServiceBoundaries(resources, inventory, errors) 
     'the exact API-only ACL user group from the reviewed workload-boundary child',
     errors,
   );
-  requireExactProperty(
+  requireExactSemanticProperty(
     resources.get('DatabaseParameterGroup') ?? '',
     'DatabaseParameterGroup',
-    'rds.force_ssl',
-    "'1'",
+    'Parameters',
+    [
+      'Parameters:',
+      "  log_parameter_max_length: '0'",
+      "  log_parameter_max_length_on_error: '0'",
+      "  rds.force_ssl: '1'",
+    ].join('\n'),
+    'the exact TLS and disabled bind-parameter logging boundary',
     errors,
   );
 

@@ -104,9 +104,9 @@ test('accepts the repository no-external-egress baseline and records the DNS res
 
 test('keeps the parent below the reviewed direct-upload ceiling after child extraction', () => {
   const bytes = Buffer.byteLength(templateSource, 'utf8');
-  assert.equal(bytes, 49_860);
+  assert.equal(bytes, 49_964);
   assert.ok(bytes <= 50_500);
-  assert.equal(51_200 - bytes, 1_340);
+  assert.equal(51_200 - bytes, 1_236);
 });
 
 test('pins the observability child URL, digest, binding, and exact parent mapping', () => {
@@ -1287,6 +1287,41 @@ test('delegates the database master credential to RDS with the reviewed KMS key'
     assertRejected(
       mutate((source) => source.replace(search, replacement)),
       message,
+    );
+  }
+});
+
+test('pins the exact TLS and disabled bind-parameter logging boundary', () => {
+  const parameterBlock = [
+    '   Parameters:',
+    "    log_parameter_max_length: '0'",
+    "    log_parameter_max_length_on_error: '0'",
+    "    rds.force_ssl: '1'",
+  ].join('\n');
+  const error =
+    /DatabaseParameterGroup must preserve the exact TLS and disabled bind-parameter logging boundary/;
+
+  for (const replacement of [
+    parameterBlock.replace("    log_parameter_max_length: '0'\n", ''),
+    parameterBlock.replace("    log_parameter_max_length_on_error: '0'\n", ''),
+    parameterBlock.replace("log_parameter_max_length: '0'", "log_parameter_max_length: '64'"),
+    parameterBlock.replace(
+      "log_parameter_max_length_on_error: '0'",
+      "log_parameter_max_length_on_error: '64'",
+    ),
+    parameterBlock.replace(
+      "    log_parameter_max_length: '0'",
+      "    log_parameter_max_length: '0'\n    log_parameter_max_length: '0'",
+    ),
+    parameterBlock.replace(
+      "    rds.force_ssl: '1'",
+      "    rds.force_ssl: '1'\n    rds.force_ssl: '1'",
+    ),
+    `${parameterBlock}\n    log_statement: all`,
+  ]) {
+    assertRejected(
+      mutate((source) => source.replace(parameterBlock, replacement)),
+      error,
     );
   }
 });

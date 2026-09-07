@@ -668,9 +668,11 @@ Resources:
  DatabaseParameterGroup:
   Type: AWS::RDS::DBParameterGroup
   Properties:
-   Description: !Sub ${EnvironmentName} PostgreSQL TLS
+   Description: !Sub ${EnvironmentName} PostgreSQL TLS and bind-parameter privacy
    Family: postgres16
    Parameters:
+    log_parameter_max_length: '0'
+    log_parameter_max_length_on_error: '0'
     rds.force_ssl: '1'
 
  Database:
