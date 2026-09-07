@@ -712,7 +712,7 @@ const REVIEWED_PROVIDER_POSITION_READ_ARTIFACT_SHA256 = Object.freeze({
   postgresWalletRegistrationRepositorySource:
     '00b46e4ab87be7e65559ca7ddc925d3226a1302ca742a5ddfb797034fd795707',
   providerPositionPostgresServiceSource:
-    '2e7e6fba4651e80f865a52ba5484f1c0ceb5c35268ad53a95eba89b216e85d94',
+    '3f8c97e8ed9c9e0ccddb75dba088e911f37869c3f7e066cf5642e95d82934e48',
   providerPositionCoverageSource:
     'a26d468abb2c46bd28267c6d36d1a7d3e62c30a700159e3c4cf263d15a8a9611',
   providerPositionObservationSource:
@@ -828,7 +828,7 @@ const REVIEWED_BALANCE_CONSUMER_ARTIFACT_SHA256 = Object.freeze({
   balanceConsumerSqsReceiptResourceSource:
     '470dc9f137b0231d96996379a04dffa96de99176270edefd0fbf98a5250f3a60',
   runtimePostgresPoolSource: 'd15b4a0604cda0bcc9d8df7f597863e42c4ef573ba8ed4362386cd2beaa1f823',
-  postgresServiceSource: '2e7e6fba4651e80f865a52ba5484f1c0ceb5c35268ad53a95eba89b216e85d94',
+  postgresServiceSource: '3f8c97e8ed9c9e0ccddb75dba088e911f37869c3f7e066cf5642e95d82934e48',
   balanceSyncCheckpointRepositorySource:
     '177a87c54235a007b4724e98e33700bf768091c432d4eb2ace24412bea23560c',
   balanceSyncWalletAddressResolverSource:
