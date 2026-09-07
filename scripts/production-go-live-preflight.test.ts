@@ -450,6 +450,20 @@ const PROVIDER_POSITION_READ_ARTIFACTS = Object.freeze({
     ),
     'utf8',
   ),
+  providerPositionChainAnchorCandidateFinalityPortSource: readFileSync(
+    resolve(
+      __dirname,
+      '../apps/api/src/mainnet-platforms/application/ports/provider-position-chain-anchor-candidate-finality.port.ts',
+    ),
+    'utf8',
+  ),
+  providerPositionChainAnchorCandidateFinalityFinalizerSource: readFileSync(
+    resolve(
+      __dirname,
+      '../apps/api/src/mainnet-platforms/application/dormant-provider-position-chain-anchor-candidate-finality.finalizer.ts',
+    ),
+    'utf8',
+  ),
   providerPositionChainAnchorEvidenceRecorderPortSource: readFileSync(
     resolve(
       __dirname,
@@ -1182,7 +1196,7 @@ function mutateProviderPositionReadArtifact(
 }
 
 test('provider-position read inspection pins the exact dormant critical source slice', () => {
-  assert.equal(Object.keys(PROVIDER_POSITION_READ_ARTIFACTS).length, 36);
+  assert.equal(Object.keys(PROVIDER_POSITION_READ_ARTIFACTS).length, 38);
   const inspected = inspectProviderPositionReadBoundaryArtifacts(PROVIDER_POSITION_READ_ARTIFACTS);
   assert.deepEqual(inspected, EXPECTED_DORMANT_PROVIDER_POSITION_READ_BOUNDARY);
   assert.equal(Object.isFrozen(inspected), true);
@@ -1212,9 +1226,13 @@ test('provider-position read semantic gate contains no disabled-check bypass', (
     'function hasDormantProviderPositionChainAnchorEvidenceProducerContract(',
     recordDeadlineMigrationStart,
   );
+  const finalityStart = source.indexOf(
+    'function hasDormantProviderPositionChainAnchorCandidateFinalityContract(',
+    producerStart,
+  );
   const recorderStart = source.indexOf(
     'function hasDormantProviderPositionChainAnchorEvidenceRecorderContract(',
-    producerStart,
+    finalityStart,
   );
   const recordIntentMigrationStart = source.indexOf(
     'function hasDormantProviderPositionChainAnchorRecordIntentMigrationContract(',
@@ -1236,7 +1254,8 @@ test('provider-position read semantic gate contains no disabled-check bypass', (
   assert.ok(
     recordDeadlineMigrationStart >= 0 &&
       producerStart > recordDeadlineMigrationStart &&
-      recorderStart > producerStart &&
+      finalityStart > producerStart &&
+      recorderStart > finalityStart &&
       recordIntentMigrationStart > recorderStart &&
       reconciliationStart > recordIntentMigrationStart &&
       reconciliationLifecycleStart > reconciliationStart &&
@@ -1497,6 +1516,175 @@ test('provider-position read inspection rejects dormant two-source evidence prod
       'mainnetPlatformsIndexSource',
       "export { MainnetPlatformDirectoryService } from './application/mainnet-platform-directory.service';",
       "export { DormantProviderPositionChainAnchorEvidenceProducer } from './application/dormant-provider-position-chain-anchor-evidence.producer';",
+    ],
+  ];
+
+  for (const [key, approved, rejected] of mutations) {
+    assert.deepEqual(
+      inspectProviderPositionReadBoundaryArtifacts(
+        mutateProviderPositionReadArtifact(key, approved, rejected),
+      ),
+      INVALID_PROVIDER_POSITION_READ_BOUNDARY,
+      `${key}: ${approved}`,
+    );
+  }
+});
+
+test('provider-position read inspection rejects dormant candidate-finality drift', () => {
+  const mutations: readonly (readonly [
+    keyof ProviderPositionReadBoundaryArtifactSources,
+    string,
+    string,
+  ])[] = [
+    [
+      'providerPositionChainAnchorCandidateFinalityPortSource',
+      'readonly mayAuthorizeFinancialAction: false;',
+      'readonly mayAuthorizeFinancialAction: true;',
+    ],
+    [
+      'providerPositionChainAnchorCandidateFinalityPortSource',
+      'readonly mayPersist: false;',
+      'readonly mayPersist: true;',
+    ],
+    [
+      'providerPositionChainAnchorCandidateFinalityPortSource',
+      'readonly mayCreatePositionSnapshot: false;',
+      'readonly mayCreatePositionSnapshot: true;',
+    ],
+    [
+      'providerPositionChainAnchorCandidateFinalityPortSource',
+      'readonly claimsSameSlotForkDetection: false;',
+      'readonly claimsSameSlotForkDetection: true;',
+    ],
+    [
+      'providerPositionChainAnchorCandidateFinalityPortSource',
+      'readonly producerCapability: unknown;',
+      'readonly producerCapability: object;',
+    ],
+    [
+      'providerPositionChainAnchorCandidateFinalityPortSource',
+      'readonly signal: AbortSignal;',
+      'readonly assessedAt: string;',
+    ],
+    [
+      'providerPositionChainAnchorCandidateFinalityFinalizerSource',
+      "import { isProxy } from 'node:util/types';",
+      "import { request } from 'node:https';",
+    ],
+    [
+      'providerPositionChainAnchorCandidateFinalityFinalizerSource',
+      'mayAuthorizeFinancialAction: false as const,',
+      'mayAuthorizeFinancialAction: true as const,',
+    ],
+    [
+      'providerPositionChainAnchorCandidateFinalityFinalizerSource',
+      'mayPersist: false as const,',
+      'mayPersist: true as const,',
+    ],
+    [
+      'providerPositionChainAnchorCandidateFinalityFinalizerSource',
+      'mayCreatePositionSnapshot: false as const,',
+      'mayCreatePositionSnapshot: true as const,',
+    ],
+    [
+      'providerPositionChainAnchorCandidateFinalityFinalizerSource',
+      "if (firstReview !== request.producerCapability) return fail('CANDIDATE_UNAVAILABLE');",
+      'if (firstReview === request.producerCapability) return firstReview;',
+    ],
+    [
+      'providerPositionChainAnchorCandidateFinalityFinalizerSource',
+      'const candidate = reviewedCandidate(firstReview, request.producerRequest);',
+      'const candidate = reviewedCandidate(request.producerCapability, request.producerRequest);',
+    ],
+    [
+      'providerPositionChainAnchorCandidateFinalityFinalizerSource',
+      'if (secondReview !== firstReview || secondReview !== candidate.candidate) {',
+      'if (secondReview !== firstReview && secondReview !== candidate.candidate) {',
+    ],
+    [
+      'providerPositionChainAnchorCandidateFinalityFinalizerSource',
+      'return candidate.finalizedHead.blockHash === candidate.candidateAnchor.blockHash',
+      'return candidate.finalizedHead.blockHash !== candidate.candidateAnchor.blockHash',
+    ],
+    [
+      'providerPositionChainAnchorCandidateFinalityFinalizerSource',
+      'const lineageProofSha256 = nonzeroSha256(values[15]);',
+      'const lineageProofSha256 = String(values[15]);',
+    ],
+    [
+      'providerPositionChainAnchorCandidateFinalityFinalizerSource',
+      'const finalizedRoot = BigInt(candidate.finalizedHead.root);',
+      'const finalizedRoot = BigInt(candidate.finalizedHead.slot);',
+    ],
+    [
+      'providerPositionChainAnchorCandidateFinalityFinalizerSource',
+      'if (finalizedRoot < candidateObservedRoot) {',
+      'if (finalizedRoot > candidateObservedRoot) {',
+    ],
+    [
+      'providerPositionChainAnchorCandidateFinalityFinalizerSource',
+      'now.milliseconds >= candidate.expiresAtExclusive.milliseconds ||',
+      'now.milliseconds > candidate.expiresAtExclusive.milliseconds ||',
+    ],
+    [
+      'providerPositionChainAnchorCandidateFinalityFinalizerSource',
+      'request.deadlineAt.milliseconds,\n      approvalExpiresAt.milliseconds,',
+      'approvalExpiresAt.milliseconds,\n      approvalExpiresAt.milliseconds,',
+    ],
+    [
+      'providerPositionChainAnchorCandidateFinalityFinalizerSource',
+      'approvalExpiresAt.milliseconds,\n      currentHeadAdvancedAt.milliseconds + currentLifetime,',
+      'request.deadlineAt.milliseconds,\n      currentHeadAdvancedAt.milliseconds + currentLifetime,',
+    ],
+    [
+      'providerPositionChainAnchorCandidateFinalityFinalizerSource',
+      'const SOLANA_CURRENT_HEAD_LIFETIME_MILLISECONDS = 15_000;',
+      'const SOLANA_CURRENT_HEAD_LIFETIME_MILLISECONDS = 150_000;',
+    ],
+    [
+      'providerPositionChainAnchorCandidateFinalityFinalizerSource',
+      'assessedAt: assessedAt.value,',
+      'assessedAt: request.producerRequest.observedAt.value,',
+    ],
+    [
+      'providerPositionChainAnchorCandidateFinalityFinalizerSource',
+      "clock,\n      'now',\n      'INVALID_CONFIGURATION',",
+      "clock,\n      'callerNow',\n      'INVALID_CONFIGURATION',",
+    ],
+    [
+      'providerPositionChainAnchorCandidateFinalityFinalizerSource',
+      'readonly #issued = new WeakMap<object, IssuedAssessment>();',
+      'readonly #issued = new Map<object, IssuedAssessment>();',
+    ],
+    [
+      'providerPositionChainAnchorCandidateFinalityFinalizerSource',
+      'issued === undefined || issued.request !== requestInput || issued.result !== capability',
+      'issued === undefined || issued.request === requestInput || issued.result !== capability',
+    ],
+    [
+      'providerPositionChainAnchorCandidateFinalityFinalizerSource',
+      'claimsSameSlotForkDetection: false as const,',
+      'claimsSameSlotForkDetection: true as const,',
+    ],
+    [
+      'providerPositionRuntimeCompositionSource',
+      'const DEPENDENCY_KEYS = Object.freeze([',
+      'type DormantProviderPositionChainAnchorCandidateFinalityFinalizer = unknown;\nconst DEPENDENCY_KEYS = Object.freeze([',
+    ],
+    [
+      'mainnetPlatformsModuleSource',
+      'providers: [MainnetPlatformDirectoryService, MainnetPlatformsPrivacyInterceptor],',
+      'providers: [MainnetPlatformDirectoryService, DormantProviderPositionChainAnchorCandidateFinalityFinalizer],',
+    ],
+    [
+      'mainnetPlatformsIndexSource',
+      "export { MainnetPlatformDirectoryService } from './application/mainnet-platform-directory.service';",
+      "export { DormantProviderPositionChainAnchorCandidateFinalityFinalizer } from './application/dormant-provider-position-chain-anchor-candidate-finality.finalizer';",
+    ],
+    [
+      'mainnetPlatformsControllerSource',
+      'constructor(private readonly directory: MainnetPlatformDirectoryService) {}',
+      'constructor(private readonly finalizer: DormantProviderPositionChainAnchorCandidateFinalityFinalizer) {}',
     ],
   ];
 
@@ -3117,7 +3305,7 @@ test('provider-position read artifact shape and private brand fail closed', () =
     Object.fromEntries(
       Object.keys(PROVIDER_POSITION_READ_ARTIFACTS).map((key) => [
         key,
-        'x'.repeat(Math.floor((896 * 1024) / 36) + 1),
+        'x'.repeat(Math.floor((896 * 1024) / 38) + 1),
       ]),
     ),
     accessor,

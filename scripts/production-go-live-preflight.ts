@@ -253,6 +253,8 @@ export interface ProviderPositionReadBoundaryArtifactSources {
   readonly providerPositionDurableChainAnchorReaderPortSource: string;
   readonly providerPositionChainAnchorEvidenceSourcePortSource: string;
   readonly providerPositionChainAnchorEvidenceProducerSource: string;
+  readonly providerPositionChainAnchorCandidateFinalityPortSource: string;
+  readonly providerPositionChainAnchorCandidateFinalityFinalizerSource: string;
   readonly providerPositionChainAnchorEvidenceRecorderPortSource: string;
   readonly providerPositionPostgresChainAnchorEvidenceRecorderSource: string;
   readonly providerPositionPostgresDurableChainAnchorReaderSource: string;
@@ -597,6 +599,8 @@ const PROVIDER_POSITION_READ_ARTIFACT_KEYS = Object.freeze([
   'providerPositionDurableChainAnchorReaderPortSource',
   'providerPositionChainAnchorEvidenceSourcePortSource',
   'providerPositionChainAnchorEvidenceProducerSource',
+  'providerPositionChainAnchorCandidateFinalityPortSource',
+  'providerPositionChainAnchorCandidateFinalityFinalizerSource',
   'providerPositionChainAnchorEvidenceRecorderPortSource',
   'providerPositionPostgresChainAnchorEvidenceRecorderSource',
   'providerPositionPostgresDurableChainAnchorReaderSource',
@@ -640,6 +644,10 @@ const REVIEWED_PROVIDER_POSITION_READ_ARTIFACT_SHA256 = Object.freeze({
     '4a40a82ab84f6b6f2123e3871835ef89009914ec188753d6ae0f190774822851',
   providerPositionChainAnchorEvidenceProducerSource:
     '34e097328ba3c77894bc055ca5e703eaa0f8d0ae95c66f0b93358774197d2dad',
+  providerPositionChainAnchorCandidateFinalityPortSource:
+    '17dcffab45de9d207f1fc5211dc8d4b90655ad0450b5249e9763f2d3796bc88a',
+  providerPositionChainAnchorCandidateFinalityFinalizerSource:
+    '581c7c17dac3ca3a09a29ac9757efda55b02cb17ea882fc6788aa3d6cf6c33d8',
   providerPositionChainAnchorEvidenceRecorderPortSource:
     'bd4e1a22eb2fe02540f11a2f5b28ba5eed6e71a726fe5a0027291a062f95951c',
   providerPositionPostgresChainAnchorEvidenceRecorderSource:
@@ -3615,6 +3623,297 @@ function hasDormantProviderPositionChainAnchorEvidenceProducerContract(
   );
 }
 
+function hasDormantProviderPositionChainAnchorCandidateFinalityContract(
+  portSource: string,
+  finalizerSource: string,
+  runtimeCompositionSource: string,
+  moduleSource: string,
+  indexSource: string,
+  controllerSource: string,
+): boolean {
+  const port = portSource.replace(/\r\n/gu, '\n');
+  const finalizer = finalizerSource.replace(/\r\n/gu, '\n');
+  const portImports = Array.from(port.matchAll(/\bfrom\s+['"]([^'"]+)['"]/gu), (match) => match[1]);
+  const finalizerImports = Array.from(
+    finalizer.matchAll(/\bfrom\s+['"]([^'"]+)['"]/gu),
+    (match) => match[1],
+  );
+  const forbiddenCapability =
+    /(?:\bimport\s*\(|\brequire\s*\(|(?:\bfrom\s+|\bimport\s*(?:\(\s*)?)['"](?:node:)?(?:child_process|cluster|dgram|dns|fs|http|http2|https|net|tls|worker_threads)(?:\/[^'"]*)?['"]|(?:\bfrom\s+|\bimport\s*(?:\(\s*)?)['"](?:axios|ethers|got|pg|superagent|undici|web3|@solana\/web3\.js)['"]|\b(?:fetch|setTimeout|setInterval|setImmediate|queueMicrotask|WebSocket|EventSource|XMLHttpRequest|readFileSync|writeFileSync)\s*\(|\.\s*(?:query|connect|end|execute|transaction|persist|save|write)\s*\(|\b(?:process|Deno|Bun)\s*\.\s*env\b|\bimport\s*\.\s*meta\s*\.\s*env\b|['"]https?:\/\/|(?:^|\n)[\t ]*@[A-Za-z_$]|\b(?:NestFactory|PostgresService|DataSource|EntityManager|Repository|loadInfrastructureConfig|createPostgresPool)\b)/iu;
+  const forbiddenPortField =
+    /\breadonly\s+(?:accountId|walletId|credential|credentials|database|endpoint|password|repository|secret|timer|token|url|writer)\s*[?:]/u;
+  const forbiddenFeatureSurface =
+    /(?:DormantProviderPositionChainAnchorCandidateFinalityFinalizer|ProviderPositionChainAnchorCandidateFinalityPort|PROVIDER_POSITION_CHAIN_ANCHOR_CANDIDATE_FINALITY_|dormant-provider-position-chain-anchor-candidate-finality\.finalizer|provider-position-chain-anchor-candidate-finality\.port)/u;
+  const runtimeSurfaces = [
+    runtimeCompositionSource,
+    moduleSource,
+    indexSource,
+    controllerSource,
+  ] as const;
+
+  const requestInterfaceStart = port.indexOf(
+    'export interface AssessProviderPositionChainAnchorCandidateFinalityRequestV1 {',
+  );
+  const statusTypeStart = port.indexOf(
+    'export type ProviderPositionChainAnchorCandidateFinalityStatus =',
+    requestInterfaceStart,
+  );
+  const requestInterface =
+    requestInterfaceStart >= 0 && statusTypeStart > requestInterfaceStart
+      ? port.slice(requestInterfaceStart, statusTypeStart)
+      : '';
+  const resultInterfaceStart = port.indexOf(
+    'export interface ProviderPositionChainAnchorCandidateFinalityResultV1 {',
+    statusTypeStart,
+  );
+  const boundaryInterfaceStart = port.indexOf(
+    'export interface ProviderPositionChainAnchorCandidateFinalityPort {',
+    resultInterfaceStart,
+  );
+  const resultInterface =
+    resultInterfaceStart >= 0 && boundaryInterfaceStart > resultInterfaceStart
+      ? port.slice(resultInterfaceStart, boundaryInterfaceStart)
+      : '';
+
+  const requestKeysStart = finalizer.indexOf('const ASSESS_REQUEST_KEYS = Object.freeze([');
+  const requestKeysEnd = finalizer.indexOf('] as const);', requestKeysStart);
+  const requestKeys =
+    requestKeysStart >= 0 && requestKeysEnd > requestKeysStart
+      ? finalizer.slice(requestKeysStart, requestKeysEnd + '] as const);'.length)
+      : '';
+  const expectedRequestKeys = [
+    'const ASSESS_REQUEST_KEYS = Object.freeze([',
+    "'finalityVersion',",
+    "'use',",
+    "'mayAuthorizeFinancialAction',",
+    "'mayPersist',",
+    "'mayCreatePositionSnapshot',",
+    "'producerCapability',",
+    "'producerRequest',",
+    "'signal',",
+    '] as const);',
+  ].join('\n');
+
+  const candidateReviewStart = finalizer.indexOf('function reviewedCandidate(');
+  const classifyStart = finalizer.indexOf('function classify(', candidateReviewStart);
+  const ensureCurrentStart = finalizer.indexOf('function ensureCurrent(', classifyStart);
+  const candidateReview =
+    candidateReviewStart >= 0 && classifyStart > candidateReviewStart
+      ? finalizer.slice(candidateReviewStart, classifyStart)
+      : '';
+  const classification =
+    classifyStart >= 0 && ensureCurrentStart > classifyStart
+      ? finalizer.slice(classifyStart, ensureCurrentStart)
+      : '';
+  const assessStart = finalizer.indexOf('  assessCandidate(');
+  const reviewStart = finalizer.indexOf('\n  reviewAssessment(', assessStart);
+  const clockStart = finalizer.indexOf('\n  #clockTime()', reviewStart);
+  const assess =
+    assessStart >= 0 && reviewStart > assessStart ? finalizer.slice(assessStart, reviewStart) : '';
+  const review =
+    reviewStart >= 0 && clockStart > reviewStart ? finalizer.slice(reviewStart, clockStart) : '';
+  const clock = clockStart >= 0 ? finalizer.slice(clockStart) : '';
+
+  const firstReviewAt = assess.indexOf('const firstReview = reviewProducerCandidate(');
+  const firstIdentityAt = assess.indexOf(
+    "if (firstReview !== request.producerCapability) return fail('CANDIDATE_UNAVAILABLE');",
+    firstReviewAt,
+  );
+  const candidateInspectionAt = assess.indexOf(
+    'const candidate = reviewedCandidate(firstReview, request.producerRequest);',
+    firstIdentityAt,
+  );
+  const classificationAt = assess.indexOf('const classification = classify(candidate);');
+  const finalClockAt = assess.indexOf('const assessedAt = this.#clockTime();', classificationAt);
+  const secondReviewAt = assess.indexOf(
+    'const secondReview = reviewProducerCandidate(',
+    finalClockAt,
+  );
+  const secondIdentityAt = assess.indexOf(
+    'if (secondReview !== firstReview || secondReview !== candidate.candidate) {',
+    secondReviewAt,
+  );
+  const postReviewAbortAt = assess.indexOf(
+    "if (aborted(request.signal)) return fail('STALE_ASSESSMENT');",
+    secondIdentityAt,
+  );
+  const resultAt = assess.indexOf('const result = frozenNullPrototype({', postReviewAbortAt);
+  const issueAt = assess.indexOf('this.#issued.set(', resultAt);
+
+  return (
+    (port.match(/^[\t ]*import\b/gmu)?.length ?? 0) === 3 &&
+    portImports.length === 3 &&
+    portImports[0] === '../../../blockchain/domain/mainnet-launch-network-policy' &&
+    portImports[1] === '../../domain/mainnet-provider-position-chain-assessment' &&
+    portImports[2] === '../dormant-provider-position-chain-anchor-evidence.producer' &&
+    exactExecutableLineCount(
+      port,
+      'export const PROVIDER_POSITION_CHAIN_ANCHOR_CANDIDATE_FINALITY_VERSION = 1 as const;',
+    ) === 1 &&
+    exactExecutableLineCount(
+      port,
+      "'DORMANT_PROVIDER_POSITION_CHAIN_ANCHOR_CANDIDATE_FINALITY_ASSESS_ONLY' as const;",
+    ) === 1 &&
+    exactExecutableLineCount(
+      port,
+      "'DORMANT_PROVIDER_POSITION_CHAIN_ANCHOR_CANDIDATE_FINALITY_RESULT_ONLY' as const;",
+    ) === 1 &&
+    exactExecutableLineCount(requestInterface, 'readonly mayAuthorizeFinancialAction: false;') ===
+      1 &&
+    exactExecutableLineCount(requestInterface, 'readonly mayPersist: false;') === 1 &&
+    exactExecutableLineCount(requestInterface, 'readonly mayCreatePositionSnapshot: false;') ===
+      1 &&
+    exactExecutableLineCount(requestInterface, 'readonly producerCapability: unknown;') === 1 &&
+    exactExecutableLineCount(
+      requestInterface,
+      'readonly producerRequest: ProduceProviderPositionChainAnchorEvidenceRequestV1;',
+    ) === 1 &&
+    exactExecutableLineCount(requestInterface, 'readonly signal: AbortSignal;') === 1 &&
+    !/\breadonly\s+(?:assessedAt|clock|evaluatedAt|expiresAtExclusive|finalizedHash|finalizedHeight|finalizedRoot|now)\s*[?:]/u.test(
+      requestInterface,
+    ) &&
+    exactExecutableLineCount(resultInterface, 'readonly mayAuthorizeFinancialAction: false;') ===
+      1 &&
+    exactExecutableLineCount(resultInterface, 'readonly mayPersist: false;') === 1 &&
+    exactExecutableLineCount(resultInterface, 'readonly mayCreatePositionSnapshot: false;') === 1 &&
+    exactExecutableLineCount(resultInterface, 'readonly authenticatedLineageProof: true;') === 1 &&
+    exactExecutableLineCount(resultInterface, 'readonly comparedSolanaFinalizedRoot: boolean;') ===
+      1 &&
+    exactExecutableLineCount(resultInterface, 'readonly claimsSameSlotForkDetection: false;') ===
+      1 &&
+    exactExecutableLineCount(resultInterface, 'readonly expiresAtExclusive: string;') === 1 &&
+    port.includes("'ETHEREUM_FINALIZED_HASH_CONFLICT'") &&
+    port.includes("'ETHEREUM_FINALIZED_LINEAGE_COVERS_CANDIDATE'") &&
+    port.includes("'SOLANA_FINALIZED_ROOT_COVERS_CANDIDATE_SLOT'") &&
+    port.includes("'SOLANA_FINALIZED_ROOT_REGRESSION';") &&
+    port.includes(
+      'assessCandidate(request: AssessProviderPositionChainAnchorCandidateFinalityRequestV1): unknown;',
+    ) &&
+    port.includes('): ProviderPositionChainAnchorCandidateFinalityResultV1 | null;') &&
+    !forbiddenPortField.test(port) &&
+    !/(?:@Injectable|@Module|@Controller)\s*\(|\bclass\s+/u.test(port) &&
+    (finalizer.match(/^[\t ]*import\b/gmu)?.length ?? 0) === 4 &&
+    finalizerImports.length === 4 &&
+    finalizerImports[0] === 'node:util/types' &&
+    finalizerImports[1] === '../domain/mainnet-provider-position-chain-assessment' &&
+    finalizerImports[2] === './dormant-provider-position-chain-anchor-evidence.producer' &&
+    finalizerImports[3] === './ports/provider-position-chain-anchor-candidate-finality.port' &&
+    !forbiddenCapability.test(port) &&
+    !forbiddenCapability.test(finalizer) &&
+    !/\bPromise\s*[<.]|\basync\b|\bawait\b/u.test(finalizer) &&
+    trimmedExecutableLines(requestKeys).join('\n') === expectedRequestKeys &&
+    exactExecutableLineCount(
+      finalizer,
+      'const ETHEREUM_CURRENT_HEAD_LIFETIME_MILLISECONDS = 60_000;',
+    ) === 1 &&
+    exactExecutableLineCount(
+      finalizer,
+      'const ETHEREUM_FINALIZED_HEAD_LIFETIME_MILLISECONDS = 1_800_000;',
+    ) === 1 &&
+    exactExecutableLineCount(
+      finalizer,
+      'const SOLANA_CURRENT_HEAD_LIFETIME_MILLISECONDS = 15_000;',
+    ) === 1 &&
+    exactExecutableLineCount(
+      finalizer,
+      'const SOLANA_FINALIZED_HEAD_LIFETIME_MILLISECONDS = 90_000;',
+    ) === 1 &&
+    exactExecutableLineCount(
+      finalizer,
+      'readonly #issued = new WeakMap<object, IssuedAssessment>();',
+    ) === 1 &&
+    !/readonly\s+#issued\s*=\s*new\s+Map\b/u.test(finalizer) &&
+    finalizer.includes('return Object.freeze(Object.assign(Object.create(null) as T, members));') &&
+    exactExecutableLineCount(
+      finalizer,
+      'this.#producerReview = captureProducerReview(producer);',
+    ) === 1 &&
+    exactExecutableLineCount(finalizer, "'now',") === 1 &&
+    finalizer.includes(
+      'Object.getPrototypeOf(value) !==\n        DormantProviderPositionChainAnchorEvidenceProducer.prototype',
+    ) &&
+    finalizer.includes("Object.getOwnPropertyDescriptor(value, 'reviewCandidate') !== undefined") &&
+    finalizer.includes(
+      'return Reflect.apply(captured.method, captured.receiver, [capability, request]);',
+    ) &&
+    firstReviewAt >= 0 &&
+    firstIdentityAt > firstReviewAt &&
+    candidateInspectionAt > firstIdentityAt &&
+    classificationAt > candidateInspectionAt &&
+    finalClockAt > classificationAt &&
+    secondReviewAt > finalClockAt &&
+    secondIdentityAt > secondReviewAt &&
+    postReviewAbortAt > secondIdentityAt &&
+    resultAt > postReviewAbortAt &&
+    issueAt > resultAt &&
+    exactExecutableLineCount(assess, 'request.producerCapability,') === 2 &&
+    exactExecutableLineCount(assess, 'request.producerRequest.request,') === 2 &&
+    exactExecutableLineCount(
+      candidateReview,
+      'const lineageProofSha256 = nonzeroSha256(values[15]);',
+    ) === 1 &&
+    exactExecutableLineCount(
+      candidateReview,
+      'new Set([identityProofSha256, liveCapabilityProofSha256, lineageProofSha256]).size !== 3',
+    ) === 1 &&
+    candidateReview.includes('request.deadlineAt.milliseconds,') &&
+    candidateReview.includes('approvalExpiresAt.milliseconds,') &&
+    candidateReview.includes('currentHeadAdvancedAt.milliseconds + currentLifetime,') &&
+    candidateReview.includes('finalizedHeadAdvancedAt.milliseconds + finalizedLifetime,') &&
+    classification.includes(
+      'const candidateHeight = BigInt(candidate.candidateAnchor.blockNumber);',
+    ) &&
+    classification.includes(
+      'const finalizedHeight = BigInt(candidate.finalizedHead.blockNumber);',
+    ) &&
+    classification.includes('if (finalizedHeight < candidateHeight) {') &&
+    classification.includes('if (finalizedHeight === candidateHeight) {') &&
+    classification.includes(
+      'return candidate.finalizedHead.blockHash === candidate.candidateAnchor.blockHash',
+    ) &&
+    classification.includes("reason: 'ETHEREUM_FINALIZED_HASH_CONFLICT' as const,") &&
+    classification.includes("reason: 'ETHEREUM_FINALIZED_LINEAGE_COVERS_CANDIDATE' as const,") &&
+    classification.includes('const candidateSlot = BigInt(candidate.candidateAnchor.slot);') &&
+    classification.includes(
+      'const candidateObservedRoot = BigInt(candidate.candidateAnchor.root);',
+    ) &&
+    classification.includes('const finalizedRoot = BigInt(candidate.finalizedHead.root);') &&
+    !classification.includes('candidate.finalizedHead.slot') &&
+    classification.includes('if (finalizedRoot < candidateObservedRoot) {') &&
+    classification.includes("reason: 'SOLANA_FINALIZED_ROOT_REGRESSION' as const,") &&
+    classification.includes('return finalizedRoot >= candidateSlot') &&
+    exactExecutableLineCount(assess, 'mayAuthorizeFinancialAction: false as const,') === 1 &&
+    exactExecutableLineCount(assess, 'mayPersist: false as const,') === 1 &&
+    exactExecutableLineCount(assess, 'mayCreatePositionSnapshot: false as const,') === 1 &&
+    exactExecutableLineCount(assess, 'authenticatedLineageProof: true as const,') === 1 &&
+    exactExecutableLineCount(assess, 'claimsSameSlotForkDetection: false as const,') === 1 &&
+    exactExecutableLineCount(assess, 'assessedAt: assessedAt.value,') === 1 &&
+    exactExecutableLineCount(assess, 'expiresAtExclusive: candidate.expiresAtExclusive.value,') ===
+      1 &&
+    finalizer.includes('now.milliseconds >= candidate.expiresAtExclusive.milliseconds ||') &&
+    exactExecutableLineCount(finalizer, 'aborted(request.signal)') >= 2 &&
+    clock.includes('milliseconds < this.#lastClockMilliseconds') &&
+    clock.includes("return fail('CLOCK_REGRESSION');") &&
+    exactExecutableLineCount(review, 'const issued = this.#issued.get(capability);') === 1 &&
+    review.includes(
+      'issued === undefined || issued.request !== requestInput || issued.result !== capability',
+    ) &&
+    review.includes('request.producerCapability !== issued.producerCapability ||') &&
+    review.includes('request.producerRequest.request !== issued.producerRequest ||') &&
+    review.includes('request.signal !== issued.signal') &&
+    review.includes('if (producerReview !== issued.candidate)') &&
+    review.includes('reviewedAt.milliseconds >= issued.expiresAtExclusiveMilliseconds ||') &&
+    review.includes('returnedAt.milliseconds >= issued.expiresAtExclusiveMilliseconds ||') &&
+    review.includes('return issued.result;') &&
+    !review.includes('classify(') &&
+    exactExecutableLineCount(
+      finalizer,
+      "super('Provider-position chain-anchor candidate finality is unavailable.');",
+    ) === 1 &&
+    runtimeSurfaces.every((source) => !forbiddenFeatureSurface.test(source))
+  );
+}
+
 function hasDormantProviderPositionChainAnchorEvidenceRecorderContract(
   recorderPortSource: string,
   recorderSource: string,
@@ -4371,6 +4670,10 @@ function hasDormantProviderPositionReadBoundaryContract(
     sources.providerPositionChainAnchorEvidenceSourcePortSource.replace(/\r\n/gu, '\n');
   const chainAnchorEvidenceProducer =
     sources.providerPositionChainAnchorEvidenceProducerSource.replace(/\r\n/gu, '\n');
+  const chainAnchorCandidateFinalityPort =
+    sources.providerPositionChainAnchorCandidateFinalityPortSource.replace(/\r\n/gu, '\n');
+  const chainAnchorCandidateFinalityFinalizer =
+    sources.providerPositionChainAnchorCandidateFinalityFinalizerSource.replace(/\r\n/gu, '\n');
   const chainAnchorEvidenceRecorderPort =
     sources.providerPositionChainAnchorEvidenceRecorderPortSource.replace(/\r\n/gu, '\n');
   const postgresChainAnchorEvidenceRecorder =
@@ -4449,6 +4752,8 @@ function hasDormantProviderPositionReadBoundaryContract(
     durableAnchorReaderPort,
     chainAnchorEvidenceSourcePort,
     chainAnchorEvidenceProducer,
+    chainAnchorCandidateFinalityPort,
+    chainAnchorCandidateFinalityFinalizer,
     chainAnchorEvidenceRecorderPort,
     chainAnchorRecordIntentReconciliationPort,
     postgresChainAnchorRecordIntentReconciliationProcessor,
@@ -5308,6 +5613,14 @@ function hasDormantProviderPositionReadBoundaryContract(
     hasDormantProviderPositionChainAnchorEvidenceProducerContract(
       chainAnchorEvidenceSourcePort,
       chainAnchorEvidenceProducer,
+      runtimeComposition,
+      moduleSource,
+      indexSource,
+      controller,
+    ) &&
+    hasDormantProviderPositionChainAnchorCandidateFinalityContract(
+      chainAnchorCandidateFinalityPort,
+      chainAnchorCandidateFinalityFinalizer,
       runtimeComposition,
       moduleSource,
       indexSource,
@@ -12127,6 +12440,20 @@ export function loadRepositoryProductionPreflightInput(
         resolve(
           repositoryRoot,
           'apps/api/src/mainnet-platforms/application/dormant-provider-position-chain-anchor-evidence.producer.ts',
+        ),
+        'utf8',
+      ),
+      providerPositionChainAnchorCandidateFinalityPortSource: readFileSync(
+        resolve(
+          repositoryRoot,
+          'apps/api/src/mainnet-platforms/application/ports/provider-position-chain-anchor-candidate-finality.port.ts',
+        ),
+        'utf8',
+      ),
+      providerPositionChainAnchorCandidateFinalityFinalizerSource: readFileSync(
+        resolve(
+          repositoryRoot,
+          'apps/api/src/mainnet-platforms/application/dormant-provider-position-chain-anchor-candidate-finality.finalizer.ts',
         ),
         'utf8',
       ),
