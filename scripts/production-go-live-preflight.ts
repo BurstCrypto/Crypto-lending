@@ -255,6 +255,7 @@ export interface ProviderPositionReadBoundaryArtifactSources {
   readonly providerPositionChainAnchorEvidenceProducerSource: string;
   readonly providerPositionChainAnchorCandidateFinalityPortSource: string;
   readonly providerPositionChainAnchorCandidateFinalityFinalizerSource: string;
+  readonly providerPositionAaveV3EthereumSource: string;
   readonly providerPositionChainAnchorEvidenceRecorderPortSource: string;
   readonly providerPositionPostgresChainAnchorEvidenceRecorderSource: string;
   readonly providerPositionPostgresDurableChainAnchorReaderSource: string;
@@ -601,6 +602,7 @@ const PROVIDER_POSITION_READ_ARTIFACT_KEYS = Object.freeze([
   'providerPositionChainAnchorEvidenceProducerSource',
   'providerPositionChainAnchorCandidateFinalityPortSource',
   'providerPositionChainAnchorCandidateFinalityFinalizerSource',
+  'providerPositionAaveV3EthereumSource',
   'providerPositionChainAnchorEvidenceRecorderPortSource',
   'providerPositionPostgresChainAnchorEvidenceRecorderSource',
   'providerPositionPostgresDurableChainAnchorReaderSource',
@@ -648,6 +650,8 @@ const REVIEWED_PROVIDER_POSITION_READ_ARTIFACT_SHA256 = Object.freeze({
     '17dcffab45de9d207f1fc5211dc8d4b90655ad0450b5249e9763f2d3796bc88a',
   providerPositionChainAnchorCandidateFinalityFinalizerSource:
     '581c7c17dac3ca3a09a29ac9757efda55b02cb17ea882fc6788aa3d6cf6c33d8',
+  providerPositionAaveV3EthereumSource:
+    '7bb670f1435d2a5dbd6ad707a3cfcef80b4ef3452433653a7f49a045440eaba5',
   providerPositionChainAnchorEvidenceRecorderPortSource:
     'bd4e1a22eb2fe02540f11a2f5b28ba5eed6e71a726fe5a0027291a062f95951c',
   providerPositionPostgresChainAnchorEvidenceRecorderSource:
@@ -710,7 +714,7 @@ const REVIEWED_PROVIDER_POSITION_READ_ARTIFACT_SHA256 = Object.freeze({
     'a713200b67f0cf67c50b56c94f707f94f7383c52e3d59f4368868710b099b55d',
 } satisfies Readonly<Record<keyof ProviderPositionReadBoundaryArtifactSources, string>>);
 const MAX_PROVIDER_POSITION_READ_ARTIFACT_BYTES = 128 * 1024;
-const MAX_PROVIDER_POSITION_READ_TOTAL_BYTES = 896 * 1024;
+const MAX_PROVIDER_POSITION_READ_TOTAL_BYTES = 960 * 1024;
 const BALANCE_CONSUMER_ARTIFACT_KEYS = Object.freeze([
   'activationSource',
   'cliSource',
@@ -4659,6 +4663,334 @@ function hasDormantProviderPositionChainAnchorRecordIntentReconciliationLifecycl
   );
 }
 
+function hasDormantAaveV3EthereumProviderPositionSourceContract(
+  sourceInput: string,
+  runtimeCompositionSource: string,
+  infrastructureConfigSource: string,
+  networkPolicySource: string,
+  moduleSource: string,
+  indexSource: string,
+  controllerSource: string,
+): boolean {
+  const source = sourceInput.replace(/\r\n/gu, '\n');
+  const importSources = Array.from(
+    source.matchAll(/\bfrom\s+['"]([^'"]+)['"]/gu),
+    (match) => match[1],
+  );
+  const importDeclarationCount = source.match(/^[\t ]*import\b/gmu)?.length ?? 0;
+  const forbiddenCapability =
+    /(?:\bimport\s*\(|\brequire\s*\(|(?:\bfrom\s+|\bimport\s*(?:\(\s*)?)['"](?:node:)?(?:child_process|cluster|dgram|dns|fs|http|http2|https|net|tls|worker_threads)(?:\/[^'"]*)?['"]|(?:\bfrom\s+|\bimport\s*(?:\(\s*)?)['"](?:axios|ethers|got|pg|superagent|undici|web3|@solana\/web3\.js)['"]|\b(?:fetch|setTimeout|setInterval|setImmediate|queueMicrotask|WebSocket|EventSource|XMLHttpRequest|readFileSync|writeFileSync)\s*\(|\.\s*(?:query|connect|end|execute|transaction|persist|save|write)\s*\(|\b(?:process|Deno|Bun)\s*\.\s*env\b|\bimport\s*\.\s*meta\s*\.\s*env\b|['"]https?:\/\/|(?:^|\n)[\t ]*@[A-Za-z_$]|\b(?:NestFactory|PostgresService|DataSource|EntityManager|Repository|loadInfrastructureConfig|createPostgresPool)\b|\bPromise\s*\.\s*(?:all|allSettled|any|race)\s*\()/iu;
+  const forbiddenFeatureSurface =
+    /(?:DormantAaveV3EthereumProviderPositionSource|AaveV3EthereumDurableTargetContextReaderPort|AaveV3EthereumFinalizedPositionTranscriptPort|AAVE_V3_ETHEREUM_(?:DURABLE_TARGET_CONTEXT|FINALIZED_POSITION_TRANSCRIPT)|dormant-aave-v3-ethereum-provider-position\.source)/u;
+  const runtimeSurfaces = [
+    runtimeCompositionSource,
+    infrastructureConfigSource,
+    networkPolicySource,
+    moduleSource,
+    indexSource,
+    controllerSource,
+  ] as const;
+
+  const reviewedRequestStart = source.indexOf('function reviewedRequest(');
+  const contextRequestStart = source.indexOf('function contextRequest(', reviewedRequestStart);
+  const reviewedRequest =
+    reviewedRequestStart >= 0 && contextRequestStart > reviewedRequestStart
+      ? source.slice(reviewedRequestStart, contextRequestStart)
+      : '';
+  const contextRequestEnd = source.indexOf('\nfunction evmAnchor(', contextRequestStart);
+  const contextRequest =
+    contextRequestStart >= 0 && contextRequestEnd > contextRequestStart
+      ? source.slice(contextRequestStart, contextRequestEnd)
+      : '';
+  const contextReviewStart = source.indexOf('function reviewedContext(');
+  const contextReviewEnd = source.indexOf('\nfunction definitionFor(', contextReviewStart);
+  const contextReview =
+    contextReviewStart >= 0 && contextReviewEnd > contextReviewStart
+      ? source.slice(contextReviewStart, contextReviewEnd)
+      : '';
+  const balanceReadsStart = source.indexOf('function balanceReads(');
+  const transcriptRequestStart = source.indexOf('function transcriptRequest(', balanceReadsStart);
+  const balanceReads =
+    balanceReadsStart >= 0 && transcriptRequestStart > balanceReadsStart
+      ? source.slice(balanceReadsStart, transcriptRequestStart)
+      : '';
+  const transcriptRequestEnd = source.indexOf('\nfunction hexQuantity(', transcriptRequestStart);
+  const transcriptRequest =
+    transcriptRequestStart >= 0 && transcriptRequestEnd > transcriptRequestStart
+      ? source.slice(transcriptRequestStart, transcriptRequestEnd)
+      : '';
+  const continuityStart = source.indexOf('function assertNonRegressing(');
+  const continuityEnd = source.indexOf('\nfunction expectedRead(', continuityStart);
+  const continuity =
+    continuityStart >= 0 && continuityEnd > continuityStart
+      ? source.slice(continuityStart, continuityEnd)
+      : '';
+  const balancesStart = source.indexOf('function parsedBalances(');
+  const balancesEnd = source.indexOf('\nfunction assertReserveTokens(', balancesStart);
+  const balances =
+    balancesStart >= 0 && balancesEnd > balancesStart
+      ? source.slice(balancesStart, balancesEnd)
+      : '';
+  const reserveTokensStart = source.indexOf('function assertReserveTokens(');
+  const reserveTokensEnd = source.indexOf('\nfunction positions(', reserveTokensStart);
+  const reserveTokens =
+    reserveTokensStart >= 0 && reserveTokensEnd > reserveTokensStart
+      ? source.slice(reserveTokensStart, reserveTokensEnd)
+      : '';
+  const positionsStart = source.indexOf('function positions(');
+  const evidenceStart = source.indexOf('function evidence(', positionsStart);
+  const positions =
+    positionsStart >= 0 && evidenceStart > positionsStart
+      ? source.slice(positionsStart, evidenceStart)
+      : '';
+  const classStart = source.indexOf(
+    'export class DormantAaveV3EthereumProviderPositionSource implements ProviderPositionAdmissionSourcePort {',
+    evidenceStart,
+  );
+  const evidence =
+    evidenceStart >= 0 && classStart > evidenceStart ? source.slice(evidenceStart, classStart) : '';
+  const publicResultStart = evidence.indexOf(
+    'return Object.freeze({',
+    evidence.indexOf('const policy = chainObservationPolicyForNetwork(NETWORK_ID);'),
+  );
+  const publicResult = publicResultStart >= 0 ? evidence.slice(publicResultStart) : '';
+  const readTargetStart = source.indexOf('  async readTarget(', classStart);
+  const readTarget = readTargetStart >= 0 ? source.slice(readTargetStart) : '';
+  const issuedContextAt = readTarget.indexOf(
+    'const issuedContextRequest = contextRequest(request);',
+  );
+  const contextReadAt = readTarget.indexOf(
+    'const contextCapability = await this.#contextReader.read(issuedContextRequest);',
+    issuedContextAt,
+  );
+  const contextSettlementAt = readTarget.indexOf(
+    'const contextSettledAt = clockTime(this.#now);',
+    contextReadAt,
+  );
+  const contextReviewAt = readTarget.indexOf(
+    'const context = reviewedContext(',
+    contextSettlementAt,
+  );
+  const issuedTranscriptAt = readTarget.indexOf(
+    'const issuedTranscriptRequest = transcriptRequest(request, context);',
+    contextReviewAt,
+  );
+  const transcriptReadAt = readTarget.indexOf(
+    'const transcriptCapability = await this.#transcriptReader.read(issuedTranscriptRequest);',
+    issuedTranscriptAt,
+  );
+  const transcriptSettlementAt = readTarget.indexOf(
+    'const transcriptSettledAt = clockTime(this.#now);',
+    transcriptReadAt,
+  );
+  const evidenceAt = readTarget.indexOf('const result = evidence(', transcriptSettlementAt);
+  const completedAt = readTarget.indexOf('const completedAt = clockTime(this.#now);', evidenceAt);
+  const returnAt = readTarget.indexOf('return result;', completedAt);
+
+  return (
+    importDeclarationCount === 7 &&
+    importSources.length === 7 &&
+    importSources[0] === 'node:buffer' &&
+    importSources[1] === 'node:util/types' &&
+    importSources[2] === '../../accounts/domain/account-profile' &&
+    importSources[3] === '../../blockchain/domain/chain-observation-policy' &&
+    importSources[4] ===
+      '../../smart-lending/infrastructure/aave/aave-v3-ethereum-deployment.manifest' &&
+    importSources[5] === '../application/provider-position-admission.coordinator' &&
+    importSources[6] === '../domain/mainnet-provider-position-observation' &&
+    !forbiddenCapability.test(source) &&
+    !/(?:@Injectable|@Module|@Controller)\s*\(/u.test(source) &&
+    exactExecutableLineCount(
+      source,
+      'export const AAVE_V3_ETHEREUM_DURABLE_TARGET_CONTEXT_VERSION = 1 as const;',
+    ) === 1 &&
+    source.includes("'DORMANT_AAVE_V3_ETHEREUM_DURABLE_TARGET_CONTEXT_READ_ONLY' as const;") &&
+    exactExecutableLineCount(
+      source,
+      'export const AAVE_V3_ETHEREUM_FINALIZED_POSITION_TRANSCRIPT_VERSION = 1 as const;',
+    ) === 1 &&
+    source.includes(
+      "'DORMANT_AAVE_V3_ETHEREUM_FINALIZED_POSITION_RPC_TRANSCRIPT_ONLY' as const;",
+    ) &&
+    exactExecutableLineCount(source, "const NETWORK_ID = 'eip155:1' as const;") === 1 &&
+    exactExecutableLineCount(source, "const PROVIDER_ID = 'aave' as const;") === 1 &&
+    exactExecutableLineCount(source, "const PROTOCOL_ID = 'aave-v3' as const;") === 1 &&
+    exactExecutableLineCount(source, 'const MARKET_ID = AAVE_V3_ETHEREUM_POOL;') === 1 &&
+    exactExecutableLineCount(source, "const EXPECTED_CHAIN_ID = '0x1' as const;") === 1 &&
+    exactExecutableLineCount(source, "const BLOCK_SELECTOR = 'finalized' as const;") === 1 &&
+    exactExecutableLineCount(
+      source,
+      "const BLOCK_BINDING = 'EIP1898_BLOCK_HASH_REQUIRE_CANONICAL' as const;",
+    ) === 1 &&
+    exactExecutableLineCount(source, 'const MAX_CONTEXT_BYTES = 8 * 1024;') === 1 &&
+    exactExecutableLineCount(source, 'const MAX_TRANSCRIPT_BYTES = 64 * 1024;') === 1 &&
+    exactExecutableLineCount(source, 'const MAX_DATA_NODES = 256;') === 1 &&
+    exactExecutableLineCount(source, 'const MAX_STRING_BYTES = 4 * 1024;') === 1 &&
+    exactExecutableLineCount(source, 'readonly mayAuthorizeFinancialAction: false;') === 3 &&
+    exactExecutableLineCount(source, 'mayAuthorizeFinancialAction: false,') === 3 &&
+    !/mayAuthorizeFinancialAction\s*:\s*true/u.test(source) &&
+    exactExecutableLineCount(
+      source,
+      'readContext(request: ReadAaveV3EthereumDurableTargetContextRequestV1): Promise<unknown>;',
+    ) === 1 &&
+    exactExecutableLineCount(
+      source,
+      'readTranscript(request: ReadAaveV3EthereumFinalizedPositionTranscriptRequestV1): Promise<unknown>;',
+    ) === 1 &&
+    exactExecutableLineCount(
+      source,
+      'verified = reader.verify(capability, issuedRequest) === true;',
+    ) === 2 &&
+    source.includes('Reflect.apply(verify, value, [capability, request]) as boolean') &&
+    source.includes(
+      'this.#contextReader.receiver === this.#transcriptReader.receiver ||\n      this.#contextReader.sourceFamilyId === this.#transcriptReader.sourceFamilyId ||\n      this.#contextReader.sourceId === this.#transcriptReader.sourceId',
+    ) &&
+    source.includes(
+      'request.sourceFamilyId !== this.#transcriptReader.sourceFamilyId ||\n        request.sourceId !== this.#transcriptReader.sourceId',
+    ) &&
+    reviewedRequest.includes('accountId = parseAccountId(record.accountId);') &&
+    reviewedRequest.includes("record.sourceKind !== 'RPC' ||") &&
+    reviewedRequest.includes('record.providerId !== PROVIDER_ID ||') &&
+    reviewedRequest.includes('record.protocolId !== PROTOCOL_ID ||') &&
+    reviewedRequest.includes('record.marketId !== MARKET_ID ||') &&
+    reviewedRequest.includes('record.networkId !== NETWORK_ID ||') &&
+    reviewedRequest.includes('record.signal.aborted ||') &&
+    reviewedRequest.includes('deadline.milliseconds <= now.milliseconds ||') &&
+    reviewedRequest.includes(
+      'deadline.milliseconds - now.milliseconds > MAX_DEADLINE_MILLISECONDS',
+    ) &&
+    contextRequest.includes('accountId: request.accountId,') &&
+    contextRequest.includes('correlationId: request.correlationId,') &&
+    contextRequest.includes('walletId: request.walletId,') &&
+    contextRequest.includes('networkId: NETWORK_ID,') &&
+    contextRequest.includes('sourceFamilyId: request.sourceFamilyId,') &&
+    contextRequest.includes('sourceId: request.sourceId,') &&
+    contextRequest.includes('deadlineAt: request.deadlineAt,') &&
+    contextRequest.includes('signal: request.signal,') &&
+    contextReview.includes('assertBoundedPlainData(capability, MAX_CONTEXT_BYTES);') &&
+    contextReview.includes('const record = exactDataRecord(capability, [') &&
+    contextReview.includes('record.accountId !== request.accountId ||') &&
+    contextReview.includes('record.correlationId !== request.correlationId ||') &&
+    contextReview.includes('record.walletId !== request.walletId ||') &&
+    contextReview.includes('record.networkId !== NETWORK_ID ||') &&
+    contextReview.includes('record.contextSourceFamilyId !== reader.sourceFamilyId ||') &&
+    contextReview.includes('record.contextSourceId !== reader.sourceId ||') &&
+    source.includes('const EVM_ADDRESS = /^0x[0-9a-f]{40}$/u;') &&
+    contextReview.includes('!EVM_ADDRESS.test(record.walletAddress) ||') &&
+    contextReview.includes('record.walletAddress === ZERO_ADDRESS ||') &&
+    transcriptRequest.includes('walletAddress: context.walletAddress,') &&
+    transcriptRequest.includes('providerId: PROVIDER_ID,') &&
+    transcriptRequest.includes('protocolId: PROTOCOL_ID,') &&
+    transcriptRequest.includes('marketId: MARKET_ID,') &&
+    transcriptRequest.includes('networkId: NETWORK_ID,') &&
+    transcriptRequest.includes('sourceFamilyId: request.sourceFamilyId,') &&
+    transcriptRequest.includes('sourceId: request.sourceId,') &&
+    transcriptRequest.includes('expectedChainId: EXPECTED_CHAIN_ID,') &&
+    transcriptRequest.includes('blockSelector: BLOCK_SELECTOR,') &&
+    transcriptRequest.includes('blockBinding: BLOCK_BINDING,') &&
+    transcriptRequest.includes('continuityFloor: context.continuityFloor,') &&
+    transcriptRequest.includes('durableContext: context.capability,') &&
+    transcriptRequest.includes('assets: request.assets,') &&
+    transcriptRequest.includes('signal: request.signal,') &&
+    evidence.includes('record.accountId !== request.accountId ||') &&
+    evidence.includes('record.correlationId !== request.correlationId ||') &&
+    evidence.includes('record.walletId !== request.walletId ||') &&
+    evidence.includes('record.walletAddress !== context.walletAddress ||') &&
+    evidence.includes('record.sourceFamilyId !== reader.sourceFamilyId ||') &&
+    evidence.includes('record.sourceId !== reader.sourceId ||') &&
+    evidence.includes('assertBoundedPlainData(capability, MAX_TRANSCRIPT_BYTES);') &&
+    evidence.includes('const record = exactDataRecord(capability, [') &&
+    publicResult.length > 0 &&
+    !/walletAddress|durableContext|context\.capability/u.test(publicResult) &&
+    source.includes('identity: AAVE_V3_ETHEREUM_USDC,') &&
+    source.includes('aTokenAddress: AAVE_V3_ETHEREUM_USDC_A_TOKEN,') &&
+    source.includes('variableDebtTokenAddress: AAVE_V3_ETHEREUM_USDC_VARIABLE_DEBT_TOKEN,') &&
+    source.includes('identity: AAVE_V3_ETHEREUM_USDT,') &&
+    source.includes('aTokenAddress: AAVE_V3_ETHEREUM_USDT_A_TOKEN,') &&
+    source.includes('variableDebtTokenAddress: AAVE_V3_ETHEREUM_USDT_VARIABLE_DEBT_TOKEN,') &&
+    exactExecutableLineCount(source, 'stableDebtTokenAddress: ZERO_ADDRESS,') === 2 &&
+    source.includes('dataArray(record.assets, ASSET_DEFINITIONS.length).map(canonicalAsset)') &&
+    balanceReads.includes("positionKind: 'SUPPLY' as const,") &&
+    balanceReads.includes('tokenAddress: definition.aTokenAddress,') &&
+    balanceReads.includes("positionKind: 'BORROW' as const,") &&
+    balanceReads.includes('tokenAddress: definition.variableDebtTokenAddress,') &&
+    balances.includes("record.method !== 'eth_call' ||") &&
+    balances.includes('record.tokenAddress !== expected.tokenAddress ||') &&
+    balances.includes('record.callData !== expected.callData ||') &&
+    balances.includes('blockParameter.blockHash !== block.hash ||') &&
+    balances.includes('blockParameter.requireCanonical !== true ||') &&
+    balances.includes('balances.has(expected.operationId)') &&
+    balances.includes('if (balances.size !== request.balanceReads.length) {') &&
+    reserveTokens.includes('dataArray(value, assets.length)') &&
+    reserveTokens.includes('record.aTokenAddress !== definition.aTokenAddress ||') &&
+    reserveTokens.includes(
+      'record.stableDebtTokenAddress !== definition.stableDebtTokenAddress ||',
+    ) &&
+    reserveTokens.includes(
+      'record.variableDebtTokenAddress !== definition.variableDebtTokenAddress',
+    ) &&
+    reserveTokens.includes('if (seen.size !== assets.length) {') &&
+    exactExecutableLineCount(
+      source,
+      'return left.number === right.number && left.hash === right.hash;',
+    ) === 1 &&
+    evidence.includes('if (!sameBlock(before, after))') &&
+    evidence.includes('record.chainIdBefore !== EXPECTED_CHAIN_ID ||') &&
+    evidence.includes('record.chainIdAfter !== EXPECTED_CHAIN_ID ||') &&
+    evidence.includes("record.status !== 'COMPLETE' ||") &&
+    evidence.includes(
+      "record.zeroPositionSemantics !== 'EXPLICIT_ZERO_BALANCE_FOR_EVERY_REQUESTED_ASSET'",
+    ) &&
+    evidence.includes('assertNonRegressing(context.continuityFloor, before);') &&
+    continuity.includes('blockNumber < floorNumber ||') &&
+    continuity.includes('(blockNumber === floorNumber && block.hash !== floor.blockHash)') &&
+    positions.includes("for (const positionKind of ['SUPPLY', 'BORROW'] as const) {") &&
+    positions.includes(
+      "if (atomic === undefined) return fail('AAVE_V3_ETHEREUM_POSITION_SOURCE_UNAVAILABLE');",
+    ) &&
+    positions.includes("if (atomic === '0') continue;") &&
+    publicResult.includes("status: 'COMPLETE',") &&
+    issuedContextAt >= 0 &&
+    contextReadAt > issuedContextAt &&
+    contextSettlementAt > contextReadAt &&
+    contextReviewAt > contextSettlementAt &&
+    issuedTranscriptAt > contextReviewAt &&
+    transcriptReadAt > issuedTranscriptAt &&
+    transcriptSettlementAt > transcriptReadAt &&
+    evidenceAt > transcriptSettlementAt &&
+    completedAt > evidenceAt &&
+    returnAt > completedAt &&
+    exactExecutableLineCount(readTarget, 'request.signal.aborted ||') === 3 &&
+    exactExecutableLineCount(
+      readTarget,
+      'contextSettledAt.milliseconds >= request.deadlineAtMilliseconds',
+    ) === 1 &&
+    exactExecutableLineCount(
+      readTarget,
+      'transcriptSettledAt.milliseconds >= request.deadlineAtMilliseconds',
+    ) === 1 &&
+    exactExecutableLineCount(
+      readTarget,
+      'completedAt.milliseconds >= request.deadlineAtMilliseconds ||',
+    ) === 1 &&
+    source.includes('cooperatively drain after\n * abort,') &&
+    exactExecutableLineCount(
+      source,
+      "super('Aave V3 Ethereum provider-position source is unavailable.');",
+    ) === 1 &&
+    exactExecutableLineCount(
+      readTarget,
+      'if (error instanceof DormantAaveV3EthereumProviderPositionSourceError) throw error;',
+    ) === 1 &&
+    exactExecutableLineCount(
+      readTarget,
+      "return fail('AAVE_V3_ETHEREUM_POSITION_SOURCE_UNAVAILABLE');",
+    ) === 4 &&
+    !/\b(?:console|logger)\s*\.|\berror\s*\./u.test(source) &&
+    runtimeSurfaces.every((runtimeSource) => !forbiddenFeatureSurface.test(runtimeSource))
+  );
+}
+
 function hasDormantProviderPositionReadBoundaryContract(
   sources: ProviderPositionReadBoundaryArtifactSources,
 ): boolean {
@@ -4674,6 +5006,7 @@ function hasDormantProviderPositionReadBoundaryContract(
     sources.providerPositionChainAnchorCandidateFinalityPortSource.replace(/\r\n/gu, '\n');
   const chainAnchorCandidateFinalityFinalizer =
     sources.providerPositionChainAnchorCandidateFinalityFinalizerSource.replace(/\r\n/gu, '\n');
+  const aaveV3EthereumSource = sources.providerPositionAaveV3EthereumSource.replace(/\r\n/gu, '\n');
   const chainAnchorEvidenceRecorderPort =
     sources.providerPositionChainAnchorEvidenceRecorderPortSource.replace(/\r\n/gu, '\n');
   const postgresChainAnchorEvidenceRecorder =
@@ -4754,6 +5087,7 @@ function hasDormantProviderPositionReadBoundaryContract(
     chainAnchorEvidenceProducer,
     chainAnchorCandidateFinalityPort,
     chainAnchorCandidateFinalityFinalizer,
+    aaveV3EthereumSource,
     chainAnchorEvidenceRecorderPort,
     chainAnchorRecordIntentReconciliationPort,
     postgresChainAnchorRecordIntentReconciliationProcessor,
@@ -5622,6 +5956,15 @@ function hasDormantProviderPositionReadBoundaryContract(
       chainAnchorCandidateFinalityPort,
       chainAnchorCandidateFinalityFinalizer,
       runtimeComposition,
+      moduleSource,
+      indexSource,
+      controller,
+    ) &&
+    hasDormantAaveV3EthereumProviderPositionSourceContract(
+      aaveV3EthereumSource,
+      runtimeComposition,
+      infrastructureConfig,
+      mainnetLaunchNetworkPolicy,
       moduleSource,
       indexSource,
       controller,
@@ -12454,6 +12797,13 @@ export function loadRepositoryProductionPreflightInput(
         resolve(
           repositoryRoot,
           'apps/api/src/mainnet-platforms/application/dormant-provider-position-chain-anchor-candidate-finality.finalizer.ts',
+        ),
+        'utf8',
+      ),
+      providerPositionAaveV3EthereumSource: readFileSync(
+        resolve(
+          repositoryRoot,
+          'apps/api/src/mainnet-platforms/infrastructure/dormant-aave-v3-ethereum-provider-position.source.ts',
         ),
         'utf8',
       ),

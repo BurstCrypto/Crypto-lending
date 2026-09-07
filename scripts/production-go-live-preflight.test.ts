@@ -464,6 +464,13 @@ const PROVIDER_POSITION_READ_ARTIFACTS = Object.freeze({
     ),
     'utf8',
   ),
+  providerPositionAaveV3EthereumSource: readFileSync(
+    resolve(
+      __dirname,
+      '../apps/api/src/mainnet-platforms/infrastructure/dormant-aave-v3-ethereum-provider-position.source.ts',
+    ),
+    'utf8',
+  ),
   providerPositionChainAnchorEvidenceRecorderPortSource: readFileSync(
     resolve(
       __dirname,
@@ -1196,7 +1203,7 @@ function mutateProviderPositionReadArtifact(
 }
 
 test('provider-position read inspection pins the exact dormant critical source slice', () => {
-  assert.equal(Object.keys(PROVIDER_POSITION_READ_ARTIFACTS).length, 38);
+  assert.equal(Object.keys(PROVIDER_POSITION_READ_ARTIFACTS).length, 39);
   const inspected = inspectProviderPositionReadBoundaryArtifacts(PROVIDER_POSITION_READ_ARTIFACTS);
   assert.deepEqual(inspected, EXPECTED_DORMANT_PROVIDER_POSITION_READ_BOUNDARY);
   assert.equal(Object.isFrozen(inspected), true);
@@ -1246,9 +1253,13 @@ test('provider-position read semantic gate contains no disabled-check bypass', (
     'function hasDormantProviderPositionChainAnchorRecordIntentReconciliationLifecycleContract(',
     reconciliationStart,
   );
+  const aaveV3EthereumStart = source.indexOf(
+    'function hasDormantAaveV3EthereumProviderPositionSourceContract(',
+    reconciliationLifecycleStart,
+  );
   const start = source.indexOf(
     'function hasDormantProviderPositionReadBoundaryContract(',
-    reconciliationLifecycleStart,
+    aaveV3EthereumStart,
   );
   const end = source.indexOf('\nfunction ', start + 1);
   assert.ok(
@@ -1259,7 +1270,8 @@ test('provider-position read semantic gate contains no disabled-check bypass', (
       recordIntentMigrationStart > recorderStart &&
       reconciliationStart > recordIntentMigrationStart &&
       reconciliationLifecycleStart > reconciliationStart &&
-      start > reconciliationLifecycleStart &&
+      aaveV3EthereumStart > reconciliationLifecycleStart &&
+      start > aaveV3EthereumStart &&
       end > start,
   );
   const semanticGateSource = source
@@ -1685,6 +1697,200 @@ test('provider-position read inspection rejects dormant candidate-finality drift
       'mainnetPlatformsControllerSource',
       'constructor(private readonly directory: MainnetPlatformDirectoryService) {}',
       'constructor(private readonly finalizer: DormantProviderPositionChainAnchorCandidateFinalityFinalizer) {}',
+    ],
+  ];
+
+  for (const [key, approved, rejected] of mutations) {
+    assert.deepEqual(
+      inspectProviderPositionReadBoundaryArtifacts(
+        mutateProviderPositionReadArtifact(key, approved, rejected),
+      ),
+      INVALID_PROVIDER_POSITION_READ_BOUNDARY,
+      `${key}: ${approved}`,
+    );
+  }
+});
+
+test('provider-position read inspection rejects dormant Aave V3 Ethereum source drift', () => {
+  const mutations: readonly (readonly [
+    keyof ProviderPositionReadBoundaryArtifactSources,
+    string,
+    string,
+  ])[] = [
+    [
+      'providerPositionAaveV3EthereumSource',
+      'readonly mayAuthorizeFinancialAction: false;',
+      'readonly mayAuthorizeFinancialAction: true;',
+    ],
+    [
+      'providerPositionAaveV3EthereumSource',
+      'this.#contextReader.receiver === this.#transcriptReader.receiver ||',
+      'this.#contextReader.receiver !== this.#transcriptReader.receiver ||',
+    ],
+    [
+      'providerPositionAaveV3EthereumSource',
+      'const contextCapability = await this.#contextReader.read(issuedContextRequest);',
+      'const contextCapability = await this.#transcriptReader.read(issuedContextRequest);',
+    ],
+    [
+      'providerPositionAaveV3EthereumSource',
+      'verified = reader.verify(capability, issuedRequest) === true;',
+      'verified = reader.verify(capability, { ...issuedRequest }) === true;',
+    ],
+    [
+      'providerPositionAaveV3EthereumSource',
+      'const result = evidence(\n        transcriptCapability,\n        issuedTranscriptRequest,',
+      'const result = evidence(\n        transcriptCapability,\n        { ...issuedTranscriptRequest },',
+    ],
+    [
+      'providerPositionAaveV3EthereumSource',
+      'durableContext: context.capability,',
+      'durableContext: Object.freeze({}),',
+    ],
+    [
+      'providerPositionAaveV3EthereumSource',
+      'positions: positions(issuedRequest, balances),',
+      'walletAddress: context.walletAddress,\n    positions: positions(issuedRequest, balances),',
+    ],
+    [
+      'providerPositionAaveV3EthereumSource',
+      'const EVM_ADDRESS = /^0x[0-9a-f]{40}$/u;',
+      'const EVM_ADDRESS = /^0x[0-9a-f]{40}$/iu;',
+    ],
+    [
+      'providerPositionAaveV3EthereumSource',
+      "const BLOCK_SELECTOR = 'finalized' as const;",
+      "const BLOCK_SELECTOR = 'latest' as const;",
+    ],
+    [
+      'providerPositionAaveV3EthereumSource',
+      "const BLOCK_BINDING = 'EIP1898_BLOCK_HASH_REQUIRE_CANONICAL' as const;",
+      "const BLOCK_BINDING = 'BLOCK_NUMBER' as const;",
+    ],
+    [
+      'providerPositionAaveV3EthereumSource',
+      'blockBinding: BLOCK_BINDING,',
+      "blockBinding: 'BLOCK_NUMBER',",
+    ],
+    [
+      'providerPositionAaveV3EthereumSource',
+      'if (!sameBlock(before, after))',
+      'if (before.number !== after.number)',
+    ],
+    [
+      'providerPositionAaveV3EthereumSource',
+      'blockParameter.requireCanonical !== true ||',
+      'blockParameter.requireCanonical !== false ||',
+    ],
+    [
+      'providerPositionAaveV3EthereumSource',
+      'record.chainIdAfter !== EXPECTED_CHAIN_ID ||',
+      'record.chainIdAfter === EXPECTED_CHAIN_ID ||',
+    ],
+    [
+      'providerPositionAaveV3EthereumSource',
+      'identity: AAVE_V3_ETHEREUM_USDT,',
+      'identity: AAVE_V3_ETHEREUM_USDC,',
+    ],
+    [
+      'providerPositionAaveV3EthereumSource',
+      "positionKind: 'SUPPLY' as const,",
+      "positionKind: 'BORROW' as const,",
+    ],
+    [
+      'providerPositionAaveV3EthereumSource',
+      'tokenAddress: definition.variableDebtTokenAddress,',
+      'tokenAddress: definition.aTokenAddress,',
+    ],
+    [
+      'providerPositionAaveV3EthereumSource',
+      'stableDebtTokenAddress: ZERO_ADDRESS,',
+      'stableDebtTokenAddress: AAVE_V3_ETHEREUM_USDC_A_TOKEN,',
+    ],
+    [
+      'providerPositionAaveV3EthereumSource',
+      'if (balances.size !== request.balanceReads.length) {',
+      'if (balances.size > request.balanceReads.length) {',
+    ],
+    [
+      'providerPositionAaveV3EthereumSource',
+      'assertBoundedPlainData(capability, MAX_TRANSCRIPT_BYTES);',
+      'void capability;',
+    ],
+    [
+      'providerPositionAaveV3EthereumSource',
+      "record.status !== 'COMPLETE' ||",
+      "record.status !== 'PARTIAL' ||",
+    ],
+    [
+      'providerPositionAaveV3EthereumSource',
+      "record.zeroPositionSemantics !== 'EXPLICIT_ZERO_BALANCE_FOR_EVERY_REQUESTED_ASSET'",
+      "record.zeroPositionSemantics !== 'MISSING_MEANS_ZERO'",
+    ],
+    [
+      'providerPositionAaveV3EthereumSource',
+      "if (atomic === '0') continue;",
+      "if (atomic === '0') return Object.freeze(result);",
+    ],
+    [
+      'providerPositionAaveV3EthereumSource',
+      'blockNumber < floorNumber ||',
+      'blockNumber > floorNumber ||',
+    ],
+    [
+      'providerPositionAaveV3EthereumSource',
+      '(blockNumber === floorNumber && block.hash !== floor.blockHash)',
+      '(blockNumber === floorNumber && block.hash === floor.blockHash)',
+    ],
+    [
+      'providerPositionAaveV3EthereumSource',
+      'request.signal.aborted ||',
+      'request.signal.aborted &&',
+    ],
+    [
+      'providerPositionAaveV3EthereumSource',
+      'contextSettledAt.milliseconds >= request.deadlineAtMilliseconds',
+      'contextSettledAt.milliseconds > request.deadlineAtMilliseconds',
+    ],
+    [
+      'providerPositionAaveV3EthereumSource',
+      'const transcriptCapability = await this.#transcriptReader.read(issuedTranscriptRequest);',
+      'const transcriptCapability = this.#transcriptReader.read(issuedTranscriptRequest);',
+    ],
+    [
+      'providerPositionAaveV3EthereumSource',
+      "super('Aave V3 Ethereum provider-position source is unavailable.');",
+      'super(`Aave source failed: ${code}`);',
+    ],
+    [
+      'providerPositionRuntimeCompositionSource',
+      'const DEPENDENCY_KEYS = Object.freeze([',
+      'type DormantAaveV3EthereumProviderPositionSource = unknown;\nconst DEPENDENCY_KEYS = Object.freeze([',
+    ],
+    [
+      'providerPositionInfrastructureConfigSource',
+      'export interface InfrastructureConfig {',
+      'type AaveV3EthereumFinalizedPositionTranscriptPort = unknown;\nexport interface InfrastructureConfig {',
+    ],
+    [
+      'mainnetLaunchNetworkPolicySource',
+      'export const MAINNET_LAUNCH_NETWORK_IDS = Object.freeze([',
+      'type DormantAaveV3EthereumProviderPositionSource = unknown;\nexport const MAINNET_LAUNCH_NETWORK_IDS = Object.freeze([',
+    ],
+    [
+      'mainnetPlatformsModuleSource',
+      'providers: [MainnetPlatformDirectoryService, MainnetPlatformsPrivacyInterceptor],',
+      'providers: [MainnetPlatformDirectoryService, DormantAaveV3EthereumProviderPositionSource],',
+    ],
+    [
+      'mainnetPlatformsIndexSource',
+      "export { MainnetPlatformDirectoryService } from './application/mainnet-platform-directory.service';",
+      "export { DormantAaveV3EthereumProviderPositionSource } from './infrastructure/dormant-aave-v3-ethereum-provider-position.source';",
+    ],
+    [
+      'mainnetPlatformsControllerSource',
+      'constructor(private readonly directory: MainnetPlatformDirectoryService) {}',
+      'constructor(private readonly source: DormantAaveV3EthereumProviderPositionSource) {}',
     ],
   ];
 
@@ -3305,7 +3511,7 @@ test('provider-position read artifact shape and private brand fail closed', () =
     Object.fromEntries(
       Object.keys(PROVIDER_POSITION_READ_ARTIFACTS).map((key) => [
         key,
-        'x'.repeat(Math.floor((896 * 1024) / 38) + 1),
+        'x'.repeat(Math.floor((960 * 1024) / 39) + 1),
       ]),
     ),
     accessor,
