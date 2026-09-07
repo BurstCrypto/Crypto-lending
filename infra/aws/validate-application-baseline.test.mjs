@@ -60,7 +60,6 @@ function addResource(source, resource) {
   return source.replace(/^Resources:\s*$/m, `Resources:\n${resource}`);
 }
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function mutateResourceBlock(source, logicalId, transform) {
   const pattern = new RegExp(
     `(^ ${logicalId}:\\n[\\s\\S]*?)(?=^ [A-Z][A-Za-z0-9]*:\\s*$|^Outputs:\\s*$)`,
@@ -1482,6 +1481,54 @@ test('rejects authored AWS credential-provider environment variables in every ta
       ),
       new RegExp(
         `${logicalIds[occurrence - 1]} must not author AWS credential-provider Environment bindings;.*${name}`,
+      ),
+    );
+  }
+});
+
+test('rejects authored preload and automatic-instrumentation environment variables in every task', () => {
+  const forbiddenNames = [
+    'NODE_OPTIONS',
+    'DD_TRACE_ENABLED',
+    'NEW_RELIC_ENABLED',
+    'ELASTIC_APM_ACTIVE',
+    'OTEL_NODE_ENABLED_INSTRUMENTATIONS',
+  ];
+  const logicalIds = ['ApiTaskDefinition', 'WebTaskDefinition', 'WorkerTaskDefinition'];
+
+  for (const [occurrence, logicalId] of logicalIds.entries()) {
+    for (const name of forbiddenNames) {
+      assertRejected(
+        mutateNthNodeEnvironment(
+          occurrence + 1,
+          (binding) => `${binding}\n            - { Name: ${name}, Value: prohibited }`,
+        ),
+        new RegExp(
+          `${logicalId} must not author NODE_OPTIONS or unreviewed automatic-instrumentation Environment or Secrets bindings`,
+        ),
+      );
+    }
+  }
+});
+
+test('rejects preload and automatic-instrumentation names injected through ECS secrets', () => {
+  const secretBinding = '       - { Name: OTEL_TRACES_EXPORTER, ValueFrom: prohibited }';
+  for (const [logicalId, anchor] of [
+    ['ApiTaskDefinition', '      Secrets:'],
+    ['WebTaskDefinition', '      LinuxParameters:'],
+    ['WorkerTaskDefinition', '      Secrets:'],
+  ]) {
+    assertRejected(
+      mutate((source) =>
+        mutateResourceBlock(source, logicalId, (block) =>
+          block.replace(
+            anchor,
+            `      Secrets:\n${secretBinding}${anchor === '      Secrets:' ? '' : `\n${anchor}`}`,
+          ),
+        ),
+      ),
+      new RegExp(
+        `${logicalId} must not author NODE_OPTIONS or unreviewed automatic-instrumentation Environment or Secrets bindings`,
       ),
     );
   }

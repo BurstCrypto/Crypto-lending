@@ -391,8 +391,16 @@ function requireAbsentProperty(block, logicalId, propertyName, expectation, erro
   }
 }
 
-function validateTaskEnvironmentCredentialBoundary(block, logicalId, errors) {
+function validateTaskEnvironmentBoundary(block, logicalId, errors) {
   const environment = indentedPropertyBlock(block, 'Environment') ?? '';
+  const secrets = indentedPropertyBlock(block, 'Secrets') ?? '';
+  const authoredEnvironmentNames = [...environment.matchAll(/\bName:\s*([A-Z][A-Z0-9_]*)\b/g)].map(
+    (match) => match[1],
+  );
+  const authoredRuntimeEnvironmentNames = [
+    ...authoredEnvironmentNames,
+    ...[...secrets.matchAll(/\bName:\s*([A-Z][A-Z0-9_]*)\b/g)].map((match) => match[1]),
+  ];
   const nodeEnvironmentNames = environment.match(/\bName:\s*NODE_ENV\b/g) ?? [];
   const productionBindings =
     environment.match(/^\s*-\s*\{\s*Name:\s*NODE_ENV,\s*Value:\s*production\s*\}\s*$/gm) ?? [];
@@ -424,19 +432,30 @@ function validateTaskEnvironmentCredentialBoundary(block, logicalId, errors) {
   ]);
   const authoredCredentialNames = [
     ...new Set(
-      [...environment.matchAll(/\bName:\s*([A-Z][A-Z0-9_]*)\b/g)]
-        .map((match) => match[1])
-        .filter(
-          (name) =>
-            forbiddenCredentialNames.has(name) ||
-            name.startsWith('AWS_CONTAINER_CREDENTIALS_') ||
-            name.startsWith('AWS_CONTAINER_AUTHORIZATION_'),
-        ),
+      authoredEnvironmentNames.filter(
+        (name) =>
+          forbiddenCredentialNames.has(name) ||
+          name.startsWith('AWS_CONTAINER_CREDENTIALS_') ||
+          name.startsWith('AWS_CONTAINER_AUTHORIZATION_'),
+      ),
     ),
   ].sort();
   if (authoredCredentialNames.length > 0) {
     errors.push(
       `${logicalId} must not author AWS credential-provider Environment bindings; ECS supplies task-role credentials through its platform channel. Forbidden bindings: ${authoredCredentialNames.join(', ')}.`,
+    );
+  }
+
+  const forbiddenInstrumentationPrefixes = ['DD_TRACE', 'NEW_RELIC', 'ELASTIC_APM', 'OTEL'];
+  if (
+    authoredRuntimeEnvironmentNames.some(
+      (name) =>
+        name === 'NODE_OPTIONS' ||
+        forbiddenInstrumentationPrefixes.some((prefix) => name.startsWith(prefix)),
+    )
+  ) {
+    errors.push(
+      `${logicalId} must not author NODE_OPTIONS or unreviewed automatic-instrumentation Environment or Secrets bindings.`,
     );
   }
 }
@@ -1563,7 +1582,7 @@ function validateEcsRoleSecurityBoundaries(resources, inventory, errors) {
     const block = resources.get(logicalId) ?? '';
     requireExactProperty(block, logicalId, 'ExecutionRoleArn', executionRoleArn, errors);
     requireExactProperty(block, logicalId, 'TaskRoleArn', taskRoleArn, errors);
-    validateTaskEnvironmentCredentialBoundary(block, logicalId, errors);
+    validateTaskEnvironmentBoundary(block, logicalId, errors);
   }
 
   const workloadSecretBindings = new Map([

@@ -12,6 +12,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import process from 'node:process';
 import { spawnSync } from 'node:child_process';
+import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 
@@ -24,6 +25,13 @@ import {
 const VALIDATOR_PATH = fileURLToPath(new URL('./validate-built-runtime.mjs', import.meta.url));
 const WEB_MANIFEST_PATH = 'apps/web/package.json';
 const WEB_SERVER_PATH = 'apps/web/server.js';
+const TEST_REQUIRE = createRequire(import.meta.url);
+const FORBIDDEN_API_INSTRUMENTATION_PACKAGES = Object.freeze([
+  '@opentelemetry/instrumentation-pg',
+  'dd-trace',
+  'newrelic',
+  'elastic-apm-node',
+]);
 
 function temporaryRoot(t, prefix) {
   const root = mkdtempSync(join(tmpdir(), prefix));
@@ -92,6 +100,7 @@ function addPackage(root, name) {
     'utf8',
   );
   writeFileSync(join(packageRoot, 'index.js'), 'module.exports = {};\n', 'utf8');
+  return packageRoot;
 }
 
 function createSymbolicLinkOrSkip(t, target, path, type) {
@@ -115,6 +124,12 @@ test('accepts an API runtime whose production root cannot resolve test-only SDKs
   const report = withProduction(() => validateBuiltApiRuntime(apiFixture(t)));
   assert.equal(report.valid, true);
   assert.equal(report.checkedEntrypoints, 11);
+  assert.deepEqual(report.forbiddenPackages, [
+    '@solana/web3.js',
+    'jayson',
+    'stream-json',
+    ...FORBIDDEN_API_INSTRUMENTATION_PACKAGES,
+  ]);
 });
 
 test('rejects an API runtime that can resolve a test-only SDK', (t) => {
@@ -124,6 +139,49 @@ test('rejects an API runtime that can resolve a test-only SDK', (t) => {
     () => withProduction(() => validateBuiltApiRuntime(root)),
     /Forbidden production dependency resolves: @solana\/web3\.js/u,
   );
+});
+
+test('rejects every resolvable production API instrumentation package without leaking paths', (t) => {
+  for (const packageName of FORBIDDEN_API_INSTRUMENTATION_PACKAGES) {
+    const root = apiFixture(t);
+    addPackage(root, packageName);
+    assert.throws(
+      () => withProduction(() => validateBuiltApiRuntime(root)),
+      (error) => {
+        assert.equal(error.message, `Forbidden production dependency resolves: ${packageName}`);
+        assert.equal(error.message.includes(root), false);
+        return true;
+      },
+    );
+  }
+});
+
+test('rejects every production API instrumentation package loaded by AppModule', (t) => {
+  for (const packageName of FORBIDDEN_API_INSTRUMENTATION_PACKAGES) {
+    const root = apiFixture(t);
+    const externalRoot = temporaryRoot(t, 'crypto-lending-external-runtime-');
+    const packageRoot = addPackage(externalRoot, packageName);
+    const packageEntrypoint = TEST_REQUIRE.resolve(packageRoot);
+    const appModule = join(root, 'dist/app.module.js');
+    writeFileSync(appModule, `module.exports = require(${JSON.stringify(packageRoot)});\n`, 'utf8');
+
+    try {
+      assert.throws(
+        () => withProduction(() => validateBuiltApiRuntime(root)),
+        (error) => {
+          assert.equal(
+            error.message,
+            `Production AppModule loaded forbidden package: ${packageName}`,
+          );
+          assert.equal(error.message.includes(externalRoot), false);
+          return true;
+        },
+      );
+    } finally {
+      delete TEST_REQUIRE.cache[packageEntrypoint];
+      delete TEST_REQUIRE.cache[appModule];
+    }
+  }
 });
 
 test('requires production mode and every API executable used by ECS', (t) => {
@@ -180,6 +238,14 @@ test('accepts harmless shared public-testnet text in the minimal web runtime', (
     'utf8',
   );
   assert.equal(withProduction(() => validateBuiltWebRuntime(root)).valid, true);
+});
+
+test('keeps production API instrumentation package policy out of the web artifact scan', (t) => {
+  const root = webFixture(t);
+  addPackage(root, 'dd-trace');
+  const report = withProduction(() => validateBuiltWebRuntime(root));
+  assert.equal(report.valid, true);
+  assert.deepEqual(report.forbiddenPackages, ['@solana/web3.js', 'jayson', 'stream-json']);
 });
 
 test('rejects forbidden SDK package paths and module markers in the web runtime', (t) => {

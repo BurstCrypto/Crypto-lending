@@ -15,6 +15,13 @@ import { TextDecoder } from 'node:util';
 import { pathToFileURL } from 'node:url';
 
 const FORBIDDEN_RUNTIME_PACKAGES = Object.freeze(['@solana/web3.js', 'jayson', 'stream-json']);
+const FORBIDDEN_API_RUNTIME_PACKAGES = Object.freeze([
+  ...FORBIDDEN_RUNTIME_PACKAGES,
+  '@opentelemetry/instrumentation-pg',
+  'dd-trace',
+  'newrelic',
+  'elastic-apm-node',
+]);
 const FORBIDDEN_WEB_MARKERS = Object.freeze([
   '@solana/web3.js',
   'node_modules/jayson/',
@@ -401,12 +408,12 @@ function validateBuiltApiRuntimeInternal(apiRootInput, options = {}) {
   const runtimeRequire = createRequire(appModule);
   const activation = runtimeRequire(balanceConsumerActivation);
   validateActivation(activation);
-  for (const packageName of FORBIDDEN_RUNTIME_PACKAGES) {
+  for (const packageName of FORBIDDEN_API_RUNTIME_PACKAGES) {
     assertPackageDoesNotResolve(runtimeRequire, packageName);
   }
   runtimeRequire(appModule);
   const loadedPaths = Object.keys(runtimeRequire.cache);
-  for (const marker of FORBIDDEN_RUNTIME_PACKAGES) {
+  for (const marker of FORBIDDEN_API_RUNTIME_PACKAGES) {
     if (
       loadedPaths.some((path) =>
         path.replaceAll('\\', '/').includes('/node_modules/' + marker + '/'),
@@ -418,7 +425,7 @@ function validateBuiltApiRuntimeInternal(apiRootInput, options = {}) {
 
   return Object.freeze({
     checkedEntrypoints: requiredPaths.length,
-    forbiddenPackages: FORBIDDEN_RUNTIME_PACKAGES,
+    forbiddenPackages: FORBIDDEN_API_RUNTIME_PACKAGES,
     scannedBytes: snapshot.aggregateBytes,
     scannedFiles: snapshot.files.size,
     valid: true,
