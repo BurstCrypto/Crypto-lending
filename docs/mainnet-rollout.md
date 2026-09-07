@@ -96,17 +96,32 @@ in a retained PostgreSQL intent lifecycle. Recorder V2 prepares the exact
 Ethereum/Solana evidence intent before claiming one record dispatch, stores only
 hashed token material, and never automatically resubmits an ambiguous record.
 A separate one-shot processor can lease one due unresolved intent and inspect
-the result only through `RECONCILE_ONLY`; it cannot dispatch `RECORD`. All 62
-focused cases in `production-go-live-preflight.test.ts` passed, and six focused
-cases passed against an isolated local PostgreSQL 16 instance.
+the result only through `RECONCILE_ONLY`; it cannot dispatch `RECORD`. A dormant,
+direct-import-only lifecycle can invoke that processor sequentially within a
+reviewed 1-through-64 work-item limit and a 10-millisecond-through-30-second run
+deadline. It accepts one run at a time, propagates aborts, honors authenticated
+retry deferrals only inside the deadline, and cleans up its injected timers and
+listeners. Import and construction start no work. The offline preflight milestone
+verified in `6f35a91` pins all 36 provider-position artifacts; all 63 focused
+cases in `production-go-live-preflight.test.ts` passed, and six focused cases
+passed against an isolated local PostgreSQL 16 instance.
 
-This closes a local evidence-recording implementation gap only. The recorder
-and reconciliation processor remain direct-import-only, unregistered,
-unscheduled, ungranted, and undeployed. They have no approved source pair,
-endpoint, credential, external transport, populated mainnet evidence, or
-financial-action authority, and physical commit acknowledgement can still be
-ambiguous across a broken connection. These local tests do not increment the
-live-provider count or clear any read-only or real-value launch gate.
+This closes a local evidence-recording and bounded-run implementation gap only.
+The recorder, reconciliation processor, and lifecycle remain direct-import-only,
+unregistered, unscheduled, ungranted, and undeployed. They have no approved
+source pair, endpoint, credential, external transport, populated mainnet
+evidence, or financial-action authority, and physical commit acknowledgement can
+still be ambiguous across a broken connection. These local tests do not
+increment the live-provider count or clear any read-only or real-value launch
+gate.
+
+The zero-cost application-template validator now rejects `NODE_OPTIONS` and
+unreviewed `DD_TRACE*`, `NEW_RELIC*`, `ELASTIC_APM*`, or `OTEL*` bindings from
+every task environment and secrets block. The built API artifact validator also
+rejects resolvable or loaded PostgreSQL auto-instrumentation packages, including
+`@opentelemetry/instrumentation-pg`, `dd-trace`, `newrelic`, and
+`elastic-apm-node`. These local protections add no instrumentation, database or
+provider call, image build, deployment, or live evidence.
 
 ## Additional gates before any real-value write
 
@@ -144,7 +159,7 @@ request a transaction signature. No public Ethereum or Solana RPC/indexing
 request, transaction submission, broadcast, provider account, cloud
 deployment, or paid resource is created by the local implementation. The
 separate balance-sync queue definition has no activated consumer or chain
-egress and grants no live-read authority. Migration `0031`, recorder V2, and
-the dormant reconciliation processor add no database runtime grant or external
-egress. The same is true of the deferred Base artifacts retained in the
-repository.
+egress and grants no live-read authority. Migration `0031`, recorder V2, the
+dormant reconciliation processor, and its bounded lifecycle add no database
+runtime grant or external egress. The same is true of the deferred Base artifacts
+retained in the repository.

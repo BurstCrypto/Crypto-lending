@@ -4,10 +4,11 @@ Status: dormant, unregistered, read-only, and non-persistable from the
 application graph. Migration `0029` defines dormant evidence persistence, and
 migration `0030` adds a dormant deadline-bound record/reconcile boundary.
 Migration `0031` and recorder V2 now provide retained one-shot record intents,
-while a separate processor provides source-only reconciliation. No evidence
-writer or reconciliation schedule is composed, and none of the private reader,
-recorder, or processor is registered, granted runtime authority, or
-runtime-reachable.
+while a separate processor provides source-only reconciliation and a bounded
+direct-import-only lifecycle can sequence processor calls when explicitly run.
+No evidence writer or reconciliation schedule is composed, and none of the
+private reader, recorder, processor, or lifecycle is registered, granted runtime
+authority, or runtime-reachable.
 
 ## What the coordinator establishes
 
@@ -182,11 +183,22 @@ only `RECONCILE_ONLY`. It cannot select an intent supplied by its caller,
 release a lease, or dispatch a record, and it has no timer or module
 registration.
 
+The dormant lifecycle processes those one-shot calls sequentially only after an
+explicit `run`, rejects overlapping runs, authenticates every opaque processor
+result against its exact generated request, and returns fixed non-authorizing
+run outcomes. Reviewed policy bounds it to 1 through 64 work items and 10
+milliseconds through 30 seconds. It propagates external abort through one
+internal signal, waits for authenticated `retryNotBefore` only inside the run
+deadline, and cleans up the injected deadline/retry timers and abort listeners.
+Import and construction start no work. The lifecycle has no provider, network,
+database, persistence, logging, or financial-action port and is absent from the
+module, barrel, controller, CLI, and runtime composition.
+
 Production still needs reviewed live implementations for both members of each
 approved source pair, an owner-authorized recorder workload, principal,
-credential, and grant, a reviewed reconciliation schedule and shutdown policy,
-logging/redaction controls, populated evidence, production registration, and
-deployed proof. The local private wiring constructs
+credential, and grant, a reviewed runtime reconciliation schedule and workload
+shutdown integration, logging/redaction controls, populated evidence,
+production registration, and deployed proof. The local private wiring constructs
 the PostgreSQL durable reader unconditionally from the same owned
 `PostgresService`, after the deadline runner and before the assembler and
 coordinator, and never exposes the reader or assembler through the facade or
@@ -222,17 +234,18 @@ The offline production preflight now byte-pins this coordinator, assembly port,
 durable-anchor reader port, concrete PostgreSQL durable reader, chain-anchor
 evidence source port, dormant two-source evidence producer, exact recorder port,
 concrete PostgreSQL recorder, record-intent reconciliation port, one-shot
-PostgreSQL reconciliation processor, dormant trusted-chain-assessment assembler,
+PostgreSQL reconciliation processor, bounded reconciliation lifecycle, dormant
+trusted-chain-assessment assembler,
 exact mainnet launch-network policy, concrete deadline runner, complete
 wallet-roster cancellation chain, shared PostgreSQL cancellation service,
 runtime-budget resource, private dormant composition, migrations `0029`,
-`0030`, and `0031`, and the migration index with a selected thirty-five-file
+`0030`, and `0031`, and the migration index with a selected thirty-six-file
 reader/domain/infrastructure/database/module/barrel/controller critical-source
 slice.
 Its local check rejects trust, timing, source-method substitution, active-controller
 lifecycle, signal substitution, cancellation/drain/cleanup, query fallback,
 result-cardinality/row-validation weakening, recorder SQL/value order,
-durable-intent/token/one-shot/reconciliation drift, pre/post-producer
+durable-intent/token/one-shot/reconciliation/lifecycle drift, pre/post-producer
 authentication, raw reader or trusted-assembly
 injection, private reader/assembler construction/argument bypass, facade
 exposure, zero-target anchor,
@@ -282,8 +295,16 @@ register or schedule itself. A rejected query or broken connection can still
 hide physical commit acknowledgement, but the durable intent remains available
 for source-only recovery without a second dispatch.
 
-All 62 focused cases in `production-go-live-preflight.test.ts` passed for this
-exact 35-artifact slice. Six focused integration cases also passed against an
+The bounded lifecycle captures only the processor's `reconcileNext` and
+`reviewResult` methods plus the injected clock and timer. It allows one run at a
+time, gives every sequential attempt the same internally controlled abort
+signal, authenticates the returned capability before reading its exact outcome,
+and stops at idle, deferral, work limit, run deadline, or external abort. It does
+not turn this source artifact into a scheduler or runtime worker.
+
+At the preflight milestone verified in `6f35a91`, all 63 focused cases in
+`production-go-live-preflight.test.ts` passed for this exact 36-artifact slice.
+Six focused integration cases also passed against an
 isolated local PostgreSQL 16 instance, including the cumulative verifier,
 Ethereum/Solana intent preparation, one-shot/idempotent execution,
 expired-`NEW` reconciliation, token rejection, and deferred-constraint
@@ -299,7 +320,8 @@ authority may consume it.
 The checked-in mainnet source-pair registry remains empty and `NOT_APPROVED`.
 No concrete source, endpoint, owner-authorized recorder or reconciliation
 workload/principal/credential/grant, module provider, barrel export, composition
-dependency, schedule, deployment, or runtime activation is added, so all three
+dependency, lifecycle registration, schedule, deployment, or runtime activation
+is added, so all three
 registration blockers remain `PROVIDER_POSITION_READER_FEATURE_REGISTRATION_MISSING`,
 `PROVIDER_POSITION_TRUSTED_ASSESSMENT_FEATURE_REGISTRATION_MISSING`, and
 `PROVIDER_POSITION_DEADLINE_RUNNER_FEATURE_REGISTRATION_MISSING`, and the

@@ -31,6 +31,17 @@ mixed, forged, or superficially widened artifacts instead emit
 callers from replacing the inspected result with asserted booleans or a
 fabricated `PRODUCTION_ENABLED` value.
 
+The application-baseline validator also rejects `NODE_OPTIONS` and unreviewed
+automatic-instrumentation names with the `DD_TRACE`, `NEW_RELIC`, `ELASTIC_APM`,
+or `OTEL` prefixes from every API, web, and worker task `Environment` or
+`Secrets` block. The built-API-runtime validator separately rejects a production
+artifact that can resolve or that loads `@opentelemetry/instrumentation-pg`,
+`dd-trace`, `newrelic`, or `elastic-apm-node`; the web artifact retains its
+separate existing package policy. These are zero-cost local template and
+artifact protections against an unreviewed PostgreSQL preload/interception path.
+They do not build or deploy an image, enable telemetry, make a database or
+network call, or supply live evidence.
+
 This check recognizes the selected environment contract and guard markers; it
 is not a substitute for the dedicated CloudFormation linters and artifact
 validators. The standalone `sqs-foundation.yaml` is intentionally outside this
@@ -185,7 +196,8 @@ coverage-aware reader v3 port, trusted-assessment assembly port,
 durable-chain-anchor reader port, concrete PostgreSQL durable-anchor reader,
 dormant chain-anchor evidence source port and two-source producer, recorder V2
 port and concrete PostgreSQL recorder, record-intent reconciliation port and
-one-shot PostgreSQL reconciliation processor, dormant trusted-chain-assessment assembler,
+one-shot PostgreSQL reconciliation processor, bounded reconciliation lifecycle,
+dormant trusted-chain-assessment assembler,
 admission coordinator, concrete Node deadline runner, wallet-roster reader port
 and adapter, wallet service and repository port, PostgreSQL wallet repository,
 shared PostgreSQL cancellation service, dormant runtime-budget resource,
@@ -194,7 +206,7 @@ runtime PostgreSQL pool factory, coverage/observation/assessment/policy domains,
 exact Ethereum/Solana mainnet launch-network policy, migration `0029`, the
 deadline-bound migration `0030`, record-intent migration `0031`, the migration
 index, feature module, feature barrel, and HTTP controller as one selected
-thirty-five-file critical-source slice. Within that slice, the local semantic
+thirty-six-file critical-source slice. Within that slice, the local semantic
 inspection requires an exact account/correlation
 reader request with no caller-supplied evaluation time and an exact frozen
 result envelope containing the server-authored parser time and covered-snapshot
@@ -307,8 +319,8 @@ The checked-in mainnet source-pair registry is exactly empty and
 `NOT_APPROVED`, and no concrete source binding is checked in. The producer has
 no database writer, transport, endpoint, credential, environment lookup,
 provider SDK, Nest decorator, module registration, barrel export, or runtime
-composition. The recorder and reconciliation processor are likewise
-unregistered and ungranted, so these dormant artifacts cannot populate
+composition. The recorder, reconciliation processor, and bounded lifecycle are
+likewise unregistered and ungranted, so these dormant artifacts cannot populate
 migration `0029` or `0031`, contact a chain, or change any production blocker.
 
 Migration `0029` adds a dormant, append-only PostgreSQL boundary for global
@@ -370,13 +382,27 @@ does not expose or release the lease, returns an opaque authenticated
 direct-import-only source artifact with no timer, decorator, module, barrel,
 controller, environment, endpoint, credential, or network capability.
 
+The dormant direct-import-only reconciliation lifecycle adds a bounded caller-
+invoked runner around that one-shot processor without registering or scheduling
+it. It processes requests sequentially, permits only one run at a time, accepts
+an exact false-authority request, and bounds each run to 1 through 64 attempts
+and 10 milliseconds through 30 seconds. An injected timer and monotonic clock
+enforce the deadline; one internal abort signal reaches every processor attempt,
+and external abort, deadline, retry deferral, work limit, idle state, and cleanup
+have fixed reviewed outcomes. Each opaque processor result is authenticated
+against the exact generated request before inspection. Importing or constructing
+the lifecycle starts no work, and it has no provider, network, database,
+persistence, logging, or financial-action capability of its own. It remains
+absent from the module, barrel, controller, CLI, and runtime composition.
+
 Physical commit acknowledgement is still not guaranteed: a rejected query or
 interrupted connection can leave the original caller uncertain whether the
 transaction committed. Migration `0031`, recorder V2, and the one-shot
 processor close the local durable pre-dispatch intent and source-only recovery
-implementation gap; they do not close workload scheduling, shutdown,
-logging/redaction, database-principal/grant, deployment, or live recovery
-evidence.
+implementation gap, and the lifecycle adds a local bounded run/abort/cleanup
+policy around the processor. They do not close runtime scheduling, workload
+ownership and shutdown integration, logging/redaction, database-principal/grant,
+deployment, or live recovery evidence.
 
 The private dormant composition accepts no raw trust dependency. It constructs
 the concrete PostgreSQL reader from its owned `PostgresService`, constructs the
@@ -401,8 +427,9 @@ validation, started-operation settlement, and timer and abort-listener cleanup
 while rejecting network, environment, dynamic-import, and decorator
 capabilities. It also confirms that the pinned feature module, barrel, and HTTP
 controller do not register or expose the coordinator, PostgreSQL durable reader,
-PostgreSQL recorder, record-intent reconciliation processor, trusted assembly,
-deadline runner, runtime-budget resource, or runtime composition.
+PostgreSQL recorder, record-intent reconciliation processor, bounded
+reconciliation lifecycle, trusted assembly, deadline runner, runtime-budget
+resource, or runtime composition.
 
 The current exact source passes local inspection. The dormant runtime-budget
 resource constructs a lazy pool from its owned reviewed API configuration and
@@ -835,8 +862,9 @@ npm run typecheck:production:preflight
 npm run test:production:preflight
 ```
 
-For the durable record-intent milestone, all 62 focused cases in
-`production-go-live-preflight.test.ts` passed. The migration was also exercised
+For the durable record-intent and bounded-reconciliation milestone verified in
+`6f35a91`, all 63 focused cases in `production-go-live-preflight.test.ts` passed.
+The migration was also exercised
 in a disposable local PostgreSQL 16 instance: all six focused integration cases
 passed, covering clean up/down/up migration verification, Ethereum and Solana
 preparation, one-shot claim and idempotent replay, expired-`NEW` reconciliation,
