@@ -14,6 +14,7 @@ import test from 'node:test';
 
 import {
   ADDITIONAL_DORMANT_PROVIDER_ARTIFACTS,
+  DORMANT_ACCOUNT_POSITION_SEMANTICS,
   DIRECTORY_PATH,
   DORMANT_PROVIDER_INVENTORY_INPUT_ERROR,
   DORMANT_PROVIDER_INVENTORY,
@@ -113,6 +114,10 @@ test('the exact ten planning entries have dormant adapter, hostile spec, and res
   assert.deepEqual(
     ADDITIONAL_DORMANT_PROVIDER_ARTIFACTS.map(({ id }) => id),
     ['kamino-provider-position-source'],
+  );
+  assert.deepEqual(
+    DORMANT_ACCOUNT_POSITION_SEMANTICS.map(({ providerId }) => providerId),
+    ['morpho', 'euler', 'gearbox', 'save', 'project-0'],
   );
 });
 
@@ -328,6 +333,58 @@ test('the additional Kamino source is byte-pinned, authority-free, and unregiste
   );
 });
 
+test('the five account-position semantics foundations are authority-free and unregistered', () => {
+  for (const semantics of DORMANT_ACCOUNT_POSITION_SEMANTICS) {
+    assertMutationRejected(`${semantics.id} missing`, (value) => {
+      value.artifacts.delete(semantics.path);
+    });
+    assertMutationRejected(`${semantics.id} detached spec`, (value) => {
+      value.artifacts.set(
+        semantics.specPath,
+        value.artifacts
+          .get(semantics.specPath)
+          .replace(`./${semantics.path.slice(semantics.path.lastIndexOf('/') + 1, -3)}`, './other'),
+      );
+    });
+    assertMutationRejected(`${semantics.id} complete-position authority`, (value) => {
+      value.artifacts.set(
+        semantics.path,
+        value.artifacts
+          .get(semantics.path)
+          .replace('mayEstablishCompletePosition: false', 'mayEstablishCompletePosition: true'),
+      );
+    });
+    assertMutationRejected(`${semantics.id} runtime import`, (value) => {
+      value.runtimeSources.set(
+        `apps/api/src/unsafe-${semantics.providerId}.module.ts`,
+        `import './${semantics.path.slice(semantics.path.lastIndexOf('/') + 1, -3)}';`,
+      );
+    });
+  }
+});
+
+test('semantics decorators, adapter dependencies, and unreviewed semantics fail closed', () => {
+  const [semantics] = DORMANT_ACCOUNT_POSITION_SEMANTICS;
+  assertMutationRejected('semantics decorator', (value) => {
+    value.artifacts.set(semantics.path, `@Injectable()\n${value.artifacts.get(semantics.path)}`);
+  });
+  assertMutationRejected('adapter dependency', (value) => {
+    value.artifacts.set(
+      semantics.path,
+      `import './morpho-blue-ethereum-finalized-transcript.adapter';\n${value.artifacts.get(semantics.path)}`,
+    );
+  });
+  assertMutationRejected('global network call', (value) => {
+    value.artifacts.set(semantics.path, `${value.artifacts.get(semantics.path)}\nfetch('x');\n`);
+  });
+  assertMutationRejected('unreviewed semantics', (value) => {
+    value.runtimeSources.set(
+      'apps/api/src/smart-lending/infrastructure/unsafe/new-account-position.semantics.ts',
+      'export const MAYBE_SAFE = true;',
+    );
+  });
+});
+
 test('malformed snapshots fail closed without escaping', () => {
   for (const value of [null, undefined, true, 1, 'inventory', [], {}, { artifacts: new Map() }]) {
     assert.doesNotThrow(() => validateDormantProviderInventorySnapshot(value));
@@ -423,6 +480,17 @@ test('the validator contains no network, provider, cloud, credential, or subproc
     `${REPOSITORY_ROOT}/infra/providers/validate-dormant-provider-inventory.mjs`,
     'utf8',
   );
+  assert.deepEqual(
+    [...source.matchAll(/\bfrom\s+['"]([^'"]+)['"]/gu)].map((match) => match[1]),
+    [
+      'node:crypto',
+      'node:fs',
+      'node:path',
+      'node:url',
+      'node:util',
+      '../shared/read-secure-local-file.mjs',
+    ],
+  );
   for (const forbidden of [
     'node:http',
     'node:https',
@@ -434,10 +502,7 @@ test('the validator contains no network, provider, cloud, credential, or subproc
     'new WebSocket',
     'sendTransaction',
     'eth_call',
-    '@aws-sdk',
-    '@solana/web3.js',
-    'ethers',
-    'viem',
+    'sendRawTransaction',
   ]) {
     assert.equal(source.includes(forbidden), false, `validator must not contain ${forbidden}`);
   }

@@ -182,6 +182,59 @@ export const ADDITIONAL_DORMANT_PROVIDER_ARTIFACTS = Object.freeze([
   }),
 ]);
 
+export const DORMANT_ACCOUNT_POSITION_SEMANTICS = Object.freeze([
+  Object.freeze({
+    id: 'morpho-account-position-semantics',
+    providerId: 'morpho',
+    path: 'apps/api/src/smart-lending/infrastructure/morpho/morpho-blue-account-position.semantics.ts',
+    specPath:
+      'apps/api/src/smart-lending/infrastructure/morpho/morpho-blue-account-position.semantics.spec.ts',
+    useSymbol: 'MORPHO_BLUE_ACCOUNT_POSITION_SEMANTICS_USE',
+    use: 'DORMANT_MORPHO_BLUE_ACCOUNT_POSITION_SEMANTICS_ONLY',
+    minimumTests: 10,
+  }),
+  Object.freeze({
+    id: 'euler-account-position-semantics',
+    providerId: 'euler',
+    path: 'apps/api/src/smart-lending/infrastructure/euler/euler-v2-account-position.semantics.ts',
+    specPath:
+      'apps/api/src/smart-lending/infrastructure/euler/euler-v2-account-position.semantics.spec.ts',
+    useSymbol: 'EULER_V2_ACCOUNT_POSITION_SEMANTICS_USE',
+    use: 'DORMANT_EULER_V2_ACCOUNT_AND_EVC_SEMANTICS_ONLY',
+    minimumTests: 7,
+  }),
+  Object.freeze({
+    id: 'gearbox-account-position-semantics',
+    providerId: 'gearbox',
+    path: 'apps/api/src/smart-lending/infrastructure/gearbox/gearbox-v3-account-position.semantics.ts',
+    specPath:
+      'apps/api/src/smart-lending/infrastructure/gearbox/gearbox-v3-account-position.semantics.spec.ts',
+    useSymbol: 'GEARBOX_V3_ACCOUNT_POSITION_SEMANTICS_USE',
+    use: 'DORMANT_GEARBOX_V3_USDC_ACCOUNT_POSITION_SEMANTICS_ONLY',
+    minimumTests: 13,
+  }),
+  Object.freeze({
+    id: 'save-account-position-semantics',
+    providerId: 'save',
+    path: 'apps/api/src/smart-lending/infrastructure/save/save-lend-account-position.semantics.ts',
+    specPath:
+      'apps/api/src/smart-lending/infrastructure/save/save-lend-account-position.semantics.spec.ts',
+    useSymbol: 'SAVE_LEND_ACCOUNT_POSITION_SEMANTICS_USE',
+    use: 'DORMANT_SAVE_LEND_ACCOUNT_POSITION_SUPPLIED_SNAPSHOT_ONLY',
+    minimumTests: 9,
+  }),
+  Object.freeze({
+    id: 'marginfi-account-position-semantics',
+    providerId: 'project-0',
+    path: 'apps/api/src/smart-lending/infrastructure/marginfi/marginfi-v2-account-position.semantics.ts',
+    specPath:
+      'apps/api/src/smart-lending/infrastructure/marginfi/marginfi-v2-account-position.semantics.spec.ts',
+    useSymbol: 'MARGINFI_V2_ACCOUNT_POSITION_SEMANTICS_USE',
+    use: 'DORMANT_MARGINFI_V2_ACCOUNT_POSITION_SUPPLIED_SNAPSHOT_ONLY',
+    minimumTests: 14,
+  }),
+]);
+
 const STANDARD_CAPABILITY_MARKERS = Object.freeze([
   'mayPersist: false',
   'mayEstablishRecommendationEligibility: false',
@@ -189,7 +242,15 @@ const STANDARD_CAPABILITY_MARKERS = Object.freeze([
 ]);
 
 const UNSAFE_CAPABILITY =
-  /\b(?:mayPersist|mayEstablishRecommendationEligibility|mayAuthorizeFinancialAction|maySign|mayAccessWalletPrivateKey)\s*:\s*true\b/u;
+  /\b(?:mayPersist|mayEstablishRecommendationEligibility|mayEstablishCompletePosition|mayAuthorizeFinancialAction|maySign|mayAccessWalletPrivateKey)\s*:\s*true\b/u;
+const REVIEWED_SEMANTICS_IMPORTS = Object.freeze([
+  'node:crypto',
+  'node:util/types',
+  'viem',
+  '../../../wallets/domain/wallet-identity',
+]);
+const PROHIBITED_SEMANTICS_RUNTIME =
+  /(?:\bprocess(?:\.|\[)|\b(?:fetch|WebSocket|XMLHttpRequest|eval|Function)\s*\()/u;
 const PLANNED_PLATFORM =
   /plannedPlatform\(\s*\{\s*id:\s*'([^']+)'\s*,\s*name:\s*'([^']+)'\s*,\s*protocol:\s*'([^']+)'\s*\}\s*,\s*'(EVM|SOLANA)'\s*,\s*\[\s*(ETHEREUM|SOLANA)\s*,?\s*\]\s*\)/gu;
 
@@ -203,6 +264,10 @@ function adapterImportStem(path) {
 
 function countTests(source) {
   return [...source.matchAll(/\b(?:it|test)\s*\(/gu)].length;
+}
+
+function importedModules(source) {
+  return [...source.matchAll(/\b(?:from\s+|import\s*)['"]([^'"]+)['"]/gu)].map((match) => match[1]);
 }
 
 function parsePlannedProviders(source) {
@@ -255,6 +320,15 @@ export function validateDormantProviderInventorySnapshot(snapshot) {
   }
   if (ADDITIONAL_DORMANT_PROVIDER_ARTIFACTS.length !== 1) {
     errors.push('validator must contain exactly one additional dormant artifact');
+  }
+  if (
+    DORMANT_ACCOUNT_POSITION_SEMANTICS.length !== 5 ||
+    new Set(DORMANT_ACCOUNT_POSITION_SEMANTICS.map(({ id }) => id)).size !== 5 ||
+    new Set(DORMANT_ACCOUNT_POSITION_SEMANTICS.map(({ providerId }) => providerId)).size !== 5
+  ) {
+    errors.push(
+      'validator must contain exactly five distinct account-position semantics artifacts',
+    );
   }
 
   const plannedProviders = parsePlannedProviders(snapshot.directorySource);
@@ -374,6 +448,59 @@ export function validateDormantProviderInventorySnapshot(snapshot) {
     }
   }
 
+  for (const semantics of DORMANT_ACCOUNT_POSITION_SEMANTICS) {
+    exactArtifactPaths.add(semantics.path);
+    exactArtifactPaths.add(semantics.specPath);
+    const provider = DORMANT_PROVIDER_INVENTORY.find(({ id }) => id === semantics.providerId);
+    if (provider === undefined) {
+      errors.push(`${semantics.id} is not bound to a reviewed provider`);
+    }
+    const source = snapshot.artifacts.get(semantics.path);
+    const spec = snapshot.artifacts.get(semantics.specPath);
+    if (typeof source !== 'string') {
+      errors.push(`${semantics.id} artifact is missing`);
+      continue;
+    }
+    if (typeof spec !== 'string') errors.push(`${semantics.id} spec artifact is missing`);
+    if (
+      !source.includes(`export const ${semantics.useSymbol}`) ||
+      !source.includes(`'${semantics.use}' as const`)
+    ) {
+      errors.push(`${semantics.id} dormant use identity drifted`);
+    }
+    if (/@(Injectable|Module|Controller)\s*\(/u.test(source)) {
+      errors.push(`${semantics.id} contains a runtime registration decorator`);
+    }
+    if (UNSAFE_CAPABILITY.test(source)) {
+      errors.push(`${semantics.id} enables a prohibited provider capability`);
+    }
+    for (const marker of [
+      'mayPersist: false',
+      'mayAuthorizeFinancialAction: false',
+      'mayEstablishCompletePosition: false',
+    ]) {
+      if (!source.includes(marker)) {
+        errors.push(`${semantics.id} is missing closed capability marker: ${marker}`);
+      }
+    }
+    if (
+      importedModules(source).some(
+        (dependency) => !REVIEWED_SEMANTICS_IMPORTS.includes(dependency),
+      ) ||
+      /\b(?:import|require)\s*\(/u.test(source) ||
+      PROHIBITED_SEMANTICS_RUNTIME.test(source)
+    ) {
+      errors.push(`${semantics.id} imports an unreviewed or dynamic dependency`);
+    }
+    if (
+      typeof spec === 'string' &&
+      (!spec.includes(`./${adapterImportStem(semantics.path)}`) ||
+        countTests(spec) < semantics.minimumTests)
+    ) {
+      errors.push(`${semantics.id} spec is detached or lacks hostile-path depth`);
+    }
+  }
+
   for (const path of snapshot.artifacts.keys()) {
     if (!exactArtifactPaths.has(path)) errors.push(`unexpected inventory artifact: ${path}`);
   }
@@ -398,6 +525,17 @@ export function validateDormantProviderInventorySnapshot(snapshot) {
       ) {
         errors.push(`${artifact.id} is referenced by runtime source ${path}`);
       }
+    }
+    for (const semantics of DORMANT_ACCOUNT_POSITION_SEMANTICS) {
+      if (
+        source.includes(semantics.useSymbol) ||
+        source.includes(adapterImportStem(semantics.path))
+      ) {
+        errors.push(`${semantics.id} is referenced by runtime source ${path}`);
+      }
+    }
+    if (path.endsWith('-account-position.semantics.ts')) {
+      errors.push(`unreviewed account-position semantics artifact: ${path}`);
     }
   }
 
@@ -487,9 +625,26 @@ function loadDormantProviderInventorySnapshotInternal(repositoryRoot, afterFirst
     );
   }
 
+  for (const semantics of DORMANT_ACCOUNT_POSITION_SEMANTICS) {
+    for (const path of [semantics.path, semantics.specPath]) {
+      if (!artifacts.has(path)) {
+        artifacts.set(
+          path,
+          repositoryFile(
+            repositoryRoot,
+            path,
+            MAX_DORMANT_PROVIDER_ARTIFACT_BYTES,
+            afterFirstReadForTest,
+          ),
+        );
+      }
+    }
+  }
+
   const adapterPaths = new Set([
     ...DORMANT_PROVIDER_INVENTORY.map(({ adapterPath }) => adapterPath),
     ...ADDITIONAL_DORMANT_PROVIDER_ARTIFACTS.map(({ path }) => path),
+    ...DORMANT_ACCOUNT_POSITION_SEMANTICS.map(({ path }) => path),
   ]);
   const runtimeSources = new Map();
   let runtimeBytes = 0;
@@ -551,7 +706,9 @@ const invokedPath = process.argv[1] ? pathToFileURL(resolve(process.argv[1])).hr
 if (import.meta.url === invokedPath) {
   const errors = validateDormantProviderInventoryFiles();
   if (errors.length === 0) {
-    console.log('Dormant provider inventory is valid: 10 planned, 10 unregistered, 0 enabled');
+    console.log(
+      'Dormant provider inventory is valid: 10 planned, 5 semantics foundations, 0 enabled',
+    );
   } else {
     for (const error of errors) console.error(`- ${error}`);
     process.exitCode = 1;
