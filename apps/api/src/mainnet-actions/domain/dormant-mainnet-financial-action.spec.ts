@@ -269,6 +269,10 @@ describe('dormant mainnet financial action boundary', () => {
     expectCode(input({ expiresAt: '2026-09-06T12:04:00Z' }), 'INVALID_INTENT_TIME');
     expectCode(input(), 'INVALID_SERVER_TIME', new Date(Number.NaN));
     expectCode(input(), 'INVALID_SERVER_TIME', '2026-09-06T12:00:00.000Z');
+    expectCode(input(), 'INVALID_SERVER_TIME', new Proxy(NOW, {}));
+
+    class DateSubclass extends Date {}
+    expectCode(input(), 'INVALID_SERVER_TIME', new DateSubclass(NOW));
   });
 
   it('requires distinct UUIDv4 identifiers and a non-zero lowercase replay digest', () => {

@@ -1,3 +1,5 @@
+import { isProxy } from 'node:util/types';
+
 import {
   isMainnetLaunchNetwork,
   type MainnetLaunchNetworkId,
@@ -454,7 +456,13 @@ function canonicalTime(
 }
 
 function serverTime(value: unknown): number {
-  if (!(value instanceof Date)) return fail('INVALID_SERVER_TIME');
+  if (
+    !(value instanceof Date) ||
+    isProxy(value) ||
+    Object.getPrototypeOf(value) !== Date.prototype
+  ) {
+    return fail('INVALID_SERVER_TIME');
+  }
   try {
     const milliseconds = Date.prototype.getTime.call(value) as number;
     if (!Number.isFinite(milliseconds)) return fail('INVALID_SERVER_TIME');
