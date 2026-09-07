@@ -698,7 +698,7 @@ const REVIEWED_PROVIDER_POSITION_READ_ARTIFACT_SHA256 = Object.freeze({
   providerPositionRuntimeCompositionSource:
     'e8053eb8c64fbc6985d9a35b11130be1ac2b083c5774fbdd24c53822bc2ca0fc',
   providerPositionInfrastructureConfigSource:
-    'fb1f6639a330d6a07db1d82434559356a4707a6550848d75397a1ff5e6a3fd10',
+    '7d74d191b8abd1910b6aad7efb3f0b29a8763b31b71b9caeeee0a14bac31d54c',
   providerPositionRuntimePostgresPoolSource:
     'd15b4a0604cda0bcc9d8df7f597863e42c4ef573ba8ed4362386cd2beaa1f823',
   portfolioWalletRegistrationReaderPortSource:
@@ -852,7 +852,7 @@ const REVIEWED_BALANCE_CONSUMER_ARTIFACT_SHA256 = Object.freeze({
   failClosedJobDispositionSource:
     'd49d752db7ca17513a67219af26261add92bf73433224dfd847a098f73baf833',
   reviewedJobDispatcherSource: 'd5c922588ecc2c7eb930d2e2acc55b64167b033e9b5523fabd952cb9e50e43af',
-  infrastructureConfigSource: 'fb1f6639a330d6a07db1d82434559356a4707a6550848d75397a1ff5e6a3fd10',
+  infrastructureConfigSource: '7d74d191b8abd1910b6aad7efb3f0b29a8763b31b71b9caeeee0a14bac31d54c',
   pinnedQueueReceiptSource: '76543f1e4b4c446eb98b85ad52ea934d7e84f8f7fedcd82f6e516a7eb45a8c56',
   sqsJobWorkerSource: '833ec8c536421751efd722c503144fc160432ffee71043f97d8711ca9fd70fc1',
   observabilitySource: 'cc451c75a65c8651161ae6c2bd10b25fc290c4ca81818ceeb16bbbec64fff18b',
@@ -8085,9 +8085,16 @@ function hasDormantProviderPositionReadBoundaryContract(
       infrastructureConfig,
       "if (workload === 'api') return 'crypto_api_runtime';",
     ) === 1 &&
+    exactExecutableLineCount(
+      infrastructureConfig,
+      'export const API_DATABASE_TIMEOUT_LIMITS: Readonly<RuntimeDatabaseTimeoutLimits> = Object.freeze({',
+    ) === 1 &&
+    exactExecutableLineCount(infrastructureConfig, 'connectionTimeoutMs: 5_000,') === 2 &&
     exactExecutableLineCount(infrastructureConfig, 'connectionTimeoutMs: 60_000,') === 1 &&
-    exactExecutableLineCount(infrastructureConfig, 'lockTimeoutMs: 60_000,') === 1 &&
-    exactExecutableLineCount(infrastructureConfig, 'statementTimeoutMs: 300_000,') === 1 &&
+    exactExecutableLineCount(infrastructureConfig, 'lockTimeoutMs: 60_000,') === 2 &&
+    exactExecutableLineCount(infrastructureConfig, 'statementTimeoutMs: 300_000,') === 2 &&
+    exactExecutableLineCount(infrastructureConfig, "workload === 'api'") === 2 &&
+    exactExecutableLineCount(infrastructureConfig, '? API_DATABASE_TIMEOUT_LIMITS') === 1 &&
     exactExecutableLineCount(
       infrastructureConfig,
       'migration ? 60_000 : runtimeTimeoutLimits.connectionTimeoutMs,',
@@ -11464,10 +11471,10 @@ function hasDormantBalanceConsumerPersistenceResourceContract(
       infrastructureConfig,
       'export const BALANCE_CONSUMER_DATABASE_TIMEOUT_LIMITS: Readonly<RuntimeDatabaseTimeoutLimits> =',
     ) === 1 &&
-    exactExecutableLineCount(infrastructureConfig, 'connectionTimeoutMs: 5_000,') === 1 &&
+    exactExecutableLineCount(infrastructureConfig, 'connectionTimeoutMs: 5_000,') === 2 &&
     exactExecutableLineCount(infrastructureConfig, 'lockTimeoutMs: 5_000,') === 1 &&
     exactExecutableLineCount(infrastructureConfig, 'statementTimeoutMs: 15_000,') === 1 &&
-    exactExecutableLineCount(infrastructureConfig, "workload === 'balance-consumer'") === 1 &&
+    exactExecutableLineCount(infrastructureConfig, ": workload === 'balance-consumer'") === 1 &&
     exactExecutableLineCount(infrastructureConfig, '? BALANCE_CONSUMER_DATABASE_TIMEOUT_LIMITS') ===
       1 &&
     exactExecutableLineCount(
