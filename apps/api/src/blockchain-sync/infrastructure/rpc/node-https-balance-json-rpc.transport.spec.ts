@@ -314,6 +314,7 @@ describe('Node HTTPS balance JSON-RPC transport', () => {
     ['ethereum', config(), 'eth_chainId'],
     ['ethereum', config(), 'eth_getBlockByNumber'],
     ['ethereum', config(), 'eth_getCode'],
+    ['ethereum', config(), 'eth_getStorageAt'],
     ['ethereum', config(), 'eth_call'],
     ['solana', config({ networkId: SOLANA }), 'getGenesisHash'],
     ['solana', config({ networkId: SOLANA }), 'getSlot'],

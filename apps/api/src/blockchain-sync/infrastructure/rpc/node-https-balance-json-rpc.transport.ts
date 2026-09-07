@@ -23,7 +23,13 @@ const MAX_JSON_NODES = 200_000;
 const MAX_RESPONSE_CHUNKS = 4_096;
 
 const ALLOWED_METHODS = Object.freeze({
-  [ETHEREUM_MAINNET]: new Set(['eth_chainId', 'eth_getBlockByNumber', 'eth_getCode', 'eth_call']),
+  [ETHEREUM_MAINNET]: new Set([
+    'eth_chainId',
+    'eth_getBlockByNumber',
+    'eth_getCode',
+    'eth_getStorageAt',
+    'eth_call',
+  ]),
   [SOLANA_MAINNET]: new Set(['getGenesisHash', 'getSlot', 'getBlock', 'getTokenAccountsByOwner']),
 });
 
