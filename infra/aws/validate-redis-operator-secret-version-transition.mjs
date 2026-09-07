@@ -19,8 +19,10 @@ import {
   readSecureLocalFile,
   readSecureLocalFileForTest,
 } from '../shared/read-secure-local-file.mjs';
+import { validateEd25519PublicKeyBytes } from '../shared/validate-ed25519-public-key.mjs';
 
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
+const ED25519_SPKI_DER_PREFIX = Buffer.from('302a300506032b6570032100', 'hex');
 export const REPOSITORY_ROOT = resolve(scriptDirectory, '..', '..');
 export const LOCAL_REDIS_OPERATOR_TRANSITION_ROOT = join(REPOSITORY_ROOT, '.local-validation');
 export const DEFAULT_REDIS_OPERATOR_TRANSITION_RECORD = join(
@@ -689,6 +691,10 @@ function parseRegistry(registry) {
     const validUntil = canonicalInstant(candidate.validUntil);
     if (!validFrom || !validUntil || validUntil <= validFrom) throw new Error('invalid');
     const der = canonicalBase64(candidate.publicKeySpkiDerBase64, 44);
+    if (!der.subarray(0, ED25519_SPKI_DER_PREFIX.length).equals(ED25519_SPKI_DER_PREFIX)) {
+      throw new Error('invalid');
+    }
+    validateEd25519PublicKeyBytes(der.subarray(ED25519_SPKI_DER_PREFIX.length));
     const key = createPublicKey({ key: der, format: 'der', type: 'spki' });
     if (key.asymmetricKeyType !== 'ed25519') throw new Error('invalid');
     const canonicalDer = key.export({ format: 'der', type: 'spki' });

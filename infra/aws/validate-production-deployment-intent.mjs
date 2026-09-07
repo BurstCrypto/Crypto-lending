@@ -15,6 +15,7 @@ import { TextDecoder, types as utilTypes } from 'node:util';
 
 import { parseStrictJsonBytes } from '../shared/parse-strict-json.mjs';
 import { readSecureLocalFile } from '../shared/read-secure-local-file.mjs';
+import { validateEd25519PublicKeyBytes } from '../shared/validate-ed25519-public-key.mjs';
 
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
 export const REPOSITORY_ROOT = resolve(scriptDirectory, '..', '..');
@@ -58,6 +59,7 @@ const STACK_NAME_PATTERN = /^[A-Za-z][A-Za-z0-9-]{0,127}$/u;
 const INSTANT_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/u;
 const REFERENCE_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:/-]{2,191}$/u;
 const BASE64_PATTERN = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u;
+const ED25519_SPKI_PREFIX = Buffer.from('302a300506032b6570032100', 'hex');
 const ETHEREUM_MAINNET_ID = 'eip155:1';
 const SOLANA_MAINNET_ID = 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp';
 const READ_TRUSTED_TIME_MILLISECONDS = Date.now.bind(Date);
@@ -729,6 +731,14 @@ function parsedRegistry(value) {
       return invalid();
     }
     const der = canonicalBase64(key.publicKeySpkiDerBase64, 44);
+    if (!der.subarray(0, ED25519_SPKI_PREFIX.length).equals(ED25519_SPKI_PREFIX)) {
+      return invalid();
+    }
+    try {
+      validateEd25519PublicKeyBytes(der.subarray(ED25519_SPKI_PREFIX.length));
+    } catch {
+      return invalid();
+    }
     let publicKey;
     try {
       publicKey = createPublicKey({ key: der, format: 'der', type: 'spki' });

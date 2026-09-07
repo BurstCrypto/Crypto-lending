@@ -1,5 +1,11 @@
 import assert from 'node:assert/strict';
-import { createHash, generateKeyPairSync, sign } from 'node:crypto';
+import {
+  createHash,
+  createPublicKey,
+  generateKeyPairSync,
+  sign,
+  verify as verifySignature,
+} from 'node:crypto';
 import {
   linkSync,
   mkdirSync,
@@ -830,6 +836,38 @@ test('rejects signature tampering, role/scope substitution, key windows, and key
     duplicateKeyRegistry,
   );
   assert.equal(report.ok, false);
+});
+
+test('rejects an identity authority key and forged identity signature before Node trust', () => {
+  const identityRaw = Buffer.alloc(32);
+  identityRaw[0] = 1;
+  const identitySpki = Buffer.concat([Buffer.from('302a300506032b6570032100', 'hex'), identityRaw]);
+  const forgedSignature = Buffer.concat([identityRaw, Buffer.alloc(32)]);
+  const record = signRecord(recordFor('transition'));
+  record.signatures[0].valueBase64 = forgedSignature.toString('base64');
+  const registry = clone(testRegistry);
+  registry.keys[0].publicKeySpkiDerBase64 = identitySpki.toString('base64');
+  const unsigned = {
+    schemaVersion: record.schemaVersion,
+    artifactType: record.artifactType,
+    content: record.content,
+  };
+  assert.equal(
+    verifySignature(
+      null,
+      authWalletSecretVersionTransitionSigningBytes(unsigned),
+      createPublicKey({ key: identitySpki, format: 'der', type: 'spki' }),
+      forgedSignature,
+    ),
+    true,
+  );
+  const report = verifyAuthWalletSecretVersionTransitionWithTestRegistry(
+    record,
+    optionsFor(record, 'transition'),
+    registry,
+  );
+  assert.equal(report.ok, false);
+  assert.equal(report.signatureValidated, false);
 });
 
 test('signing bytes are canonical, domain separated, and cover the complete unsigned record', () => {

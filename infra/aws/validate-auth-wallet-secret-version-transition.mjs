@@ -20,6 +20,7 @@ import {
   readSecureLocalFile,
   readSecureLocalFileForTest,
 } from '../shared/read-secure-local-file.mjs';
+import { validateEd25519PublicKeyBytes } from '../shared/validate-ed25519-public-key.mjs';
 
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
 export const REPOSITORY_ROOT = resolve(scriptDirectory, '..', '..');
@@ -62,6 +63,7 @@ const ENVIRONMENT_PATTERN = /^(?:dev|test|qa|sandbox|staging|production)(?:-[a-z
 const STACK_NAME_PATTERN = /^[A-Za-z][A-Za-z0-9-]{0,127}$/u;
 const INSTANT_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/u;
 const BASE64_PATTERN = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u;
+const ED25519_SPKI_PREFIX = Buffer.from('302a300506032b6570032100', 'hex');
 
 export const AUTH_WALLET_SECRET_FIELDS = Object.freeze([
   'AUTH_PREAUTH_SEAL_KEY',
@@ -929,6 +931,10 @@ function parseRegistry(registry) {
     const validUntil = canonicalInstant(candidate.validUntil);
     if (!validFrom || !validUntil || validUntil <= validFrom) throw new Error('invalid');
     const der = canonicalBase64(candidate.publicKeySpkiDerBase64, 44);
+    if (!der.subarray(0, ED25519_SPKI_PREFIX.length).equals(ED25519_SPKI_PREFIX)) {
+      throw new Error('invalid');
+    }
+    validateEd25519PublicKeyBytes(der.subarray(ED25519_SPKI_PREFIX.length));
     const key = createPublicKey({ key: der, format: 'der', type: 'spki' });
     if (key.asymmetricKeyType !== 'ed25519') throw new Error('invalid');
     const canonicalDer = key.export({ format: 'der', type: 'spki' });

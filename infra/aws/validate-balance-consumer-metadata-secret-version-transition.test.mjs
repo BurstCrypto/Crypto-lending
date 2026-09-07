@@ -1041,6 +1041,30 @@ test('signature substitution and shared-key approvals fail closed', () => {
   assert.equal(sharedKey.ok, false);
 });
 
+test('rejects an identity authority key with a forged identity signature', () => {
+  const signed = signedRecord(baseContent());
+  const identityPoint = Buffer.concat([Buffer.from([1]), Buffer.alloc(31)]);
+  const identitySpki = Buffer.concat([
+    Buffer.from('302a300506032b6570032100', 'hex'),
+    identityPoint,
+  ]);
+  signed.registry.keys[0].publicKeySpkiDerBase64 = identitySpki.toString('base64');
+  signed.record.signatures[0].valueBase64 = Buffer.concat([
+    identityPoint,
+    Buffer.alloc(32),
+  ]).toString('base64');
+
+  const report = verifyBalanceConsumerMetadataSecretVersionTransitionWithTestRegistry(
+    signed.record,
+    options('create', 'NO_DEPLOYED_VERSION', FIRST_VERSION),
+    signed.registry,
+  );
+
+  assert.equal(report.ok, false);
+  assert.equal(report.signatureValidated, false);
+  assert.match(report.errors.join('\n'), /production authority registry/u);
+});
+
 test('accessors, custom prototypes, cycles, and sparse arrays are rejected without disclosure', () => {
   let reads = 0;
   const accessor = Object.create(null);

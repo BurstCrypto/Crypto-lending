@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { generateKeyPairSync, sign } from 'node:crypto';
+import { createPublicKey, generateKeyPairSync, sign, verify as verifySignature } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { test } from 'node:test';
@@ -584,6 +584,39 @@ test('rejects wrong roles, keys, signatures, content digests, and target binding
     verifyWithTestRegistry(record, optionsFor(record), oversizedRegistryKeyId).ok,
     false,
   );
+});
+
+test('rejects an identity authority key and forged identity signature before Node trust', () => {
+  const identityRaw = Buffer.alloc(32);
+  identityRaw[0] = 1;
+  const identitySpki = Buffer.concat([Buffer.from('302a300506032b6570032100', 'hex'), identityRaw]);
+  const forgedSignature = Buffer.concat([identityRaw, Buffer.alloc(32)]);
+  const record = buildRecord();
+  record.signatures[0].valueBase64 = forgedSignature.toString('base64');
+  const registry = structuredClone(TEST_REGISTRY);
+  registry.keys[0].publicKeySpkiDerBase64 = identitySpki.toString('base64');
+  const signature = record.signatures[0];
+  const unsigned = {
+    schemaVersion: record.schemaVersion,
+    artifactType: record.artifactType,
+    intentSha256: record.intentSha256,
+    content: record.content,
+  };
+  assert.equal(
+    verifySignature(
+      null,
+      productionDeploymentIntentSigningBytes(unsigned, {
+        role: signature.role,
+        scope: signature.scope,
+        authorityKeyId: signature.authorityKeyId,
+        signedAt: signature.signedAt,
+      }),
+      createPublicKey({ key: identitySpki, format: 'der', type: 'spki' }),
+      forgedSignature,
+    ),
+    true,
+  );
+  assert.equal(verifyWithTestRegistry(record, optionsFor(record), registry).ok, false);
 });
 
 test('emergency kill, rollback, delete, and read-only activation cannot increase forbidden authority', () => {
