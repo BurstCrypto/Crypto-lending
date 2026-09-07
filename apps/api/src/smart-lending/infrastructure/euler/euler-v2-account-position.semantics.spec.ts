@@ -62,7 +62,7 @@ describe('Euler V2 account-position semantics', () => {
   });
 
   it('requires the already pinned proxy, implementation, modules, EVC, and asset identities', () => {
-    expect(EULER_V2_ACCOUNT_POSITION_IDENTITY_REQUIREMENTS.exactDeploymentAddresses).toBe(
+    expect(EULER_V2_ACCOUNT_POSITION_IDENTITY_REQUIREMENTS.exactDeploymentAddresses).toEqual(
       EULER_V2_ETHEREUM_IDENTITIES,
     );
     expect(EULER_V2_ACCOUNT_POSITION_IDENTITY_REQUIREMENTS.callPathCodeIdentities).toMatchObject({

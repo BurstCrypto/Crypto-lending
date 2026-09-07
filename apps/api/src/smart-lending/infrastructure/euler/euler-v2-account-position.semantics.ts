@@ -1,13 +1,10 @@
 import { createHash } from 'node:crypto';
 
 import { parseEvmWalletAddress } from '../../../wallets/domain/wallet-identity';
-import {
-  EULER_V2_ETHEREUM_IDENTITIES,
-  EULER_V2_ETHEREUM_SOURCE_PINS,
-} from './euler-v2-ethereum-finalized-transcript.adapter';
 
 const NETWORK_ID = 'eip155:1' as const;
 const CHAIN_ID = '0x1' as const;
+const EULER_VAULT_KIT_COMMIT_SHA = '9e3c760e051f5d769f7c6edb9be30198a55117d4' as const;
 const INTERNAL_DEBT_PRECISION_SHIFT = 31n;
 const INTERNAL_DEBT_SCALE = 1n << INTERNAL_DEBT_PRECISION_SHIFT;
 const VIRTUAL_DEPOSIT_ATOMIC = 1_000_000n;
@@ -20,9 +17,29 @@ function frozen<T extends object>(value: T): Readonly<T> {
   return Object.freeze(value);
 }
 
-function sourceFile(path: string, bytes: number, sha256: string) {
+function sourceFile(
+  path: string,
+  bytes: number,
+  sha256: string,
+): Readonly<{ path: string; bytes: number; sha256: string }> {
   return frozen({ path, bytes, sha256 });
 }
+
+const EULER_V2_ACCOUNT_POSITION_DEPLOYMENT_IDENTITIES = frozen({
+  factory: '0x29a56a1b8214d9cf7c5561811750d5cbdb45cc8e',
+  implementation: '0x8ff1c814719096b61abf00bb46ead0c9a529dd7d',
+  evc: '0x0c9a3dd6b8f28529d72d7f9ce918d493519ee383',
+  protocolConfig: '0x4cd6bf1d183264c02be7748cb5cd3a47d013351b',
+  sequenceRegistry: '0xeaddd21618ad5deb412d3fd23580fd461c106b54',
+  balanceTracker: '0x0d52d06ceb8dcdeeb40cfd9f17489b350dd7f8a3',
+  permit2: '0x000000000022d473030f116ddee9f6b43ac78ba3',
+  modules: frozen({
+    token: '0x8a58aecbe677682d0f037c67f37f5a7a2e94973c',
+    vault: '0xb4ad4d9c02c01b01cf586c16f01c58c73c7f0188',
+    borrowing: '0x639156f8feb0cd88205e4861a0224ec169605acf',
+    governance: '0xa61f5016f2cd5cec12d091f871fce1e1df5f0b67',
+  }),
+});
 
 export const EULER_V2_ACCOUNT_POSITION_SEMANTICS_VERSION = 1 as const;
 export const EULER_V2_ACCOUNT_POSITION_SEMANTICS_USE =
@@ -34,7 +51,7 @@ export const EULER_V2_ACCOUNT_POSITION_SEMANTICS_USE =
  */
 export const EULER_V2_ACCOUNT_POSITION_SOURCE_PINS = frozen({
   repository: 'euler-xyz/euler-vault-kit',
-  commitSha: EULER_V2_ETHEREUM_SOURCE_PINS.eulerVaultKitCommitSha,
+  commitSha: EULER_VAULT_KIT_COMMIT_SHA,
   evcRepository: 'euler-xyz/ethereum-vault-connector',
   evcSubmoduleCommitSha: '084b32284ba643921f8d21bff3ddaf0c4e08d754',
   hashAlgorithm: 'SHA256_OF_GIT_BLOB_PAYLOAD',
@@ -250,7 +267,7 @@ export const EULER_V2_ACCOUNT_POSITION_ABI = frozen({
 export const EULER_V2_ACCOUNT_POSITION_IDENTITY_REQUIREMENTS = frozen({
   networkId: NETWORK_ID,
   chainId: CHAIN_ID,
-  exactDeploymentAddresses: EULER_V2_ETHEREUM_IDENTITIES,
+  exactDeploymentAddresses: EULER_V2_ACCOUNT_POSITION_DEPLOYMENT_IDENTITIES,
   runtimeCodeKeccak256RequiredAtBoundBlock: true,
   vaultProxy: frozen({
     factoryRecognized: true,
