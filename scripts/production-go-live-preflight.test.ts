@@ -513,6 +513,13 @@ const PROVIDER_POSITION_READ_ARTIFACTS = Object.freeze({
     ),
     'utf8',
   ),
+  providerPositionChainAnchorRecordIntentReconciliationLifecycleSource: readFileSync(
+    resolve(
+      __dirname,
+      '../apps/api/src/mainnet-platforms/application/provider-position-chain-anchor-record-intent-reconciliation.lifecycle.ts',
+    ),
+    'utf8',
+  ),
   providerPositionMigrationIndexSource: readFileSync(
     resolve(__dirname, '../apps/api/src/infrastructure/database/migrations/index.ts'),
     'utf8',
@@ -1175,7 +1182,7 @@ function mutateProviderPositionReadArtifact(
 }
 
 test('provider-position read inspection pins the exact dormant critical source slice', () => {
-  assert.equal(Object.keys(PROVIDER_POSITION_READ_ARTIFACTS).length, 35);
+  assert.equal(Object.keys(PROVIDER_POSITION_READ_ARTIFACTS).length, 36);
   const inspected = inspectProviderPositionReadBoundaryArtifacts(PROVIDER_POSITION_READ_ARTIFACTS);
   assert.deepEqual(inspected, EXPECTED_DORMANT_PROVIDER_POSITION_READ_BOUNDARY);
   assert.equal(Object.isFrozen(inspected), true);
@@ -1217,9 +1224,13 @@ test('provider-position read semantic gate contains no disabled-check bypass', (
     'function hasDormantProviderPositionChainAnchorRecordIntentReconciliationContract(',
     recordIntentMigrationStart,
   );
+  const reconciliationLifecycleStart = source.indexOf(
+    'function hasDormantProviderPositionChainAnchorRecordIntentReconciliationLifecycleContract(',
+    reconciliationStart,
+  );
   const start = source.indexOf(
     'function hasDormantProviderPositionReadBoundaryContract(',
-    reconciliationStart,
+    reconciliationLifecycleStart,
   );
   const end = source.indexOf('\nfunction ', start + 1);
   assert.ok(
@@ -1228,7 +1239,8 @@ test('provider-position read semantic gate contains no disabled-check bypass', (
       recorderStart > producerStart &&
       recordIntentMigrationStart > recorderStart &&
       reconciliationStart > recordIntentMigrationStart &&
-      start > reconciliationStart &&
+      reconciliationLifecycleStart > reconciliationStart &&
+      start > reconciliationLifecycleStart &&
       end > start,
   );
   const semanticGateSource = source
@@ -2194,6 +2206,85 @@ test('provider-position read inspection rejects record-intent reconciliation dri
   }
 });
 
+test('provider-position read inspection rejects reconciliation lifecycle drift', () => {
+  const mutations: readonly (readonly [
+    keyof ProviderPositionReadBoundaryArtifactSources,
+    string,
+    string,
+  ])[] = [
+    [
+      'providerPositionChainAnchorRecordIntentReconciliationLifecycleSource',
+      'PROVIDER_POSITION_CHAIN_ANCHOR_RECORD_INTENT_RECONCILIATION_LIFECYCLE_VERSION =\n  1 as const;',
+      'PROVIDER_POSITION_CHAIN_ANCHOR_RECORD_INTENT_RECONCILIATION_LIFECYCLE_VERSION =\n  2 as const;',
+    ],
+    [
+      'providerPositionChainAnchorRecordIntentReconciliationLifecycleSource',
+      'const MAX_WORK_ITEMS = 64;',
+      'const MAX_WORK_ITEMS = 65;',
+    ],
+    [
+      'providerPositionChainAnchorRecordIntentReconciliationLifecycleSource',
+      'const MAX_RUN_MILLISECONDS = 30_000;',
+      'const MAX_RUN_MILLISECONDS = 60_000;',
+    ],
+    [
+      'providerPositionChainAnchorRecordIntentReconciliationLifecycleSource',
+      'const MIN_RETRY_DELAY_MILLISECONDS = 10;',
+      'const MIN_RETRY_DELAY_MILLISECONDS = 0;',
+    ],
+    [
+      'providerPositionChainAnchorRecordIntentReconciliationLifecycleSource',
+      "const DEPENDENCY_KEYS = Object.freeze(['reconciliation', 'clock', 'timer', 'policy'] as const);",
+      "const DEPENDENCY_KEYS = Object.freeze(['reconciliation', 'clock', 'timer', 'policy', 'logger'] as const);",
+    ],
+    [
+      'providerPositionChainAnchorRecordIntentReconciliationLifecycleSource',
+      'while (counts.attempts < this.#dependencies.maximumWorkItems) {',
+      'while (counts.attempts <= this.#dependencies.maximumWorkItems) {',
+    ],
+    [
+      'providerPositionChainAnchorRecordIntentReconciliationLifecycleSource',
+      "if (reviewed !== capability) return fail('RESULT_AUTHENTICATION_FAILED');",
+      'void capability;',
+    ],
+    [
+      'providerPositionChainAnchorRecordIntentReconciliationLifecycleSource',
+      'capability: await operation',
+      'capability: operation',
+    ],
+    [
+      'providerPositionChainAnchorRecordIntentReconciliationLifecycleSource',
+      'const retryAt = Math.max(',
+      'const retryAt = Math.min(',
+    ],
+    [
+      'providerPositionChainAnchorRecordIntentReconciliationLifecycleSource',
+      'export class DormantProviderPositionChainAnchorRecordIntentReconciliationLifecycle {',
+      'setInterval(() => undefined, 1);\nexport class DormantProviderPositionChainAnchorRecordIntentReconciliationLifecycle {',
+    ],
+    [
+      'mainnetPlatformsModuleSource',
+      'providers: [MainnetPlatformDirectoryService, MainnetPlatformsPrivacyInterceptor],',
+      'providers: [MainnetPlatformDirectoryService, DormantProviderPositionChainAnchorRecordIntentReconciliationLifecycle],',
+    ],
+    [
+      'mainnetPlatformsIndexSource',
+      "export { MainnetPlatformDirectoryService } from './application/mainnet-platform-directory.service';",
+      "export { DormantProviderPositionChainAnchorRecordIntentReconciliationLifecycle } from './application/provider-position-chain-anchor-record-intent-reconciliation.lifecycle';",
+    ],
+  ];
+
+  for (const [key, approved, rejected] of mutations) {
+    assert.deepEqual(
+      inspectProviderPositionReadBoundaryArtifacts(
+        mutateProviderPositionReadArtifact(key, approved, rejected),
+      ),
+      INVALID_PROVIDER_POSITION_READ_BOUNDARY,
+      `${key}: ${approved}`,
+    );
+  }
+});
+
 test('provider-position read blockers participate in both readiness calculations', () => {
   const source = readFileSync(PREFLIGHT_SCRIPT_PATH, 'utf8');
   const readOnlyStart = source.indexOf('const publicReadOnly = readinessFor([');
@@ -3026,7 +3117,7 @@ test('provider-position read artifact shape and private brand fail closed', () =
     Object.fromEntries(
       Object.keys(PROVIDER_POSITION_READ_ARTIFACTS).map((key) => [
         key,
-        'x'.repeat(Math.floor((896 * 1024) / 35) + 1),
+        'x'.repeat(Math.floor((896 * 1024) / 36) + 1),
       ]),
     ),
     accessor,

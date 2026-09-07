@@ -262,6 +262,7 @@ export interface ProviderPositionReadBoundaryArtifactSources {
   readonly providerPositionChainAnchorRecordIntentMigrationSource: string;
   readonly providerPositionChainAnchorRecordIntentReconciliationPortSource: string;
   readonly providerPositionPostgresChainAnchorRecordIntentReconciliationProcessorSource: string;
+  readonly providerPositionChainAnchorRecordIntentReconciliationLifecycleSource: string;
   readonly providerPositionMigrationIndexSource: string;
   readonly providerPositionAdmissionCoordinatorSource: string;
   readonly providerPositionDeadlineRunnerSource: string;
@@ -605,6 +606,7 @@ const PROVIDER_POSITION_READ_ARTIFACT_KEYS = Object.freeze([
   'providerPositionChainAnchorRecordIntentMigrationSource',
   'providerPositionChainAnchorRecordIntentReconciliationPortSource',
   'providerPositionPostgresChainAnchorRecordIntentReconciliationProcessorSource',
+  'providerPositionChainAnchorRecordIntentReconciliationLifecycleSource',
   'providerPositionMigrationIndexSource',
   'providerPositionAdmissionCoordinatorSource',
   'providerPositionDeadlineRunnerSource',
@@ -656,6 +658,8 @@ const REVIEWED_PROVIDER_POSITION_READ_ARTIFACT_SHA256 = Object.freeze({
     '69810de205e47e5275f4e756fedbdaaafbf0b5f53c092420d2535d6b4dbdb6a8',
   providerPositionPostgresChainAnchorRecordIntentReconciliationProcessorSource:
     '3539ea558fd21f11542fc3937271900633f6ca80ea2d59a03c40c71402b7f2df',
+  providerPositionChainAnchorRecordIntentReconciliationLifecycleSource:
+    '4b0bd742fe5508c2c18b07c10ae7feb4c5a2d888c1498fde8ee01a784fc040dc',
   providerPositionMigrationIndexSource:
     'be2a50819fec7ec86a4eb67867f8a79ee97579b132d6527ab125de34c6946ace',
   providerPositionAdmissionCoordinatorSource:
@@ -832,7 +836,7 @@ const REVIEWED_BALANCE_CONSUMER_ARTIFACT_SHA256 = Object.freeze({
   rootPackageSource: '1a2c762fe9278975a123073be69b7dc332b547e348ecbb71303233da7ebac8fd',
   rootPackageLockSource: 'ac745baf70f2e70b3ba779612f0a3cc2b10692860a47c54c927a1e4805b2e6a6',
   applicationTemplateSource: '58b040eea3858661d45ab0f1334457c0b937cfb8179bad665aa3bb649171807c',
-  applicationValidatorSource: 'ef7d09ce2118a2f6b4aa0bd4b02651d1306d058be4dcea48affae3ad3f076032',
+  applicationValidatorSource: '3da9441a8d3c5de0b47b88fd0c11d489c940234702f768ea9774279f7fab3e00',
   workloadTemplateSource: '4c74c98e73635df30570dfe1e726b41cb6f62832f0bfc2e43dcd087d384b78de',
   workloadValidatorSource: '694f28c926fb08f6648d2d399fd31161681247eadacf43042077c4759dcbafba',
   balanceConsumerEnvelopeSource: '3b621023e516cd553c34fbe09e4b0047d1395fab45e105eef7692570d6429045',
@@ -4220,6 +4224,142 @@ function hasDormantProviderPositionChainAnchorRecordIntentReconciliationContract
   );
 }
 
+function hasDormantProviderPositionChainAnchorRecordIntentReconciliationLifecycleContract(
+  lifecycleSource: string,
+  runtimeCompositionSource: string,
+  moduleSource: string,
+  indexSource: string,
+  controllerSource: string,
+): boolean {
+  const lifecycle = lifecycleSource.replace(/\r\n/gu, '\n');
+  const imports = Array.from(
+    lifecycle.matchAll(/\bfrom\s+['"]([^'"]+)['"]/gu),
+    (match) => match[1],
+  );
+  const constructorStart = lifecycle.indexOf('  constructor(');
+  const runStart = lifecycle.indexOf('\n  async run(', constructorStart);
+  const constructor =
+    constructorStart >= 0 && runStart > constructorStart
+      ? lifecycle.slice(constructorStart, runStart)
+      : '';
+  const runEnd = lifecycle.indexOf('\n  async #runReviewed(', runStart);
+  const run = runStart >= 0 && runEnd > runStart ? lifecycle.slice(runStart, runEnd) : '';
+  const runReviewedEnd = lifecycle.indexOf('\n  #currentStatus(', runEnd);
+  const runReviewed =
+    runEnd >= 0 && runReviewedEnd > runEnd ? lifecycle.slice(runEnd, runReviewedEnd) : '';
+  const invokeStart = lifecycle.indexOf('  async #invoke(', runReviewedEnd);
+  const authenticateStart = lifecycle.indexOf('\n  #authenticateResult(', invokeStart);
+  const invoke =
+    invokeStart >= 0 && authenticateStart > invokeStart
+      ? lifecycle.slice(invokeStart, authenticateStart)
+      : '';
+  const forbiddenCapability =
+    /(?:\bimport\s*\(|\brequire\s*\(|(?:\bfrom\s+|\bimport\s*(?:\(\s*)?)['"](?:node:)?(?:child_process|cluster|dgram|dns|fs|http|http2|https|net|tls|worker_threads)(?:\/[^'"]*)?['"]|(?:\bfrom\s+|\bimport\s*(?:\(\s*)?)['"](?:axios|ethers|got|superagent|undici|web3|@solana\/web3\.js)['"]|\b(?:fetch|setTimeout|setInterval|setImmediate|queueMicrotask|WebSocket|EventSource|XMLHttpRequest|readFileSync|writeFileSync)\s*\(|\.\s*(?:query|connect|end|execute|transaction|persist|save|write)\s*\(|\b(?:process|Deno|Bun)\s*\.\s*env\b|\bimport\s*\.\s*meta\s*\.\s*env\b|['"]https?:\/\/|(?:^|\n)[\t ]*@[A-Za-z_$]|\b(?:NestFactory|DataSource|EntityManager|Repository|PostgresService|loadInfrastructureConfig|createPostgresPool|POSTGRES_POOL)\b|\b(?:SELECT|INSERT\s+INTO|UPDATE|DELETE\s+FROM|TRUNCATE)\b)/iu;
+  const forbiddenFeatureSurface =
+    /(?:DormantProviderPositionChainAnchorRecordIntentReconciliationLifecycle|PROVIDER_POSITION_CHAIN_ANCHOR_RECORD_INTENT_RECONCILIATION_LIFECYCLE_|provider-position-chain-anchor-record-intent-reconciliation\.lifecycle)/u;
+  const runtimeSurfaces = [runtimeCompositionSource, moduleSource, indexSource, controllerSource];
+  const attemptAt = runReviewed.indexOf('counts.attempts += 1;');
+  const invocationAt = runReviewed.indexOf('const invocation = await this.#invoke(', attemptAt);
+  const authenticationAt = runReviewed.indexOf(
+    'const reviewed = this.#authenticateResult(invocation.capability, reconcileRequest);',
+    invocationAt,
+  );
+  const deferredAt = runReviewed.indexOf(
+    "if (reviewed.outcome !== 'DEFERRED') {",
+    authenticationAt,
+  );
+  const retryAt = runReviewed.indexOf('const retryAt = Math.max(', deferredAt);
+  const waitAt = runReviewed.indexOf(
+    'const wait = await this.#wait(retryAt - now, internalSignal);',
+    retryAt,
+  );
+
+  return (
+    (lifecycle.match(/^[\t ]*import\b/gmu)?.length ?? 0) === 2 &&
+    imports.length === 2 &&
+    imports[0] === 'node:util/types' &&
+    imports[1] === './ports/provider-position-chain-anchor-record-intent-reconciliation.port' &&
+    lifecycle.includes(
+      'export const PROVIDER_POSITION_CHAIN_ANCHOR_RECORD_INTENT_RECONCILIATION_LIFECYCLE_VERSION =\n  1 as const;',
+    ) &&
+    lifecycle.includes(
+      "'DORMANT_PROVIDER_POSITION_CHAIN_ANCHOR_RECORD_INTENT_RECONCILIATION_LIFECYCLE_ONLY' as const;",
+    ) &&
+    lifecycle.includes(
+      "'DORMANT_PROVIDER_POSITION_CHAIN_ANCHOR_RECORD_INTENT_RECONCILIATION_LIFECYCLE_RESULT_ONLY' as const;",
+    ) &&
+    exactExecutableLineCount(lifecycle, 'const MAX_WORK_ITEMS = 64;') === 1 &&
+    exactExecutableLineCount(lifecycle, 'const MIN_RUN_MILLISECONDS = 10;') === 1 &&
+    exactExecutableLineCount(lifecycle, 'const MAX_RUN_MILLISECONDS = 30_000;') === 1 &&
+    exactExecutableLineCount(lifecycle, 'const MIN_RETRY_DELAY_MILLISECONDS = 10;') === 1 &&
+    exactExecutableLineCount(
+      lifecycle,
+      "const DEPENDENCY_KEYS = Object.freeze(['reconciliation', 'clock', 'timer', 'policy'] as const);",
+    ) === 1 &&
+    exactExecutableLineCount(
+      lifecycle,
+      "const POLICY_KEYS = Object.freeze(['maximumWorkItems', 'maximumRunMilliseconds'] as const);",
+    ) === 1 &&
+    exactExecutableLineCount(lifecycle, 'readonly mayAuthorizeFinancialAction: false;') === 2 &&
+    lifecycle.includes(
+      "'IDLE' | 'WORK_LIMIT_REACHED' | 'RUN_DEADLINE_REACHED' | 'DEFERRED' | 'ABORTED';",
+    ) &&
+    lifecycle.includes('readonly attemptCount: number;') &&
+    lifecycle.includes('readonly resolvedIntentCount: number;') &&
+    lifecycle.includes('readonly deferredCount: number;') &&
+    !forbiddenCapability.test(lifecycle) &&
+    !/(?:\bconsole\s*\.|\blogger\s*\.|\bcause\b|\bPromise\s*\.\s*(?:race|all)\s*\()/u.test(
+      lifecycle,
+    ) &&
+    exactExecutableLineCount(
+      lifecycle,
+      'export class DormantProviderPositionChainAnchorRecordIntentReconciliationLifecycle {',
+    ) === 1 &&
+    exactExecutableLineCount(
+      constructor,
+      'this.#dependencies = reviewedDependencies(dependencies);',
+    ) === 1 &&
+    !/\b(?:await|schedule|reconcileNext|reviewResult)\s*\(/u.test(constructor) &&
+    exactExecutableLineCount(run, "if (this.#running) return fail('ALREADY_RUNNING');") === 1 &&
+    exactExecutableLineCount(run, 'this.#running = true;') === 1 &&
+    exactExecutableLineCount(run, 'this.#running = false;') === 1 &&
+    exactExecutableLineCount(
+      runReviewed,
+      'while (counts.attempts < this.#dependencies.maximumWorkItems) {',
+    ) === 1 &&
+    exactExecutableLineCount(runReviewed, 'mayAuthorizeFinancialAction: false,') === 1 &&
+    attemptAt >= 0 &&
+    invocationAt > attemptAt &&
+    authenticationAt > invocationAt &&
+    deferredAt > authenticationAt &&
+    retryAt > deferredAt &&
+    waitAt > retryAt &&
+    runReviewed.includes(
+      'reviewed.retryNotBeforeMilliseconds,\n          now + MIN_RETRY_DELAY_MILLISECONDS,',
+    ) &&
+    runReviewed.includes('if (!Number.isSafeInteger(retryAt) || retryAt >= deadlineAt) {') &&
+    exactExecutableLineCount(
+      lifecycle,
+      "if (reviewed !== capability) return fail('RESULT_AUTHENTICATION_FAILED');",
+    ) === 1 &&
+    exactExecutableLineCount(
+      invoke,
+      'return Object.freeze({ ok: true as const, capability: await operation });',
+    ) === 1 &&
+    exactExecutableLineCount(lifecycle, 'abortInternal();') >= 2 &&
+    lifecycle.includes(
+      "if (externalAborted || isExternallyAborted) return runResult('ABORTED', counts);",
+    ) &&
+    lifecycle.includes("return runResult('RUN_DEADLINE_REACHED', counts);") &&
+    exactExecutableLineCount(lifecycle, 'if (cleanupFailure !== null) fail(cleanupFailure);') ===
+      1 &&
+    lifecycle.includes('attemptCount: counts.attempts,') &&
+    lifecycle.includes('resolvedIntentCount: counts.resolved,') &&
+    lifecycle.includes('deferredCount: counts.deferred,') &&
+    runtimeSurfaces.every((source) => !forbiddenFeatureSurface.test(source))
+  );
+}
+
 function hasDormantProviderPositionReadBoundaryContract(
   sources: ProviderPositionReadBoundaryArtifactSources,
 ): boolean {
@@ -4249,6 +4389,11 @@ function hasDormantProviderPositionReadBoundaryContract(
     sources.providerPositionChainAnchorRecordIntentReconciliationPortSource.replace(/\r\n/gu, '\n');
   const postgresChainAnchorRecordIntentReconciliationProcessor =
     sources.providerPositionPostgresChainAnchorRecordIntentReconciliationProcessorSource.replace(
+      /\r\n/gu,
+      '\n',
+    );
+  const chainAnchorRecordIntentReconciliationLifecycle =
+    sources.providerPositionChainAnchorRecordIntentReconciliationLifecycleSource.replace(
       /\r\n/gu,
       '\n',
     );
@@ -4307,6 +4452,7 @@ function hasDormantProviderPositionReadBoundaryContract(
     chainAnchorEvidenceRecorderPort,
     chainAnchorRecordIntentReconciliationPort,
     postgresChainAnchorRecordIntentReconciliationProcessor,
+    chainAnchorRecordIntentReconciliationLifecycle,
     postgresDurableAnchorReader,
     trustedAssessmentAssembler,
     coordinator,
@@ -5186,6 +5332,13 @@ function hasDormantProviderPositionReadBoundaryContract(
     hasDormantProviderPositionChainAnchorRecordIntentReconciliationContract(
       chainAnchorRecordIntentReconciliationPort,
       postgresChainAnchorRecordIntentReconciliationProcessor,
+      runtimeComposition,
+      moduleSource,
+      indexSource,
+      controller,
+    ) &&
+    hasDormantProviderPositionChainAnchorRecordIntentReconciliationLifecycleContract(
+      chainAnchorRecordIntentReconciliationLifecycle,
       runtimeComposition,
       moduleSource,
       indexSource,
@@ -12037,6 +12190,13 @@ export function loadRepositoryProductionPreflightInput(
         resolve(
           repositoryRoot,
           'apps/api/src/mainnet-platforms/infrastructure/postgres-provider-position-chain-anchor-record-intent.reconciliation-processor.ts',
+        ),
+        'utf8',
+      ),
+      providerPositionChainAnchorRecordIntentReconciliationLifecycleSource: readFileSync(
+        resolve(
+          repositoryRoot,
+          'apps/api/src/mainnet-platforms/application/provider-position-chain-anchor-record-intent-reconciliation.lifecycle.ts',
         ),
         'utf8',
       ),
