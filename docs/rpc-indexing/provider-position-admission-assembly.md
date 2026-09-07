@@ -229,16 +229,18 @@ exact request identity in a private `WeakMap`. It has no writer function or
 ordinary-query fallback. Admission source review, observation parsing, this
 reader, and migration `0029` all derive the same chain-global observation ID
 from the exact anchor. The private dormant runtime composition continues to
-expose only its frozen null-prototype reader v3 sub-capability. No evidence
-source or writer is composed, no source pair is approved, and no populated
-evidence rows, registered production composition, runtime activation, deployed
-binding, or live chain evidence exists, so neither
-the PostgreSQL reader nor `admitAndAssemble` is a live application path. All three
-provider-position registration blockers remain
-`PROVIDER_POSITION_READER_FEATURE_REGISTRATION_MISSING`,
-`PROVIDER_POSITION_TRUSTED_ASSESSMENT_FEATURE_REGISTRATION_MISSING`, and
-`PROVIDER_POSITION_DEADLINE_RUNNER_FEATURE_REGISTRATION_MISSING`, and the
-live-provider count remains zero.
+expose only its frozen null-prototype reader v3 sub-capability. The mainnet
+module now exports a separate inert reader-v3 facade, but its source-owned
+Ethereum/Solana activation registry is empty, `NOT_APPROVED`, and `DISABLED`, so
+every read rejects before acquiring a capability. No evidence source or writer
+is composed, no source pair is approved, and no populated evidence rows,
+registered production composition, runtime activation, deployed binding, or
+live chain evidence exists, so neither the PostgreSQL reader nor
+`admitAndAssemble` is a live application path. The remaining blockers are
+`PROVIDER_POSITION_RUNTIME_ACTIVATION_POLICY_NOT_APPROVED`,
+`PROVIDER_POSITION_APPROVED_SOURCE_BINDINGS_MISSING`, and
+`PROVIDER_POSITION_DEPLOYED_EVIDENCE_MISSING`, and the live-provider count
+remains zero.
 
 The offline production preflight now byte-pins this coordinator, assembly port,
 durable-anchor reader port, concrete PostgreSQL durable reader, chain-anchor
@@ -250,12 +252,11 @@ trusted-chain-assessment assembler,
 exact mainnet launch-network policy, concrete deadline runner, complete
 wallet-roster cancellation chain, shared PostgreSQL cancellation service,
 runtime-budget resource, private dormant composition, migrations `0029`,
-`0030`, and `0031`, and the migration index. The historical finality milestone
-selected 38 reader/domain/infrastructure/database/module/barrel/controller
-artifacts. Aave, Kamino, and Compound were subsequently pinned by preflight
-commits `ecff5b9`, `b41cc62`, and `91bd9bc`, bringing the committed set to 41.
-Spark preflight commit `2978367` pins source commit `d684428` and brings the
-selected local critical-source set to 42 artifacts.
+`0030`, and `0031`, the migration index, and the inert reader registration. The
+historical finality milestone selected 38 reader/domain/infrastructure/database/
+module/barrel/controller artifacts. Aave, Kamino, Compound, and Spark expanded
+that set to 42; preflight commit `a684735` pins the inert registration as the
+43rd artifact and binds the complete 389-file API snapshot.
 Its local check rejects trust, timing, source-method substitution, active-controller
 lifecycle, signal substitution, cancellation/drain/cleanup, query fallback,
 result-cardinality/row-validation weakening, recorder SQL/value order,
@@ -263,11 +264,11 @@ durable-intent/token/one-shot/reconciliation/lifecycle drift, pre/post-producer
 authentication, raw reader or trusted-assembly
 injection, private reader/assembler construction/argument bypass, facade
 exposure, zero-target anchor, candidate-finality authentication/classification,
-authority, or feature-surface drift inside that slice, but deliberately reports the reader,
-trusted-assessment, and deadline-runner feature registrations as missing. It
-does not prove recursive dependency closure or scan every application module,
-and it performs no provider, chain, network, cloud, secret, transaction, or
-billable operation.
+authority, or feature-surface drift inside that slice. It admits only the exact
+inert token registration and deliberately reports missing activation policy,
+approved source bindings, and deployed evidence. It does not prove recursive
+dependency closure or scan every application module, and it performs no
+provider, chain, network, cloud, secret, transaction, or billable operation.
 
 The selected slice's authority-free producer accepts one canonical
 selected-source observation and uses the configured corroborating member only
@@ -353,16 +354,16 @@ or financial use.
 
 The checked-in mainnet source-pair registry remains empty and `NOT_APPROVED`.
 The four provider-target source artifacts do not change that registry and do
-not provide an approved independent witness pair. No live source, endpoint,
-owner-authorized recorder or reconciliation
-workload/principal/credential/grant, module provider, barrel export, composition
-dependency, finalizer registration, lifecycle registration, schedule,
-deployment, or runtime activation is added, so all three
-registration blockers remain `PROVIDER_POSITION_READER_FEATURE_REGISTRATION_MISSING`,
-`PROVIDER_POSITION_TRUSTED_ASSESSMENT_FEATURE_REGISTRATION_MISSING`, and
-`PROVIDER_POSITION_DEADLINE_RUNNER_FEATURE_REGISTRATION_MISSING`, and the
-live-provider count, `liveReadEvidenceBound`, and `transactionEvidenceBound`
-all remain zero.
+not provide an approved independent witness pair. The registered module token
+resolves only to the inert facade; no live source, endpoint, owner-authorized
+recorder or reconciliation workload/principal/credential/grant, approved source
+binding into the private composition, barrel export, finalizer registration,
+reconciliation lifecycle registration, schedule, deployment, or runtime
+activation is added. The remaining blockers are
+`PROVIDER_POSITION_RUNTIME_ACTIVATION_POLICY_NOT_APPROVED`,
+`PROVIDER_POSITION_APPROVED_SOURCE_BINDINGS_MISSING`, and
+`PROVIDER_POSITION_DEPLOYED_EVIDENCE_MISSING`, and the live-provider count,
+`liveReadEvidenceBound`, and `transactionEvidenceBound` all remain zero.
 
 That production change must also provide:
 

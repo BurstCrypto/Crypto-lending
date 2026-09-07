@@ -130,30 +130,27 @@ direct-import-only lifecycle can invoke that processor sequentially within a
 reviewed 1-through-64 work-item limit and a 10-millisecond-through-30-second run
 deadline. It accepts one run at a time, propagates aborts, honors authenticated
 retry deferrals only inside the deadline, and cleans up its injected timers and
-listeners. Import and construction start no work. At the candidate-finality
-milestone, offline preflight commit `7f7347a` pinned the then-current 38
-provider-position artifacts and all 64 focused cases in
-`production-go-live-preflight.test.ts` passed. Later preflight commits
-`ecff5b9`, `b41cc62`, and `91bd9bc` pin the Aave, Kamino, and Compound sources,
-bringing the committed critical slice to 41 artifacts. Spark source commit
-`d684428` passed its focused specification, API typecheck, and targeted
-static/format checks; preflight commit `2978367` pins it and brings the slice to
-42 artifacts. All 68 cases passed for that exact slice in a current focused
-rerun. The earlier six focused record-intent cases also passed
+listeners. Import and construction start no work. At the inert-registration
+milestone, preflight commit `a684735` pins the current 43 provider-position
+artifacts and the complete API source snapshot at 389 files and 5,869,308
+bytes. All 81 focused cases in `production-go-live-preflight.test.ts` pass for
+that exact slice. The earlier six focused record-intent cases also passed
 against an isolated local PostgreSQL 16 instance.
 
-This closes a local evidence-recording and bounded-run implementation gap only.
-The finalizer, recorder, reconciliation processor, and lifecycle remain
-direct-import-only, unregistered, unscheduled, ungranted, and undeployed. They
-have no approved source pair, endpoint, credential, external transport,
-populated mainnet evidence, or financial-action authority, and physical commit
+This closes a local evidence-recording, bounded-run, and inert-registration gap
+only. The exported reader-v3 facade rejects every request without inspecting
+input because its source-owned Ethereum/Solana activation registry is empty,
+`NOT_APPROVED`, and `DISABLED`. The private composition, finalizer, recorder,
+reconciliation processor, and reconciliation lifecycle remain direct-import-
+only, unregistered, unscheduled, ungranted, and undeployed. They have no
+approved source pair, endpoint, credential, external transport, populated
+mainnet evidence, or financial-action authority, and physical commit
 acknowledgement can still be ambiguous across a broken connection. The report
-still emits `PROVIDER_POSITION_READER_FEATURE_REGISTRATION_MISSING`,
-`PROVIDER_POSITION_TRUSTED_ASSESSMENT_FEATURE_REGISTRATION_MISSING`, and
-`PROVIDER_POSITION_DEADLINE_RUNNER_FEATURE_REGISTRATION_MISSING`;
-`liveReadEvidenceBound` and `transactionEvidenceBound` both remain zero. These
-local tests do not increment the zero live-provider count or clear any
-read-only or real-value launch gate.
+emits `PROVIDER_POSITION_RUNTIME_ACTIVATION_POLICY_NOT_APPROVED`,
+`PROVIDER_POSITION_APPROVED_SOURCE_BINDINGS_MISSING`, and
+`PROVIDER_POSITION_DEPLOYED_EVIDENCE_MISSING`; `liveReadEvidenceBound` and
+`transactionEvidenceBound` both remain zero. These local tests do not increment
+the zero live-provider count or clear any read-only or real-value launch gate.
 
 The zero-cost application-template validator now rejects `NODE_OPTIONS` and
 unreviewed `DD_TRACE*`, `NEW_RELIC*`, `ELASTIC_APM*`, or `OTEL*` bindings from

@@ -122,13 +122,11 @@ market-level transcript boundaries: Aave V3 Ethereum (`1538ec7`), Kamino Solana
 (`1e70d80`), Compound III Ethereum (`7e10077`), and SparkLend Ethereum
 (`d684428`). They are endpoint-free, direct-import-only, dormant, unregistered,
 and depend on injected authenticated durable wallet/continuity context plus
-bounded finalized transcripts. The Aave, Kamino, and Compound preflight pins
-are committed in `ecff5b9`, `b41cc62`, and `91bd9bc`, taking the selected local
-critical slice from its historical 38 artifacts to 41. Spark's focused source
-specification, API typecheck, and targeted static/format checks pass; preflight
-commit `2978367` pins source commit `d684428` and brings the slice to 42
-artifacts. All 68 cases passed for that exact slice in a current focused rerun.
-None of these sources adds a live endpoint,
+bounded finalized transcripts. The Aave, Kamino, Compound, and Spark preflight
+pins grew the selected local critical slice from its historical 38 artifacts to 42. Registration commit `7617800` adds an inert reader-v3 facade backed by an
+empty, `NOT_APPROVED`, and `DISABLED` Ethereum/Solana activation registry;
+preflight commit `a684735` pins it as the 43rd artifact. All 81 focused cases
+pass for that exact slice. None of these sources adds a live endpoint,
 credential, approved independent source pair, runtime activation, persistence
 or financial-action authority, production approval, or live evidence.
 
@@ -982,8 +980,8 @@ provider-position production slice. Later preflight commits `ecff5b9`,
 sources and bring the committed slice to 41 artifacts. Spark source commit
 `d684428` passed its focused specification, API typecheck, and targeted
 static/format checks; preflight commit `2978367` pins it and brings the slice to
-42 artifacts. All 68 cases passed for that exact slice in a current focused
-rerun. Registration commit `7617800` adds the separately pinned inert runtime
+42 artifacts. All 68 cases passed for that exact historical slice.
+Registration commit `7617800` adds the separately pinned inert runtime
 owner and module wiring; the resulting 43-artifact slice passes all 81 focused
 cases. The reviewed whole-API runtime snapshot now contains 389 files and
 5,869,308 bytes with SHA-256

@@ -142,19 +142,19 @@ does not persist or update migration `0029`; the producer artifact remains
 authority boundary exists.
 
 The four concrete provider-target sources remain local artifacts rather than
-live implementations: none owns an endpoint, provider credential, runtime
-registration, or financial-action authority. There is still no approved
-independent source pair, owner-authorized recorder workload/principal/
-credential/grant, populated evidence claim, runtime registration or activation,
-deployment, or live evidence. The finalizer also
-has no module, barrel, controller, scheduler, or composition registration.
-Consequently all three
-provider-position registration blockers remain
-`PROVIDER_POSITION_READER_FEATURE_REGISTRATION_MISSING`,
-`PROVIDER_POSITION_TRUSTED_ASSESSMENT_FEATURE_REGISTRATION_MISSING`, and
-`PROVIDER_POSITION_DEADLINE_RUNNER_FEATURE_REGISTRATION_MISSING`, and the
-live-provider count, `liveReadEvidenceBound`, and `transactionEvidenceBound`
-all remain zero.
+live implementations: none owns an endpoint, provider credential, source
+registration, or financial-action authority. A module-level reader-v3 token is
+now registered, but it resolves only to a frozen rejecting facade backed by an
+empty, `NOT_APPROVED`, and `DISABLED` Ethereum/Solana activation registry.
+There is still no approved independent source pair, owner-authorized recorder
+workload/principal/credential/grant, populated evidence claim, private
+composition activation, deployment, or live evidence. The finalizer also has
+no module, barrel, controller, scheduler, or composition registration.
+Consequently the remaining provider-position blockers are
+`PROVIDER_POSITION_RUNTIME_ACTIVATION_POLICY_NOT_APPROVED`,
+`PROVIDER_POSITION_APPROVED_SOURCE_BINDINGS_MISSING`, and
+`PROVIDER_POSITION_DEPLOYED_EVIDENCE_MISSING`, and the live-provider count,
+`liveReadEvidenceBound`, and `transactionEvidenceBound` all remain zero.
 
 Migration `0030` refuses installation over any existing `0029` evidence while
 holding an access-exclusive evidence-table lock. It adds an append-only,
