@@ -44,9 +44,10 @@ synthetic transcript boundaries: six Ethereum and four Solana. All ten remain
 unregistered and unavailable. The live read-only and transaction-enabled
 provider counts are both zero.
 
-Four account-scoped provider-position source artifacts also exist: Aave V3
+Six account-scoped provider-position source artifacts also exist: Aave V3
 Ethereum (`1538ec7`), Kamino Solana (`1e70d80`), Compound III Ethereum
-(`7e10077`), and SparkLend Ethereum (`d684428`). They are endpoint-free,
+(`7e10077`), SparkLend Ethereum (`d684428`), Morpho Blue Ethereum (`5910ebf`),
+and Euler V2 Ethereum (`d478f3b`). They are endpoint-free,
 direct-import-only, dormant, and unregistered. Each requires injected
 authenticated durable wallet/continuity context and a bounded finalized
 transcript. None supplies an endpoint, credential, approved independent source
@@ -131,11 +132,14 @@ reviewed 1-through-64 work-item limit and a 10-millisecond-through-30-second run
 deadline. It accepts one run at a time, propagates aborts, honors authenticated
 retry deferrals only inside the deadline, and cleans up its injected timers and
 listeners. Import and construction start no work. At the inert-registration
-milestone, preflight commit `a684735` pins the current 43 provider-position
-artifacts and the complete API source snapshot at 389 files and 5,869,308
-bytes. All 81 focused cases in `production-go-live-preflight.test.ts` pass for
-that exact slice. The earlier six focused record-intent cases also passed
-against an isolated local PostgreSQL 16 instance.
+milestone, preflight commit `a684735` pinned 43 provider-position artifacts.
+Morpho/Euler inventory commit `a77a57e` and preflight commit `5550fbf` now pin
+the six dormant provider-position sources in a 45-artifact boundary. The
+complete reviewed API source snapshot is 393 files and 6,048,616 bytes with
+SHA-256 `0d11c90d870eeac4f0c1565f82be3025053a9b510b0516482d51b0d8b5155c20`.
+All 85 focused cases in `production-go-live-preflight.test.ts` pass for that
+exact slice. The earlier six focused record-intent cases also passed against an
+isolated local PostgreSQL 16 instance.
 
 This closes a local evidence-recording, bounded-run, and inert-registration gap
 only. The exported reader-v3 facade rejects every request without inspecting

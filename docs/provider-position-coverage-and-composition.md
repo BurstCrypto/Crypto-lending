@@ -15,10 +15,11 @@ mainnet registry is empty and `NOT_APPROVED`. Recorder V2 durably prepares the
 `0031` intent before at most one guarded dispatch; a separate one-shot processor
 can perform only source-only reconciliation, and a bounded direct-import-only
 lifecycle can sequence processor calls only when explicitly run. The recorder,
-processor, and lifecycle are unregistered and ungranted. Four endpoint-free
+processor, and lifecycle are unregistered and ungranted. Six endpoint-free
 provider-target source implementations now exist locally for Aave V3 Ethereum,
-Kamino Solana, Compound III Ethereum, and SparkLend Ethereum, but each remains
-direct-import-only, dormant, and unregistered. No approved independent source
+Kamino Solana, Compound III Ethereum, SparkLend Ethereum, Morpho Blue Ethereum,
+and Euler V2 Ethereum, but each remains direct-import-only, dormant, and
+unregistered. No approved independent source
 pair, owner-authorized workload/principal/credential, populated evidence,
 production migration execution, runtime activation, deployment, or live proof
 exists.
@@ -76,8 +77,11 @@ module, barrel, and controller sources together with migrations `0029`, `0030`,
 and `0031` and the migration index. The historical candidate-finality preflight
 covered 38 artifacts. The committed Aave, Kamino, and Compound source pins
 expanded that selected set to 41. Spark preflight commit `2978367` pins source
-commit `d684428` and brings the selected local set to 42 critical artifacts. A
-passing local source inspection
+commit `d684428` and brought the selected local set to 42 critical artifacts.
+The inert runtime owner then brought the slice to 43. Morpho and Euler source
+commits `5910ebf` and `d478f3b`, inventory commit `a77a57e`, and preflight
+commit `5550fbf` now bring the selected boundary to 45 artifacts. A passing
+local source inspection
 does not prove recursive dependency closure, whole-application registration
 absence, populated or deployed evidence, or live behavior. It does pin the
 private construction path that passes the composition-owned PostgreSQL reader
@@ -94,8 +98,11 @@ are Aave `1538ec7` / `ecff5b9`, Kamino `1e70d80` / `b41cc62`, and Compound
 `7e10077` / `91bd9bc`. Spark source commit `d684428` passed its focused source
 specification, API typecheck, and targeted static/format checks; preflight commit
 `2978367` pins it, and all 68 cases passed for the resulting exact 42-artifact
-slice in a current focused rerun. Six
-focused PostgreSQL 16 integration cases also passed for the
+historical slice. The later inert-registration boundary passed 81 cases at 43
+artifacts. The current Morpho/Euler boundary passes all 85 focused cases at 45
+artifacts and pins a 393-file, 6,048,616-byte API source snapshot with SHA-256
+`0d11c90d870eeac4f0c1565f82be3025053a9b510b0516482d51b0d8b5155c20`.
+Six focused PostgreSQL 16 integration cases also passed for the
 migration/recorder/processor path. That is local source and disposable-database
 evidence only, not proof of a production migration, runtime
 registration, provider call, deployment, or live recovery.
@@ -141,7 +148,7 @@ does not persist or update migration `0029`; the producer artifact remains
 `PROVISIONAL` and `DISPLAY_ONLY` until a separately reviewed and activated
 authority boundary exists.
 
-The four concrete provider-target sources remain local artifacts rather than
+The six concrete provider-target sources remain local artifacts rather than
 live implementations: none owns an endpoint, provider credential, source
 registration, or financial-action authority. A module-level reader-v3 token is
 now registered, but it resolves only to a frozen rejecting facade backed by an

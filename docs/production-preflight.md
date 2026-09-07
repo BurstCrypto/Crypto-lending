@@ -1089,10 +1089,12 @@ slice. The later Aave, Kamino, Compound, and Spark preflight integrations are
 committed in `ecff5b9`, `b41cc62`, `91bd9bc`, and `2978367`; the resulting exact
 42-artifact slice passed all 68 cases in a current focused rerun.
 Registration commit `7617800` adds the separately pinned inert runtime owner and
-module wiring; the resulting 43-artifact slice passes all 81 focused cases. The
-reviewed whole-API runtime snapshot now contains 389 files and 5,869,308 bytes
-with SHA-256
-`a1479da28d229c2add6e07a9f4de88d74c6fceeac99e108bf558e47326ffe4c4`.
+module wiring; that 43-artifact slice passed all 81 focused cases. Morpho/Euler
+source commits `5910ebf` and `d478f3b`, inventory commit `a77a57e`, and preflight
+commit `5550fbf` bring the current boundary to 45 artifacts and 85 passing
+focused cases. The reviewed whole-API runtime snapshot now contains 393 files
+and 6,048,616 bytes with SHA-256
+`0d11c90d870eeac4f0c1565f82be3025053a9b510b0516482d51b0d8b5155c20`.
 The record-intent migration was also exercised
 in a disposable local PostgreSQL 16 instance: all six focused integration cases
 passed, covering clean up/down/up migration verification, Ethereum and Solana
