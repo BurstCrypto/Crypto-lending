@@ -271,17 +271,37 @@ return digest-only, one-shot evidence. The production manifest registry remains
 empty and all-deny, and this verifier has no RPC, persistence, construction,
 signing, broadcast, retry, or runtime registration.
 
+Commit `a3cf243` adds unregistered migration `0039`, which persists an
+owner-only, append-only, digest-only proof that the exact signed Ethereum or
+Solana command passed that verifier before the lifecycle entered
+`WALLET_SIGNED_SUBMISSION_BOUND`. Its wrapper accepts no caller-authored
+verification time, binds the proof to the exact prepared revision and snapshot,
+and makes the legacy proof-free bind fail at commit. Exact lost-ack replay
+reuses the database-authored time; conflicts and cross-intent replay identities
+fail closed. The migration has no runtime grant and remains outside the
+coordinated migration index until its application binder and successor
+migrations are reviewed together.
+
+Commit `924ae56` adds a direct-import-only two-queue scheduler contract.
+`PRE_BROADCAST` and `RECONCILIATION` claims use separate opaque, one-shot
+capabilities with server-owned leases, fencing tokens, timestamps, and bounded
+attempts. Signed or unknown-outcome work cannot return to pre-broadcast, and an
+attempt limit means durable quarantine and manual review rather than completion,
+deletion, or resubmission. This application boundary has no durable queue
+adapter, timer, worker registration, transport, or financial-action authority.
+
 This closes the local contract, schema, and adapter portions of durable replay,
 wallet-identity binding, authenticated-finality admission, append-only
-post-finality quarantine, and static signed-command verification. It does not
-create API/worker composition, a runtime grant, controlled authority-row
-population, concrete prerequisite or chain sources, unresolved-work
-discovery/claim/lease processing, a scheduled reviewer/reconciler, durable
-signed-verification-proof binding, downstream ledger remediation, a signer, a
+post-finality quarantine, static signed-command verification, proof persistence,
+and in-memory scheduling policy. It does not create API/worker composition, a
+runtime grant, controlled authority-row population, concrete prerequisite or
+chain sources, durable unresolved-work discovery/claim/lease processing, a
+scheduled reviewer/reconciler, downstream ledger remediation, a signer, a
 broadcaster, a mainnet provider binding, or write authority. Migrations `0033`
-through `0038` are registered solely in the cumulative migration index; their
-functions remain unavailable to application principals, the adapters, producer,
-and verifier are unregistered, both `0035` authority tables and the production
+through `0038` are registered solely in the cumulative migration index;
+migration `0039` is intentionally unregistered. Their functions remain
+unavailable to application principals, the adapters, producer, verifier, and
+scheduler are unregistered, both `0035` authority tables and the production
 write-manifest registry are empty, and all policy limits and approvals remain
 zero.
 
