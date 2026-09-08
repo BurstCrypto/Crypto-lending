@@ -185,7 +185,7 @@ const ADMISSION_SQL = `SELECT
     result.recorded_at AT TIME ZONE 'UTC',
     'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'
   ) AS recorded_at
-FROM record_authenticated_mainnet_financial_action_reconciliation_v2(
+FROM record_authenticated_mainnet_financial_action_reconciliation_v3(
   $1::uuid, $2::uuid, $3::bigint, $4::text, $5::uuid, $6::text,
   $7::text, $8::numeric, $9::text, $10::numeric, $11::text, $12::text,
   $13::uuid, $14::text, $15::uuid, $16::text, $17::text, $18::text,
@@ -207,7 +207,7 @@ const POST_FINALITY_SQL = `SELECT
     result.recorded_at AT TIME ZONE 'UTC',
     'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'
   ) AS recorded_at
-FROM record_mainnet_financial_action_post_finality_review_v2(
+FROM record_mainnet_financial_action_post_finality_review_v3(
   $1::uuid, $2::uuid, $3::bigint, $4::text, $5::bigint, $6::text,
   $7::uuid, $8::text, $9::text, $10::text, $11::numeric, $12::text,
   $13::numeric, $14::text, $15::text, $16::uuid, $17::text, $18::uuid,

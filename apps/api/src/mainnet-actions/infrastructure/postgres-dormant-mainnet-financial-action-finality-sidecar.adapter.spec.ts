@@ -374,7 +374,7 @@ function reconciliationPrerequisite(
     use: MAINNET_FINANCIAL_ACTION_RECONCILIATION_PREREQUISITE_USE,
     purpose: 'RECONCILIATION_ADMISSION' as const,
     lifecycleRevision: '2',
-    lifecycleStage: 'BROADCAST_OUTCOME_AMBIGUOUS' as const,
+    lifecycleStage: 'WALLET_SIGNED_SUBMISSION_BOUND' as const,
     observationId: OBSERVATION_ID,
   }) as unknown as MainnetFinancialActionReconciliationEvidencePrerequisiteV1;
 }
@@ -658,7 +658,8 @@ describe('PostgresDormantMainnetFinancialActionFinalitySidecarAdapter', () => {
     expect(evidence.clock).toHaveBeenCalledTimes(2);
     expect(test.query).toHaveBeenCalledTimes(1);
     const [sql, values, dispatchedSignal] = test.query.mock.calls[0] ?? [];
-    expect(sql).toContain('record_authenticated_mainnet_financial_action_reconciliation_v2');
+    expect(sql).toContain('record_authenticated_mainnet_financial_action_reconciliation_v3');
+    expect(sql).not.toContain('record_authenticated_mainnet_financial_action_reconciliation_v2');
     expect(sql).not.toContain('record_authenticated_mainnet_financial_action_reconciliation_v1');
     expect(sql).not.toContain('INSERT');
     expect(values).toEqual(candidate.admissionArguments);
@@ -809,7 +810,8 @@ describe('PostgresDormantMainnetFinancialActionFinalitySidecarAdapter', () => {
       expect(evidence.clock).toHaveBeenCalledTimes(2);
       expect(test.query).toHaveBeenCalledTimes(2);
       const [sql, values, dispatchedSignal] = test.query.mock.calls[1] ?? [];
-      expect(sql).toContain('record_mainnet_financial_action_post_finality_review_v2');
+      expect(sql).toContain('record_mainnet_financial_action_post_finality_review_v3');
+      expect(sql).not.toContain('record_mainnet_financial_action_post_finality_review_v2');
       expect(sql).not.toContain('record_mainnet_financial_action_post_finality_review_v1');
       expect(sql).not.toContain('INSERT');
       expect(values).toEqual(candidate.reviewArguments);

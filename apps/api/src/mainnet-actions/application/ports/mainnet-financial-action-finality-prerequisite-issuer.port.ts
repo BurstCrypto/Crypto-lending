@@ -26,7 +26,7 @@ export const MAINNET_FINANCIAL_ACTION_POST_FINALITY_PREREQUISITE_ISSUE_USE =
 export const MAINNET_FINANCIAL_ACTION_FINALITY_PREREQUISITE_ISSUANCE_USE =
   'DORMANT_MAINNET_FINANCIAL_ACTION_FINALITY_PREREQUISITE_ISSUANCE_ONLY' as const;
 
-export const MAINNET_FINANCIAL_ACTION_FINALITY_WALLET_READER_VERSION = 1 as const;
+export const MAINNET_FINANCIAL_ACTION_FINALITY_WALLET_READER_VERSION = 2 as const;
 export const MAINNET_FINANCIAL_ACTION_FINALITY_WALLET_READ_USE =
   'DORMANT_MAINNET_FINANCIAL_ACTION_FINALITY_WALLET_READ_ONLY' as const;
 export const MAINNET_FINANCIAL_ACTION_FINALITY_WALLET_RESULT_USE =
@@ -93,49 +93,67 @@ export type MainnetFinancialActionFinalityPrerequisiteIssuanceV1 =
   | MainnetFinancialActionPostFinalityPrerequisiteIssuanceV1;
 
 /**
- * Private wallet-plaintext boundary used only after migration 0036 has
+ * Private wallet-plaintext boundary used only after migration 0038 has
  * authenticated the lifecycle wallet identifier and its captured keyed digest.
- * The reader separately proves that the exact account-bound registration is
- * currently ACTIVE and nonrevoked and verifies the address against the current
- * active HMAC alias. Migration 0036 remains the sole proof of the historical
- * digest; this issuer exact-cross-binds the reader result to that database row.
- * Absence or revocation fails closed. This read never authorizes a new action
- * and must not expose unrelated roster metadata or key material.
+ * The reader separately proves that the exact account/intent/lifecycle recovery
+ * cursor resolves to the same signed-bound wallet and verifies its plaintext
+ * against the current HMAC alias. A revoked registration is usable only when
+ * migration 0038 proves that the signed event predates revocation. This read
+ * never authorizes a new action and must not expose unrelated roster metadata
+ * or key material.
  */
-export interface ReadMainnetFinancialActionFinalityWalletRequestV1 {
+export interface ReadMainnetFinancialActionFinalityWalletRequestV2 {
   readonly readerVersion: typeof MAINNET_FINANCIAL_ACTION_FINALITY_WALLET_READER_VERSION;
   readonly use: typeof MAINNET_FINANCIAL_ACTION_FINALITY_WALLET_READ_USE;
   readonly mayAuthorizeFinancialAction: false;
   readonly mayPersist: false;
   readonly accountId: string;
+  readonly intentId: string;
   readonly walletRegistrationId: string;
   readonly networkId: MainnetLaunchNetworkId;
   readonly walletIdentityDigestVersion: number;
   readonly walletIdentityDigestHex: string;
+  readonly lifecycleRevision: string;
+  readonly lifecycleSnapshotSha256: string;
+  readonly lifecycleStage:
+    | 'WALLET_SIGNED_SUBMISSION_BOUND'
+    | 'BROADCAST_OUTCOME_AMBIGUOUS'
+    | 'RECONCILIATION_AMBIGUOUS'
+    | 'FINALIZED_SUCCESS'
+    | 'FINALIZED_FAILURE';
+  readonly purpose: 'RECONCILIATION_ADMISSION' | 'POST_FINALITY_REVIEW';
   readonly deadlineAt: string;
   readonly signal: AbortSignal;
 }
 
-export interface MainnetFinancialActionFinalityWalletResultV1 {
+export interface MainnetFinancialActionFinalityWalletResultV2 {
   readonly readerVersion: typeof MAINNET_FINANCIAL_ACTION_FINALITY_WALLET_READER_VERSION;
   readonly use: typeof MAINNET_FINANCIAL_ACTION_FINALITY_WALLET_RESULT_USE;
   readonly mayAuthorizeFinancialAction: false;
   readonly mayPersist: false;
   readonly accountId: string;
+  readonly intentId: string;
   readonly walletRegistrationId: string;
   readonly networkId: MainnetLaunchNetworkId;
   readonly walletIdentityDigestVersion: number;
   readonly walletIdentityDigestHex: string;
+  readonly lifecycleRevision: string;
+  readonly lifecycleSnapshotSha256: string;
+  readonly lifecycleStage: ReadMainnetFinancialActionFinalityWalletRequestV2['lifecycleStage'];
+  readonly purpose: ReadMainnetFinancialActionFinalityWalletRequestV2['purpose'];
+  readonly walletStatus: 'ACTIVE' | 'REVOKED';
+  readonly revokedAt: string | null;
+  readonly verifiedAt: string;
   readonly walletAddress: WalletAddress;
 }
 
 export interface MainnetFinancialActionFinalityWalletReaderPort {
   readonly readerVersion: typeof MAINNET_FINANCIAL_ACTION_FINALITY_WALLET_READER_VERSION;
-  readWallet(request: ReadMainnetFinancialActionFinalityWalletRequestV1): Promise<unknown>;
+  readWallet(request: ReadMainnetFinancialActionFinalityWalletRequestV2): Promise<unknown>;
   verifyWallet(
     capability: unknown,
-    request: ReadMainnetFinancialActionFinalityWalletRequestV1,
-  ): MainnetFinancialActionFinalityWalletResultV1 | null;
+    request: ReadMainnetFinancialActionFinalityWalletRequestV2,
+  ): MainnetFinancialActionFinalityWalletResultV2 | null;
 }
 
 export interface MainnetFinancialActionFinalityPrerequisiteIssuerClock {

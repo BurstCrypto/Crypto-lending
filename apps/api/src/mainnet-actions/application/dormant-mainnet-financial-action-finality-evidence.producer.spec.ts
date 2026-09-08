@@ -357,7 +357,7 @@ function prerequisite(
         ...common,
         use: MAINNET_FINANCIAL_ACTION_RECONCILIATION_PREREQUISITE_USE,
         purpose,
-        lifecycleStage: 'BROADCAST_OUTCOME_AMBIGUOUS' as const,
+        lifecycleStage: 'WALLET_SIGNED_SUBMISSION_BOUND' as const,
         observationId: OBSERVATION_ID,
         ...overrides,
       }) as MainnetFinancialActionReconciliationEvidencePrerequisiteV1)
@@ -627,7 +627,7 @@ describe('dormant mainnet financial-action finality evidence producer', () => {
   });
 
   it.each([ETHEREUM, SOLANA])(
-    'issues an exact authenticated reconciliation tuple for %s',
+    'issues an exact signed-bound revision-2 reconciliation tuple for %s',
     async (networkId) => {
       const value = fixture('RECONCILIATION_ADMISSION', { networkId });
       const request = value.request as ProduceMainnetFinancialActionReconciliationEvidenceRequestV1;
@@ -666,6 +666,27 @@ describe('dormant mainnet financial-action finality evidence producer', () => {
         action: 'SUPPLY',
         amountAtomic: '1000000',
       });
+    },
+  );
+
+  it.each([
+    ['WALLET_SIGNED_SUBMISSION_BOUND' as const, '3'],
+    ['BROADCAST_OUTCOME_AMBIGUOUS' as const, '2'],
+  ])(
+    'rejects lifecycle stage %s at incoherent revision %s',
+    async (lifecycleStage, lifecycleRevision) => {
+      const value = fixture('RECONCILIATION_ADMISSION', {
+        prerequisiteOverrides: { lifecycleStage, lifecycleRevision },
+      });
+
+      await expectCode(
+        value.producer.produceReconciliationAdmissionCandidate(
+          value.request as ProduceMainnetFinancialActionReconciliationEvidenceRequestV1,
+        ),
+        'PREREQUISITE_UNAVAILABLE',
+      );
+      expect(value.primary.requests).toHaveLength(0);
+      expect(value.corroborating.requests).toHaveLength(0);
     },
   );
 

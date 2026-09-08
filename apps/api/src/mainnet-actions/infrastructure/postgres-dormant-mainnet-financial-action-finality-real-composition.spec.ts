@@ -26,7 +26,7 @@ import {
 } from '../../mainnet-platforms/application/ports/provider-position-chain-anchor-evidence-source.port';
 import { PostgresProviderPositionChainAnchorEvidenceRecorder } from '../../mainnet-platforms/infrastructure/postgres-provider-position-chain-anchor-evidence.recorder';
 import type {
-  ActiveWalletRegistrationRecord,
+  MainnetFinancialActionRecoveryWalletRecord,
   WalletRegistrationRepositoryPort,
 } from '../../wallets/application/ports/wallet-registration-repository.port';
 import { WalletRegistrationService } from '../../wallets/application/wallet-registration.service';
@@ -452,10 +452,10 @@ type EnabledWalletRegistrationConfig = Extract<
 >;
 
 interface WalletFixture {
-  readonly addressDigest: ActiveWalletRegistrationRecord['addressDigest'];
+  readonly addressDigest: MainnetFinancialActionRecoveryWalletRecord['addressDigest'];
   readonly identityKeyRing: EnabledWalletRegistrationConfig['identityHmacKeys'];
-  readonly listActiveWallets: jest.MockedFunction<
-    WalletRegistrationRepositoryPort['listActiveWallets']
+  readonly readRecoveryWallet: jest.MockedFunction<
+    WalletRegistrationRepositoryPort['readMainnetFinancialActionRecoveryWallet']
   >;
   readonly reader: WalletRegistrationMainnetFinancialActionFinalityWalletReader;
 }
@@ -480,13 +480,17 @@ function walletFixture(facts: Scenario): Readonly<WalletFixture> {
   const challengeId = parseWalletChallengeId(CHALLENGE_ID);
   const identityKey = activeWalletRegistrationKey(config.identityHmacKeys);
   const addressDigest = digestWalletIdentity(identityKey, facts.networkId, facts.walletAddress);
-  const record: ActiveWalletRegistrationRecord = {
+  const record: MainnetFinancialActionRecoveryWalletRecord = {
     walletId: WALLET_ID,
     accountId,
+    intentId: INTENT_ID,
     registeredByChallengeId: challengeId,
     chainId: facts.networkId,
+    lifecycleRevision: '3',
+    lifecycleSnapshotSha256: TERMINAL_SNAPSHOT,
+    lifecycleStage: 'FINALIZED_SUCCESS',
     registry: {
-      environment: MAINNET_SUPPORTED_ASSET_REGISTRY.latest.environment,
+      environment: 'MAINNET',
       version: MAINNET_SUPPORTED_ASSET_REGISTRY.latest.version,
       fingerprintSha256: MAINNET_SUPPORTED_ASSET_REGISTRY.latest.fingerprintSha256,
     },
@@ -505,13 +509,17 @@ function walletFixture(facts: Scenario): Readonly<WalletFixture> {
       facts.walletAddress,
     ),
     registeredAt: new Date(REGISTERED_AT),
+    status: 'REVOKED',
+    revokedAt: new Date('2026-09-07T11:59:59.500Z'),
+    verifiedAt: new Date(NOW),
   };
-  const listActiveWallets = jest.fn<
-    ReturnType<WalletRegistrationRepositoryPort['listActiveWallets']>,
-    Parameters<WalletRegistrationRepositoryPort['listActiveWallets']>
-  >(() => Promise.resolve(Object.freeze([record])));
+  const readRecoveryWallet = jest.fn<
+    ReturnType<WalletRegistrationRepositoryPort['readMainnetFinancialActionRecoveryWallet']>,
+    Parameters<WalletRegistrationRepositoryPort['readMainnetFinancialActionRecoveryWallet']>
+  >(() => Promise.resolve(Object.freeze(record)));
   const repository = {
-    listActiveWallets,
+    readMainnetFinancialActionRecoveryWallet: readRecoveryWallet,
+    listActiveWallets: jest.fn(),
     revokeWallet: jest.fn(),
     beginChallenge: jest.fn(),
     prepareChallenge: jest.fn(),
@@ -524,7 +532,7 @@ function walletFixture(facts: Scenario): Readonly<WalletFixture> {
   return frozen({
     addressDigest,
     identityKeyRing: config.identityHmacKeys,
-    listActiveWallets,
+    readRecoveryWallet,
     reader: new WalletRegistrationMainnetFinancialActionFinalityWalletReader(service, {
       now: () => new Date(NOW),
     }),
@@ -730,7 +738,7 @@ function prerequisiteRow(
 
 describe('dormant mainnet finality real-class composition', () => {
   it.each([ETHEREUM, SOLANA] as const)(
-    'composes current ACTIVE %s wallet, lifecycle, chain evidence, safety, issuer, and post-finality producer',
+    'composes historically signed, now-revoked %s wallet through post-finality persistence v3',
     async (networkId) => {
       const facts = scenario(networkId);
       const wallet = walletFixture(facts);
@@ -961,6 +969,12 @@ describe('dormant mainnet finality real-class composition', () => {
       expect(queryWithCancellation).toHaveBeenCalledTimes(7);
       expect(databaseCall).toBe(scriptedRows.length);
       for (const call of queryWithCancellation.mock.calls) expect(call[2]).toBe(signal);
+      expect(queryWithCancellation.mock.calls[5]?.[0]).toContain(
+        'read_mainnet_financial_action_post_finality_prerequisite_v2',
+      );
+      expect(queryWithCancellation.mock.calls[6]?.[0]).toContain(
+        'record_mainnet_financial_action_post_finality_review_v3',
+      );
       expect(chain.primary.requests).toHaveLength(1);
       expect(chain.corroborating.requests).toHaveLength(1);
       expect(chain.primary.requests[0]?.signal).toBe(signal);
@@ -969,9 +983,14 @@ describe('dormant mainnet finality real-class composition', () => {
       expect(corroboratingFinality.requests).toHaveLength(1);
       expect(primaryFinality.requests[0]?.signal).toBe(signal);
       expect(corroboratingFinality.requests[0]?.signal).toBe(signal);
-      expect(wallet.listActiveWallets).toHaveBeenCalledTimes(1);
-      expect(wallet.listActiveWallets.mock.calls[0]?.[0]).toEqual({
+      expect(wallet.readRecoveryWallet).toHaveBeenCalledTimes(1);
+      expect(wallet.readRecoveryWallet.mock.calls[0]?.[0]).toEqual({
         accountId: parseAccountId(ACCOUNT_ID),
+        intentId: INTENT_ID,
+        lifecycleRevision: '3',
+        lifecycleSnapshotSha256: TERMINAL_SNAPSHOT,
+        purpose: 'POST_FINALITY_REVIEW',
+        deadlineAt: new Date(DEADLINE),
         signal,
       });
     },

@@ -1,13 +1,7 @@
 import { isProxy } from 'node:util/types';
 
 import { parseAccountId, type AccountId } from '../../accounts/domain/account-profile';
-import { MAINNET_SUPPORTED_ASSET_REGISTRY } from '../../blockchain/domain/supported-asset-registry';
-import { MAX_ACTIVE_WALLET_REGISTRATIONS_PER_ACCOUNT } from '../../wallets/application/ports/wallet-registration-repository.port';
-import {
-  ACTIVE_WALLET_ROSTER_VERSION,
-  type ActiveRegisteredWallet,
-  type WalletRegistrationService,
-} from '../../wallets/application/wallet-registration.service';
+import type { WalletRegistrationService } from '../../wallets/application/wallet-registration.service';
 import { parseWalletAddress, type WalletAddress } from '../../wallets/domain/wallet-identity';
 import {
   MAINNET_FINANCIAL_ACTION_FINALITY_WALLET_READ_USE,
@@ -15,8 +9,8 @@ import {
   MAINNET_FINANCIAL_ACTION_FINALITY_WALLET_RESULT_USE,
   type MainnetFinancialActionFinalityPrerequisiteIssuerClock,
   type MainnetFinancialActionFinalityWalletReaderPort,
-  type MainnetFinancialActionFinalityWalletResultV1,
-  type ReadMainnetFinancialActionFinalityWalletRequestV1,
+  type MainnetFinancialActionFinalityWalletResultV2,
+  type ReadMainnetFinancialActionFinalityWalletRequestV2,
 } from '../application/ports/mainnet-financial-action-finality-prerequisite-issuer.port';
 
 const ETHEREUM = 'eip155:1' as const;
@@ -24,9 +18,10 @@ const SOLANA = 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp' as const;
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const SHA256 = /^[0-9a-f]{64}$/u;
 const TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
+const POSITIVE_INT64 = /^[1-9][0-9]{0,18}$/u;
 const MAX_DEADLINE_MILLISECONDS = 30_000;
 const MAX_SMALLINT = 32_767;
-const MAINNET_REGISTRY = MAINNET_SUPPORTED_ASSET_REGISTRY.latest;
+const MAX_INT64 = (1n << 63n) - 1n;
 const ABORTED_GETTER = Object.getOwnPropertyDescriptor(AbortSignal.prototype, 'aborted')?.get;
 const DATE_GET_TIME = Object.getOwnPropertyDescriptor(Date.prototype, 'getTime')?.value as
   ((this: Date) => number) | undefined;
@@ -39,22 +34,32 @@ const REQUEST_KEYS = Object.freeze([
   'mayAuthorizeFinancialAction',
   'mayPersist',
   'accountId',
+  'intentId',
   'walletRegistrationId',
   'networkId',
   'walletIdentityDigestVersion',
   'walletIdentityDigestHex',
+  'lifecycleRevision',
+  'lifecycleSnapshotSha256',
+  'lifecycleStage',
+  'purpose',
   'deadlineAt',
   'signal',
 ] as const);
-const ROSTER_KEYS = Object.freeze(['version', 'wallets'] as const);
-const WALLET_KEYS = Object.freeze([
+const RECOVERY_WALLET_KEYS = Object.freeze([
+  'mayAuthorizeFinancialAction',
+  'mayPersist',
+  'accountId',
+  'intentId',
   'walletId',
   'chainId',
   'address',
-  'registeredAt',
-  'registryEnvironment',
-  'registryVersion',
-  'registryFingerprintSha256',
+  'lifecycleRevision',
+  'lifecycleSnapshotSha256',
+  'lifecycleStage',
+  'walletStatus',
+  'revokedAt',
+  'verifiedAt',
 ] as const);
 
 export type MainnetFinancialActionFinalityWalletReaderFailureCode =
@@ -80,20 +85,25 @@ interface CanonicalTime {
 }
 
 interface ReviewedRequest {
-  readonly request: ReadMainnetFinancialActionFinalityWalletRequestV1 & object;
+  readonly request: ReadMainnetFinancialActionFinalityWalletRequestV2 & object;
   readonly accountId: AccountId;
+  readonly intentId: string;
   readonly walletRegistrationId: string;
   readonly networkId: typeof ETHEREUM | typeof SOLANA;
   readonly walletIdentityDigestVersion: number;
   readonly walletIdentityDigestHex: string;
+  readonly lifecycleRevision: string;
+  readonly lifecycleSnapshotSha256: string;
+  readonly lifecycleStage: ReadMainnetFinancialActionFinalityWalletRequestV2['lifecycleStage'];
+  readonly purpose: ReadMainnetFinancialActionFinalityWalletRequestV2['purpose'];
   readonly deadlineAt: CanonicalTime;
   readonly signal: AbortSignal;
 }
 
 interface IssuedWallet {
   readonly capability: object;
-  readonly request: ReadMainnetFinancialActionFinalityWalletRequestV1 & object;
-  readonly result: MainnetFinancialActionFinalityWalletResultV1;
+  readonly request: ReadMainnetFinancialActionFinalityWalletRequestV2 & object;
+  readonly result: MainnetFinancialActionFinalityWalletResultV2;
   readonly signal: AbortSignal;
   readonly issuedAtMilliseconds: number;
   readonly deadlineAtMilliseconds: number;
@@ -270,11 +280,18 @@ function reviewRequest(value: unknown): ReviewedRequest {
   } catch {
     return fail('INVALID_REQUEST');
   }
+  const intentId = record.intentId;
   const walletRegistrationId = record.walletRegistrationId;
   const networkId = record.networkId;
   const digestVersion = record.walletIdentityDigestVersion;
   const digestHex = record.walletIdentityDigestHex;
+  const lifecycleRevision = record.lifecycleRevision;
+  const lifecycleSnapshotSha256 = record.lifecycleSnapshotSha256;
+  const lifecycleStage = record.lifecycleStage;
+  const purpose = record.purpose;
   if (
+    typeof intentId !== 'string' ||
+    !UUID_V4.test(intentId) ||
     typeof walletRegistrationId !== 'string' ||
     !UUID_V4.test(walletRegistrationId) ||
     (networkId !== ETHEREUM && networkId !== SOLANA) ||
@@ -283,128 +300,93 @@ function reviewRequest(value: unknown): ReviewedRequest {
     (digestVersion as number) > MAX_SMALLINT ||
     typeof digestHex !== 'string' ||
     !SHA256.test(digestHex) ||
-    /^0{64}$/u.test(digestHex)
+    /^0{64}$/u.test(digestHex) ||
+    typeof lifecycleRevision !== 'string' ||
+    !POSITIVE_INT64.test(lifecycleRevision) ||
+    BigInt(lifecycleRevision) > MAX_INT64 ||
+    typeof lifecycleSnapshotSha256 !== 'string' ||
+    !SHA256.test(lifecycleSnapshotSha256) ||
+    /^0{64}$/u.test(lifecycleSnapshotSha256) ||
+    (purpose !== 'RECONCILIATION_ADMISSION' && purpose !== 'POST_FINALITY_REVIEW') ||
+    (purpose === 'RECONCILIATION_ADMISSION'
+      ? (lifecycleStage !== 'WALLET_SIGNED_SUBMISSION_BOUND' || lifecycleRevision !== '2') &&
+        (lifecycleStage !== 'BROADCAST_OUTCOME_AMBIGUOUS' || lifecycleRevision !== '3') &&
+        (lifecycleStage !== 'RECONCILIATION_AMBIGUOUS' || BigInt(lifecycleRevision) < 3n)
+      : (lifecycleStage !== 'FINALIZED_SUCCESS' && lifecycleStage !== 'FINALIZED_FAILURE') ||
+        BigInt(lifecycleRevision) < 3n)
   ) {
     return fail('INVALID_REQUEST');
   }
   return Object.freeze({
-    request: value as ReadMainnetFinancialActionFinalityWalletRequestV1 & object,
+    request: value as ReadMainnetFinancialActionFinalityWalletRequestV2 & object,
     accountId,
+    intentId,
     walletRegistrationId,
     networkId,
     walletIdentityDigestVersion: digestVersion as number,
     walletIdentityDigestHex: digestHex,
+    lifecycleRevision,
+    lifecycleSnapshotSha256,
+    lifecycleStage:
+      lifecycleStage as ReadMainnetFinancialActionFinalityWalletRequestV2['lifecycleStage'],
+    purpose: purpose as ReadMainnetFinancialActionFinalityWalletRequestV2['purpose'],
     deadlineAt: timestamp(record.deadlineAt, 'INVALID_REQUEST'),
     signal: authenticSignal(record.signal, 'INVALID_REQUEST'),
   });
 }
 
-function uuid(value: unknown): string {
-  if (typeof value !== 'string' || !UUID_V4.test(value)) return fail('WALLET_UNAVAILABLE');
-  return value;
-}
-
-function activeWallet(value: unknown): ActiveRegisteredWallet {
-  const record = exactFrozenRecord(value, WALLET_KEYS, Object.prototype, 'WALLET_UNAVAILABLE');
-  const chainId = record.chainId;
+function recoveryWallet(
+  value: unknown,
+  request: ReviewedRequest,
+  startedAt: CanonicalTime,
+  completedAt: CanonicalTime,
+): Readonly<{
+  address: WalletAddress;
+  walletStatus: 'ACTIVE' | 'REVOKED';
+  revokedAt: string | null;
+  verifiedAt: string;
+}> {
+  const record = exactFrozenRecord(
+    value,
+    RECOVERY_WALLET_KEYS,
+    Object.prototype,
+    'WALLET_UNAVAILABLE',
+  );
+  const walletStatus = record.walletStatus;
+  const revokedAt =
+    record.revokedAt === null ? null : timestamp(record.revokedAt, 'WALLET_UNAVAILABLE');
+  const verifiedAt = timestamp(record.verifiedAt, 'WALLET_UNAVAILABLE');
   if (
-    (chainId !== ETHEREUM && chainId !== SOLANA) ||
-    record.registryEnvironment !== 'MAINNET' ||
-    record.registryVersion !== MAINNET_REGISTRY.version ||
-    record.registryFingerprintSha256 !== MAINNET_REGISTRY.fingerprintSha256
-  ) {
-    return fail('WALLET_UNAVAILABLE');
-  }
-  timestamp(record.registeredAt, 'WALLET_UNAVAILABLE');
-  const fingerprint = record.registryFingerprintSha256;
-  if (
-    typeof fingerprint !== 'string' ||
-    !SHA256.test(fingerprint) ||
-    /^0{64}$/u.test(fingerprint)
+    record.mayAuthorizeFinancialAction !== false ||
+    record.mayPersist !== false ||
+    record.accountId !== request.accountId ||
+    record.intentId !== request.intentId ||
+    record.walletId !== request.walletRegistrationId ||
+    record.chainId !== request.networkId ||
+    record.lifecycleRevision !== request.lifecycleRevision ||
+    record.lifecycleSnapshotSha256 !== request.lifecycleSnapshotSha256 ||
+    record.lifecycleStage !== request.lifecycleStage ||
+    (walletStatus !== 'ACTIVE' && walletStatus !== 'REVOKED') ||
+    (walletStatus === 'ACTIVE') !== (revokedAt === null) ||
+    verifiedAt.milliseconds < startedAt.milliseconds ||
+    verifiedAt.milliseconds > completedAt.milliseconds ||
+    verifiedAt.milliseconds >= request.deadlineAt.milliseconds ||
+    (revokedAt !== null && revokedAt.milliseconds > verifiedAt.milliseconds)
   ) {
     return fail('WALLET_UNAVAILABLE');
   }
   let address: WalletAddress;
   try {
-    address = parseWalletAddress(chainId, record.address);
+    address = parseWalletAddress(request.networkId, record.address);
   } catch {
     return fail('WALLET_UNAVAILABLE');
   }
   return Object.freeze({
-    walletId: uuid(record.walletId),
-    chainId,
     address,
-    registeredAt: record.registeredAt as string,
-    registryEnvironment: 'MAINNET',
-    registryVersion: MAINNET_REGISTRY.version,
-    registryFingerprintSha256: fingerprint,
+    walletStatus,
+    revokedAt: revokedAt?.value ?? null,
+    verifiedAt: verifiedAt.value,
   });
-}
-
-function exactFrozenNativeArray(value: unknown): readonly unknown[] {
-  try {
-    if (
-      !Array.isArray(value) ||
-      isProxy(value) ||
-      Object.getPrototypeOf(value) !== Array.prototype ||
-      !Object.isFrozen(value) ||
-      value.length > MAX_ACTIVE_WALLET_REGISTRATIONS_PER_ACCOUNT
-    ) {
-      return fail('WALLET_UNAVAILABLE');
-    }
-    const descriptors = Object.getOwnPropertyDescriptors(value) as unknown as Record<
-      PropertyKey,
-      PropertyDescriptor | undefined
-    >;
-    const actualKeys = Reflect.ownKeys(descriptors);
-    const expectedKeys = [
-      ...Array.from({ length: value.length }, (_, index) => String(index)),
-      'length',
-    ];
-    if (
-      actualKeys.length !== expectedKeys.length ||
-      actualKeys.some((key) => typeof key !== 'string' || !expectedKeys.includes(key))
-    ) {
-      return fail('WALLET_UNAVAILABLE');
-    }
-    const length = descriptors.length;
-    if (
-      length === undefined ||
-      !('value' in length) ||
-      length.value !== value.length ||
-      length.enumerable ||
-      length.configurable ||
-      length.writable
-    ) {
-      return fail('WALLET_UNAVAILABLE');
-    }
-    const elements: unknown[] = [];
-    for (let index = 0; index < value.length; index += 1) {
-      const descriptor = descriptors[String(index)];
-      if (
-        descriptor === undefined ||
-        !descriptor.enumerable ||
-        descriptor.configurable ||
-        !('value' in descriptor) ||
-        descriptor.writable
-      ) {
-        return fail('WALLET_UNAVAILABLE');
-      }
-      elements.push(descriptor.value);
-    }
-    return Object.freeze(elements);
-  } catch (error) {
-    if (error instanceof DormantMainnetFinancialActionFinalityWalletUnavailableError) throw error;
-    return fail('WALLET_UNAVAILABLE');
-  }
-}
-
-function activeRoster(value: unknown): readonly ActiveRegisteredWallet[] {
-  const record = exactFrozenRecord(value, ROSTER_KEYS, Object.prototype, 'WALLET_UNAVAILABLE');
-  if (record.version !== ACTIVE_WALLET_ROSTER_VERSION) return fail('WALLET_UNAVAILABLE');
-  return Object.freeze(
-    exactFrozenNativeArray(record.wallets).map((wallet) => activeWallet(wallet)),
-  );
 }
 
 function nativePromise(value: unknown): Promise<unknown> | null {
@@ -425,11 +407,11 @@ function nativePromise(value: unknown): Promise<unknown> | null {
 }
 
 /**
- * Dormant plaintext resolver for an already-authenticated migration-0036 row.
+ * Dormant plaintext resolver for an already-authenticated migration-0038 row.
  * WalletRegistrationService remains the only owner of registration encryption
- * and HMAC key material. This wrapper proves current ACTIVE/nonrevoked account,
- * wallet, network, and address integrity; migration 0036 remains the sole proof
- * of the lifecycle-captured digest that is exact-bound through the request.
+ * and HMAC key material. This wrapper proves the exact signed-bound recovery
+ * account, intent, lifecycle, wallet, network, and address. Revoked wallets are
+ * resolved only through the service's migration-0038 historical gate.
  *
  * The class is intentionally undecorated and unregistered. It owns no endpoint,
  * credential, provider transport, signer, broadcaster, writer, retry, or timer.
@@ -437,7 +419,9 @@ function nativePromise(value: unknown): Promise<unknown> | null {
 export class WalletRegistrationMainnetFinancialActionFinalityWalletReader implements MainnetFinancialActionFinalityWalletReaderPort {
   readonly readerVersion = MAINNET_FINANCIAL_ACTION_FINALITY_WALLET_READER_VERSION;
 
-  readonly #wallets: CapturedMethod<WalletRegistrationService['listActiveWallets']>;
+  readonly #wallets: CapturedMethod<
+    WalletRegistrationService['readMainnetFinancialActionRecoveryWallet']
+  >;
   readonly #clock: CapturedMethod<MainnetFinancialActionFinalityPrerequisiteIssuerClock['now']>;
   readonly #startedRequests = new WeakSet<object>();
   readonly #issued = new WeakMap<object, IssuedWallet>();
@@ -446,10 +430,9 @@ export class WalletRegistrationMainnetFinancialActionFinalityWalletReader implem
     wallets: WalletRegistrationService,
     clock: MainnetFinancialActionFinalityPrerequisiteIssuerClock,
   ) {
-    this.#wallets = captureMethod<WalletRegistrationService['listActiveWallets']>(
-      wallets,
-      'listActiveWallets',
-    );
+    this.#wallets = captureMethod<
+      WalletRegistrationService['readMainnetFinancialActionRecoveryWallet']
+    >(wallets, 'readMainnetFinancialActionRecoveryWallet');
     this.#clock = captureMethod<MainnetFinancialActionFinalityPrerequisiteIssuerClock['now']>(
       clock,
       'now',
@@ -457,7 +440,7 @@ export class WalletRegistrationMainnetFinancialActionFinalityWalletReader implem
   }
 
   async readWallet(
-    requestInput: ReadMainnetFinancialActionFinalityWalletRequestV1,
+    requestInput: ReadMainnetFinancialActionFinalityWalletRequestV2,
   ): Promise<unknown> {
     const request = reviewRequest(requestInput);
     const startedAt = clockTime(this.#clock);
@@ -476,8 +459,15 @@ export class WalletRegistrationMainnetFinancialActionFinalityWalletReader implem
     let pending: unknown;
     try {
       pending = Reflect.apply(this.#wallets.method, this.#wallets.receiver, [
-        request.accountId,
-        Object.freeze({ signal: request.signal }),
+        Object.freeze({
+          accountId: request.accountId,
+          intentId: request.intentId,
+          lifecycleRevision: request.lifecycleRevision,
+          lifecycleSnapshotSha256: request.lifecycleSnapshotSha256,
+          purpose: request.purpose,
+          deadlineAt: new Date(request.deadlineAt.milliseconds),
+          signal: request.signal,
+        }),
       ]);
     } catch {
       return fail('WALLET_UNAVAILABLE');
@@ -485,9 +475,9 @@ export class WalletRegistrationMainnetFinancialActionFinalityWalletReader implem
     const operation = nativePromise(pending);
     if (operation === null) return fail('WALLET_UNAVAILABLE');
 
-    let rawRoster: unknown;
+    let rawWallet: unknown;
     try {
-      rawRoster = await operation;
+      rawWallet = await operation;
     } catch {
       if (aborted(request.signal)) return fail('STALE_REQUEST');
       const failedAt = clockTime(this.#clock);
@@ -505,25 +495,27 @@ export class WalletRegistrationMainnetFinancialActionFinalityWalletReader implem
       return fail('STALE_REQUEST');
     }
 
-    const matches = activeRoster(rawRoster).filter(
-      (wallet) =>
-        wallet.walletId === request.walletRegistrationId && wallet.chainId === request.networkId,
-    );
-    if (matches.length !== 1) return fail('WALLET_UNAVAILABLE');
-    const matched = matches[0];
-    if (matched === undefined) return fail('WALLET_UNAVAILABLE');
+    const matched = recoveryWallet(rawWallet, request, startedAt, completedAt);
 
-    const result = nullRecord<MainnetFinancialActionFinalityWalletResultV1>({
+    const result = nullRecord<MainnetFinancialActionFinalityWalletResultV2>({
       readerVersion: MAINNET_FINANCIAL_ACTION_FINALITY_WALLET_READER_VERSION,
       use: MAINNET_FINANCIAL_ACTION_FINALITY_WALLET_RESULT_USE,
       mayAuthorizeFinancialAction: false,
       mayPersist: false,
       accountId: request.accountId,
+      intentId: request.intentId,
       walletRegistrationId: request.walletRegistrationId,
       networkId: request.networkId,
       walletIdentityDigestVersion: request.walletIdentityDigestVersion,
       walletIdentityDigestHex: request.walletIdentityDigestHex,
-      walletAddress: matched.address as WalletAddress,
+      lifecycleRevision: request.lifecycleRevision,
+      lifecycleSnapshotSha256: request.lifecycleSnapshotSha256,
+      lifecycleStage: request.lifecycleStage,
+      purpose: request.purpose,
+      walletStatus: matched.walletStatus,
+      revokedAt: matched.revokedAt,
+      verifiedAt: matched.verifiedAt,
+      walletAddress: matched.address,
     });
     const issuedAt = clockTime(this.#clock);
     if (
@@ -550,8 +542,8 @@ export class WalletRegistrationMainnetFinancialActionFinalityWalletReader implem
 
   verifyWallet(
     capabilityInput: unknown,
-    requestInput: ReadMainnetFinancialActionFinalityWalletRequestV1,
-  ): MainnetFinancialActionFinalityWalletResultV1 | null {
+    requestInput: ReadMainnetFinancialActionFinalityWalletRequestV2,
+  ): MainnetFinancialActionFinalityWalletResultV2 | null {
     try {
       if (
         typeof capabilityInput !== 'object' ||

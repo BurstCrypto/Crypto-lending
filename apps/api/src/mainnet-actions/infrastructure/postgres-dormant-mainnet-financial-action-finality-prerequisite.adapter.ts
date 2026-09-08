@@ -60,8 +60,8 @@ import {
   type MainnetFinancialActionFinalityPrerequisiteIssuerClock,
   type MainnetFinancialActionFinalityPrerequisiteIssuerPort,
   type MainnetFinancialActionFinalityWalletReaderPort,
-  type MainnetFinancialActionFinalityWalletResultV1,
-  type ReadMainnetFinancialActionFinalityWalletRequestV1,
+  type MainnetFinancialActionFinalityWalletResultV2,
+  type ReadMainnetFinancialActionFinalityWalletRequestV2,
 } from '../application/ports/mainnet-financial-action-finality-prerequisite-issuer.port';
 import { MAINNET_FINANCIAL_ACTION_PROVIDER_CANDIDATES } from '../domain/dormant-mainnet-financial-action';
 
@@ -148,8 +148,29 @@ const LIFECYCLE_RECONCILIATION_OUTCOMES = Object.freeze([
   'REORGED_OUT',
 ] as const);
 
+const WALLET_RESULT_KEYS = Object.freeze([
+  'readerVersion',
+  'use',
+  'mayAuthorizeFinancialAction',
+  'mayPersist',
+  'accountId',
+  'intentId',
+  'walletRegistrationId',
+  'networkId',
+  'walletIdentityDigestVersion',
+  'walletIdentityDigestHex',
+  'lifecycleRevision',
+  'lifecycleSnapshotSha256',
+  'lifecycleStage',
+  'purpose',
+  'walletStatus',
+  'revokedAt',
+  'verifiedAt',
+  'walletAddress',
+] as const);
+
 /**
- * Migration 0036 contract (not installed by this dormant adapter): both
+ * Migration 0038 contract (not installed by this dormant adapter): both
  * owner-only functions are read-only, use a fixed catalog-qualified
  * search_path, and return either exactly one row with the 53 columns below or
  * no row. They must reject stale lifecycle CAS inputs, a nonmatching recorded
@@ -164,12 +185,12 @@ const LIFECYCLE_RECONCILIATION_OUTCOMES = Object.freeze([
  * proof of transaction inclusion, sender, payload, effect, or Solana blockhash.
  */
 export const MAINNET_FINANCIAL_ACTION_RECONCILIATION_PREREQUISITE_DATABASE_FUNCTION =
-  'read_mainnet_financial_action_reconciliation_prerequisite_v1(uuid,uuid,bigint,text,text,timestamp with time zone)' as const;
+  'read_mainnet_financial_action_reconciliation_prerequisite_v2(uuid,uuid,bigint,text,text,timestamp with time zone)' as const;
 export const MAINNET_FINANCIAL_ACTION_POST_FINALITY_PREREQUISITE_DATABASE_FUNCTION =
-  'read_mainnet_financial_action_post_finality_prerequisite_v1(uuid,uuid,bigint,text,text,text,text,bigint,text,text,timestamp with time zone)' as const;
+  'read_mainnet_financial_action_post_finality_prerequisite_v2(uuid,uuid,bigint,text,text,text,text,bigint,text,text,timestamp with time zone)' as const;
 
 /**
- * Exact migration-0036 result contract shared by both owner-only read
+ * Exact migration-0038 result contract shared by both owner-only read
  * functions. Review-only fields are null for reconciliation and fully bound
  * for post-finality review.
  */
@@ -289,12 +310,12 @@ const ROW_PROJECTION = `
     'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS verified_at`;
 
 export const MAINNET_FINANCIAL_ACTION_RECONCILIATION_PREREQUISITE_READ_SQL = `SELECT${ROW_PROJECTION}
-FROM read_mainnet_financial_action_reconciliation_prerequisite_v1(
+FROM read_mainnet_financial_action_reconciliation_prerequisite_v2(
   $1::uuid, $2::uuid, $3::bigint, $4::text, $5::text, $6::timestamptz
 ) AS result`;
 
 export const MAINNET_FINANCIAL_ACTION_POST_FINALITY_PREREQUISITE_READ_SQL = `SELECT${ROW_PROJECTION}
-FROM read_mainnet_financial_action_post_finality_prerequisite_v1(
+FROM read_mainnet_financial_action_post_finality_prerequisite_v2(
   $1::uuid, $2::uuid, $3::bigint, $4::text, $5::text, $6::text,
   $7::text, $8::bigint, $9::text, $10::text, $11::timestamptz
 ) AS result`;
@@ -349,6 +370,7 @@ interface ReviewedLifecycle {
   readonly lifecycleSnapshotSha256: string;
   readonly intentRecordFingerprintSha256: string;
   readonly lifecycleStage:
+    | 'WALLET_SIGNED_SUBMISSION_BOUND'
     | 'BROADCAST_OUTCOME_AMBIGUOUS'
     | 'RECONCILIATION_AMBIGUOUS'
     | 'FINALIZED_SUCCESS'
@@ -416,7 +438,7 @@ interface DecodedRow {
   > & {
     readonly lifecycleStage: ReviewedLifecycle['lifecycleStage'];
   };
-  readonly walletRequest: ReadMainnetFinancialActionFinalityWalletRequestV1;
+  readonly walletRequest: ReadMainnetFinancialActionFinalityWalletRequestV2;
   readonly terminalTransitionFingerprintSha256: string | null;
   readonly originalAdmissionFingerprintSha256: string | null;
   readonly terminalTransactionPosition: string | null;
@@ -1257,7 +1279,8 @@ function reviewedLifecycle(
   const lifecycleStage = record.stage;
   const allowed =
     request.purpose === 'RECONCILIATION_ADMISSION'
-      ? lifecycleStage === 'BROADCAST_OUTCOME_AMBIGUOUS' ||
+      ? lifecycleStage === 'WALLET_SIGNED_SUBMISSION_BOUND' ||
+        lifecycleStage === 'BROADCAST_OUTCOME_AMBIGUOUS' ||
         lifecycleStage === 'RECONCILIATION_AMBIGUOUS'
       : lifecycleStage === 'FINALIZED_SUCCESS' || lifecycleStage === 'FINALIZED_FAILURE';
   if (!allowed) {
@@ -1265,8 +1288,11 @@ function reviewedLifecycle(
   }
   const revision = BigInt(lifecycleRevision);
   if (
+    (lifecycleStage === 'WALLET_SIGNED_SUBMISSION_BOUND' && revision !== 2n) ||
     (lifecycleStage === 'BROADCAST_OUTCOME_AMBIGUOUS' && revision !== 3n) ||
-    (lifecycleStage !== 'BROADCAST_OUTCOME_AMBIGUOUS' && revision < 3n)
+    (lifecycleStage !== 'WALLET_SIGNED_SUBMISSION_BOUND' &&
+      lifecycleStage !== 'BROADCAST_OUTCOME_AMBIGUOUS' &&
+      revision < 3n)
   ) {
     return fail('UPSTREAM_UNAVAILABLE');
   }
@@ -1288,7 +1314,11 @@ function reviewedLifecycle(
     'TRANSACTION',
     'UPSTREAM_UNAVAILABLE',
   );
-  uuid(record.observationId, 'UPSTREAM_UNAVAILABLE');
+  if (lifecycleStage === 'WALLET_SIGNED_SUBMISSION_BOUND') {
+    if (record.observationId !== null) return fail('UPSTREAM_UNAVAILABLE');
+  } else {
+    uuid(record.observationId, 'UPSTREAM_UNAVAILABLE');
+  }
   const broadcastOutcome = record.broadcastOutcome;
   const reconciliationOutcome = record.reconciliationOutcome;
   if (
@@ -1338,6 +1368,13 @@ function reviewedLifecycle(
   ) {
     return fail('UPSTREAM_UNAVAILABLE');
   }
+  const signedBoundShape =
+    lifecycleStage === 'WALLET_SIGNED_SUBMISSION_BOUND' &&
+    broadcastOutcome === null &&
+    reconciliationOutcome === null &&
+    transactionPosition === null &&
+    finalizedPosition === null &&
+    lastObservedTransactionPosition === null;
   const broadcastShape =
     lifecycleStage === 'BROADCAST_OUTCOME_AMBIGUOUS' &&
     broadcastOutcome !== null &&
@@ -1366,7 +1403,7 @@ function reviewedLifecycle(
     transactionPosition !== null &&
     finalizedPosition !== null &&
     BigInt(finalizedPosition) >= BigInt(transactionPosition);
-  if (!broadcastShape && !reconciliationShape && !terminalShape) {
+  if (!signedBoundShape && !broadcastShape && !reconciliationShape && !terminalShape) {
     return fail('UPSTREAM_UNAVAILABLE');
   }
   const terminal = request.purpose === 'POST_FINALITY_REVIEW';
@@ -1681,7 +1718,8 @@ function decodedRow(
   const lifecycleStage = row.lifecycle_stage;
   const expectedStage =
     request.purpose === 'RECONCILIATION_ADMISSION'
-      ? lifecycleStage === 'BROADCAST_OUTCOME_AMBIGUOUS' ||
+      ? lifecycleStage === 'WALLET_SIGNED_SUBMISSION_BOUND' ||
+        lifecycleStage === 'BROADCAST_OUTCOME_AMBIGUOUS' ||
         lifecycleStage === 'RECONCILIATION_AMBIGUOUS'
       : lifecycleStage === 'FINALIZED_SUCCESS' || lifecycleStage === 'FINALIZED_FAILURE';
   if (!expectedStage) return fail('INVALID_DATABASE_RESULT');
@@ -1886,10 +1924,15 @@ function decodedRow(
     mayAuthorizeFinancialAction: false as const,
     mayPersist: false as const,
     accountId,
+    intentId,
     walletRegistrationId,
     networkId,
     walletIdentityDigestVersion,
     walletIdentityDigestHex,
+    lifecycleRevision,
+    lifecycleSnapshotSha256,
+    lifecycleStage: lifecycle.lifecycleStage,
+    purpose: request.purpose,
     deadlineAt: request.deadlineAt.value,
     signal: request.signal,
   });
@@ -1950,36 +1993,43 @@ function decodedRow(
 
 function walletResult(
   value: unknown,
-  request: ReadMainnetFinancialActionFinalityWalletRequestV1,
-): MainnetFinancialActionFinalityWalletResultV1 & { readonly walletAddress: WalletAddress } {
+  request: ReadMainnetFinancialActionFinalityWalletRequestV2,
+): MainnetFinancialActionFinalityWalletResultV2 & { readonly walletAddress: WalletAddress } {
   try {
-    const reviewed = capability(
-      value,
-      'WALLET_UNAVAILABLE',
-    ) as MainnetFinancialActionFinalityWalletResultV1;
+    const fields = exactFrozenDataRecord(value, WALLET_RESULT_KEYS, 'WALLET_UNAVAILABLE');
+    const reviewed = value as MainnetFinancialActionFinalityWalletResultV2;
     if (
-      stableMember(reviewed, 'readerVersion') !==
-        MAINNET_FINANCIAL_ACTION_FINALITY_WALLET_READER_VERSION ||
-      stableMember(reviewed, 'use') !== MAINNET_FINANCIAL_ACTION_FINALITY_WALLET_RESULT_USE ||
-      stableMember(reviewed, 'mayAuthorizeFinancialAction') !== false ||
-      stableMember(reviewed, 'mayPersist') !== false ||
-      stableMember(reviewed, 'accountId') !== request.accountId ||
-      stableMember(reviewed, 'walletRegistrationId') !== request.walletRegistrationId ||
-      stableMember(reviewed, 'networkId') !== request.networkId ||
-      stableMember(reviewed, 'walletIdentityDigestVersion') !==
-        request.walletIdentityDigestVersion ||
-      stableMember(reviewed, 'walletIdentityDigestHex') !== request.walletIdentityDigestHex
+      fields.readerVersion !== MAINNET_FINANCIAL_ACTION_FINALITY_WALLET_READER_VERSION ||
+      fields.use !== MAINNET_FINANCIAL_ACTION_FINALITY_WALLET_RESULT_USE ||
+      fields.mayAuthorizeFinancialAction !== false ||
+      fields.mayPersist !== false ||
+      fields.accountId !== request.accountId ||
+      fields.intentId !== request.intentId ||
+      fields.walletRegistrationId !== request.walletRegistrationId ||
+      fields.networkId !== request.networkId ||
+      fields.walletIdentityDigestVersion !== request.walletIdentityDigestVersion ||
+      fields.walletIdentityDigestHex !== request.walletIdentityDigestHex ||
+      fields.lifecycleRevision !== request.lifecycleRevision ||
+      fields.lifecycleSnapshotSha256 !== request.lifecycleSnapshotSha256 ||
+      fields.lifecycleStage !== request.lifecycleStage ||
+      fields.purpose !== request.purpose ||
+      (fields.walletStatus !== 'ACTIVE' && fields.walletStatus !== 'REVOKED')
     ) {
       return fail('WALLET_UNAVAILABLE');
     }
-    const walletAddress = parseWalletAddress(
-      request.networkId,
-      stableMember(reviewed, 'walletAddress'),
-    );
-    if (walletAddress !== stableMember(reviewed, 'walletAddress')) {
+    const revokedAt =
+      fields.revokedAt === null ? null : timestamp(fields.revokedAt, 'WALLET_UNAVAILABLE');
+    const verifiedAt = timestamp(fields.verifiedAt, 'WALLET_UNAVAILABLE');
+    if (
+      (fields.walletStatus === 'ACTIVE') !== (revokedAt === null) ||
+      verifiedAt.milliseconds >= timestamp(request.deadlineAt, 'WALLET_UNAVAILABLE').milliseconds ||
+      (revokedAt !== null && revokedAt.milliseconds > verifiedAt.milliseconds)
+    ) {
       return fail('WALLET_UNAVAILABLE');
     }
-    return reviewed as MainnetFinancialActionFinalityWalletResultV1 & {
+    const walletAddress = parseWalletAddress(request.networkId, fields.walletAddress);
+    if (walletAddress !== fields.walletAddress) return fail('WALLET_UNAVAILABLE');
+    return reviewed as MainnetFinancialActionFinalityWalletResultV2 & {
       readonly walletAddress: WalletAddress;
     };
   } catch (error) {
@@ -1991,29 +2041,37 @@ function walletResult(
 }
 
 function sameWallet(
-  left: MainnetFinancialActionFinalityWalletResultV1,
-  right: MainnetFinancialActionFinalityWalletResultV1,
+  left: MainnetFinancialActionFinalityWalletResultV2,
+  right: MainnetFinancialActionFinalityWalletResultV2,
 ): boolean {
   return (
     left === right &&
     left.accountId === right.accountId &&
+    left.intentId === right.intentId &&
     left.walletRegistrationId === right.walletRegistrationId &&
     left.networkId === right.networkId &&
     left.walletIdentityDigestVersion === right.walletIdentityDigestVersion &&
     left.walletIdentityDigestHex === right.walletIdentityDigestHex &&
+    left.lifecycleRevision === right.lifecycleRevision &&
+    left.lifecycleSnapshotSha256 === right.lifecycleSnapshotSha256 &&
+    left.lifecycleStage === right.lifecycleStage &&
+    left.purpose === right.purpose &&
+    left.walletStatus === right.walletStatus &&
+    left.revokedAt === right.revokedAt &&
+    left.verifiedAt === right.verifiedAt &&
     left.walletAddress === right.walletAddress
   );
 }
 
 /**
- * Direct-import-only reader for migration 0036's future owner-only functions.
+ * Direct-import-only reader for migration 0038's owner-only functions.
  * Construction captures every boundary without performing I/O. Each issue
  * method performs exactly one fixed prerequisite SQL query and one separately
- * authenticated ACTIVE-wallet read, with one caller-owned AbortSignal and no
+ * authenticated signed-bound recovery-wallet read, with one caller-owned AbortSignal and no
  * retry. The two reads are deliberately not described as atomic. Wallet
- * absence/revocation observed by the roster fails issuance and the resulting
- * capability is short-lived; migration 0035 revalidates lifecycle, evidence,
- * and authorities, but it does not currently revalidate wallet revocation.
+ * absence or invalid historical revocation ordering fails issuance and the
+ * resulting capability is short-lived; migration 0038 revalidates lifecycle,
+ * evidence, authorities, and the signed-event/revocation ordering atomically.
  */
 export class PostgresDormantMainnetFinancialActionFinalityPrerequisiteAdapter
   implements
@@ -2282,7 +2340,7 @@ export class PostgresDormantMainnetFinancialActionFinalityPrerequisiteAdapter
     }
     let walletOpaqueObject: object;
     let firstWalletValue: unknown;
-    let firstWallet: MainnetFinancialActionFinalityWalletResultV1 & {
+    let firstWallet: MainnetFinancialActionFinalityWalletResultV2 & {
       readonly walletAddress: WalletAddress;
     };
     try {
@@ -2313,7 +2371,7 @@ export class PostgresDormantMainnetFinancialActionFinalityPrerequisiteAdapter
       purpose === 'POST_FINALITY_REVIEW'
         ? reviewedSafety(this.#effectiveSafety, repeatedRequest, secondLifecycle)
         : null;
-    let secondWallet: MainnetFinancialActionFinalityWalletResultV1 & {
+    let secondWallet: MainnetFinancialActionFinalityWalletResultV2 & {
       readonly walletAddress: WalletAddress;
     };
     try {

@@ -142,7 +142,8 @@ interface MainnetFinancialActionFinalityPrerequisiteCommonV1 {
 export interface MainnetFinancialActionReconciliationEvidencePrerequisiteV1 extends MainnetFinancialActionFinalityPrerequisiteCommonV1 {
   readonly use: typeof MAINNET_FINANCIAL_ACTION_RECONCILIATION_PREREQUISITE_USE;
   readonly purpose: 'RECONCILIATION_ADMISSION';
-  readonly lifecycleStage: 'BROADCAST_OUTCOME_AMBIGUOUS' | 'RECONCILIATION_AMBIGUOUS';
+  readonly lifecycleStage:
+    'WALLET_SIGNED_SUBMISSION_BOUND' | 'BROADCAST_OUTCOME_AMBIGUOUS' | 'RECONCILIATION_AMBIGUOUS';
   readonly observationId: string;
 }
 
@@ -1528,8 +1529,16 @@ function reconciliationPrerequisite(
     'RECONCILIATION_ADMISSION',
   );
   if (
+    record.lifecycleStage !== 'WALLET_SIGNED_SUBMISSION_BOUND' &&
     record.lifecycleStage !== 'BROADCAST_OUTCOME_AMBIGUOUS' &&
     record.lifecycleStage !== 'RECONCILIATION_AMBIGUOUS'
+  ) {
+    return fail('PREREQUISITE_UNAVAILABLE');
+  }
+  if (
+    (record.lifecycleStage === 'WALLET_SIGNED_SUBMISSION_BOUND' &&
+      common.lifecycleRevision !== '2') ||
+    (record.lifecycleStage === 'BROADCAST_OUTCOME_AMBIGUOUS' && common.lifecycleRevision !== '3')
   ) {
     return fail('PREREQUISITE_UNAVAILABLE');
   }

@@ -129,7 +129,10 @@ function setup(
   networkId: Network,
   clockTimes: readonly string[] = [NOW],
   lifecycleStage:
-    'BROADCAST_OUTCOME_AMBIGUOUS' | 'RECONCILIATION_AMBIGUOUS' = 'BROADCAST_OUTCOME_AMBIGUOUS',
+    | 'WALLET_SIGNED_SUBMISSION_BOUND'
+    | 'BROADCAST_OUTCOME_AMBIGUOUS'
+    | 'RECONCILIATION_AMBIGUOUS' = 'BROADCAST_OUTCOME_AMBIGUOUS',
+  walletStatus: 'ACTIVE' | 'REVOKED' = 'ACTIVE',
 ): TestContext {
   const abortController = new AbortController();
   const signal = abortController.signal;
@@ -147,9 +150,14 @@ function setup(
   const finalizedHead = isEthereum
     ? frozen({ kind: 'EVM_BLOCK' as const, blockNumber: '110', blockHash: finalizedBlockId })
     : frozen({ kind: 'SOLANA_SLOT' as const, slot: '120', root: '110' });
+  const signedBound = lifecycleStage === 'WALLET_SIGNED_SUBMISSION_BOUND';
   const reconciliation = lifecycleStage === 'RECONCILIATION_AMBIGUOUS';
-  const lifecycleRevision = reconciliation ? '4' : '3';
-  const lifecycleSnapshotSha256 = reconciliation ? '8'.repeat(64) : '3'.repeat(64);
+  const lifecycleRevision = signedBound ? '2' : reconciliation ? '4' : '3';
+  const lifecycleSnapshotSha256 = signedBound
+    ? '7'.repeat(64)
+    : reconciliation
+      ? '8'.repeat(64)
+      : '3'.repeat(64);
   const lifecycleRequest = frozen({
     durableLifecycleVersion: DORMANT_MAINNET_FINANCIAL_ACTION_DURABLE_LIFECYCLE_VERSION,
     use: DORMANT_MAINNET_FINANCIAL_ACTION_DURABLE_REQUEST_USE,
@@ -185,8 +193,8 @@ function setup(
     stage: lifecycleStage,
     chainTransactionId: transactionId,
     submissionFingerprintSha256: '4'.repeat(64),
-    observationId: OBSERVATION_ID,
-    broadcastOutcome: reconciliation ? null : ('WALLET_REPORTED_AMBIGUOUS' as const),
+    observationId: signedBound ? null : OBSERVATION_ID,
+    broadcastOutcome: signedBound || reconciliation ? null : ('WALLET_REPORTED_AMBIGUOUS' as const),
     reconciliationOutcome: reconciliation ? ('PENDING' as const) : null,
     transactionPosition: reconciliation ? '100' : null,
     transactionBlockId: reconciliation ? blockId : null,
@@ -272,23 +280,33 @@ function setup(
     isEthereum ? `0x${'1'.repeat(40)}` : encodeBase58(new Uint8Array(32).fill(10)),
   );
   const walletCapability = frozen({});
-  const walletResult = frozen({
-    readerVersion: MAINNET_FINANCIAL_ACTION_FINALITY_WALLET_READER_VERSION,
-    use: MAINNET_FINANCIAL_ACTION_FINALITY_WALLET_RESULT_USE,
-    mayAuthorizeFinancialAction: false as const,
-    mayPersist: false as const,
-    accountId: ACCOUNT_ID,
-    walletRegistrationId: WALLET_ID,
-    networkId,
-    walletIdentityDigestVersion: 1,
-    walletIdentityDigestHex: '1'.repeat(64),
-    walletAddress,
-  });
   let walletRequest: unknown;
+  let walletResult: object | undefined;
   const wallet = {
     readerVersion: MAINNET_FINANCIAL_ACTION_FINALITY_WALLET_READER_VERSION,
     readWallet: jest.fn((request) => {
       walletRequest = request;
+      const exact = request as unknown as Record<string, unknown>;
+      walletResult = frozen({
+        readerVersion: MAINNET_FINANCIAL_ACTION_FINALITY_WALLET_READER_VERSION,
+        use: MAINNET_FINANCIAL_ACTION_FINALITY_WALLET_RESULT_USE,
+        mayAuthorizeFinancialAction: false as const,
+        mayPersist: false as const,
+        accountId: exact.accountId,
+        intentId: exact.intentId,
+        walletRegistrationId: exact.walletRegistrationId,
+        networkId: exact.networkId,
+        walletIdentityDigestVersion: exact.walletIdentityDigestVersion,
+        walletIdentityDigestHex: exact.walletIdentityDigestHex,
+        lifecycleRevision: exact.lifecycleRevision,
+        lifecycleSnapshotSha256: exact.lifecycleSnapshotSha256,
+        lifecycleStage: exact.lifecycleStage,
+        purpose: exact.purpose,
+        walletStatus,
+        revokedAt: walletStatus === 'REVOKED' ? '2026-09-07T11:59:00.000Z' : null,
+        verifiedAt: NOW,
+        walletAddress,
+      });
       return Promise.resolve(walletCapability);
     }),
     verifyWallet: jest.fn((capability, request) =>
@@ -629,9 +647,26 @@ function setupPost(
 }
 
 describe('PostgresDormantMainnetFinancialActionFinalityPrerequisiteAdapter', () => {
+  it('pins both prerequisite reads to migration-0038 v2 functions', () => {
+    expect(MAINNET_FINANCIAL_ACTION_RECONCILIATION_PREREQUISITE_READ_SQL).toContain(
+      'read_mainnet_financial_action_reconciliation_prerequisite_v2',
+    );
+    expect(MAINNET_FINANCIAL_ACTION_RECONCILIATION_PREREQUISITE_READ_SQL).not.toContain(
+      'read_mainnet_financial_action_reconciliation_prerequisite_v1',
+    );
+    expect(MAINNET_FINANCIAL_ACTION_POST_FINALITY_PREREQUISITE_READ_SQL).toContain(
+      'read_mainnet_financial_action_post_finality_prerequisite_v2',
+    );
+    expect(MAINNET_FINANCIAL_ACTION_POST_FINALITY_PREREQUISITE_READ_SQL).not.toContain(
+      'read_mainnet_financial_action_post_finality_prerequisite_v1',
+    );
+  });
+
   it.each([
+    ['eip155:1', 'WALLET_SIGNED_SUBMISSION_BOUND'],
     ['eip155:1', 'BROADCAST_OUTCOME_AMBIGUOUS'],
     ['eip155:1', 'RECONCILIATION_AMBIGUOUS'],
+    ['solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp', 'WALLET_SIGNED_SUBMISSION_BOUND'],
     ['solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp', 'BROADCAST_OUTCOME_AMBIGUOUS'],
     ['solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp', 'RECONCILIATION_AMBIGUOUS'],
   ] as const)(
@@ -640,9 +675,18 @@ describe('PostgresDormantMainnetFinancialActionFinalityPrerequisiteAdapter', () 
       const test = setup(networkId, [NOW], lifecycleStage);
       const capability = await test.adapter.issueReconciliationPrerequisite(test.request);
       const issuance = test.adapter.reviewIssuance(capability, test.request);
-      const expectedRevision = lifecycleStage === 'BROADCAST_OUTCOME_AMBIGUOUS' ? '3' : '4';
+      const expectedRevision =
+        lifecycleStage === 'WALLET_SIGNED_SUBMISSION_BOUND'
+          ? '2'
+          : lifecycleStage === 'BROADCAST_OUTCOME_AMBIGUOUS'
+            ? '3'
+            : '4';
       const expectedSnapshot =
-        lifecycleStage === 'BROADCAST_OUTCOME_AMBIGUOUS' ? '3'.repeat(64) : '8'.repeat(64);
+        lifecycleStage === 'WALLET_SIGNED_SUBMISSION_BOUND'
+          ? '7'.repeat(64)
+          : lifecycleStage === 'BROADCAST_OUTCOME_AMBIGUOUS'
+            ? '3'.repeat(64)
+            : '8'.repeat(64);
 
       expect(issuance).not.toBeNull();
       expect(Object.getPrototypeOf(issuance)).toBeNull();
@@ -674,6 +718,23 @@ describe('PostgresDormantMainnetFinancialActionFinalityPrerequisiteAdapter', () 
       expect(Object.isFrozen(prerequisite)).toBe(true);
     },
   );
+
+  it('accepts an exact recovery-reader result for a wallet revoked after signing', async () => {
+    const test = setup('eip155:1', [NOW], 'WALLET_SIGNED_SUBMISSION_BOUND', 'REVOKED');
+
+    await expect(test.adapter.issueReconciliationPrerequisite(test.request)).resolves.toBeDefined();
+    expect(test.wallet.readWallet).toHaveBeenCalledWith(
+      expect.objectContaining({
+        intentId: INTENT_ID,
+        lifecycleRevision: '2',
+        lifecycleSnapshotSha256: '7'.repeat(64),
+        lifecycleStage: 'WALLET_SIGNED_SUBMISSION_BOUND',
+        purpose: 'RECONCILIATION_ADMISSION',
+        mayAuthorizeFinancialAction: false,
+        mayPersist: false,
+      }),
+    );
+  });
 
   it('accepts the exact frozen standard-prototype shape emitted by the durable adapter', async () => {
     const test = setup('eip155:1');
@@ -1270,7 +1331,7 @@ describe('PostgresDormantMainnetFinancialActionFinalityPrerequisiteAdapter', () 
     expect(test.queryWithCancellation).not.toHaveBeenCalled();
   });
 
-  it('reserves the final int64 review revision required by migration 0036', async () => {
+  it('reserves the final int64 review revision required by migration 0038', async () => {
     const accepted = setupPost('eip155:1', '9223372036854775806');
     await expect(
       accepted.adapter.issuePostFinalityPrerequisite(accepted.request),
