@@ -31,6 +31,13 @@ export type DormantMainnetReconciliationDatabaseOutcome =
   'PENDING' | 'UNKNOWN' | 'FINALIZED_SUCCESS' | 'FINALIZED_FAILURE' | 'REORGED_OUT';
 
 /**
+ * The legacy migration-0033 adapter may persist uncertainty only. Terminal
+ * outcomes require the authenticated evidence capability introduced by the
+ * migration-0035 sidecar and are intentionally absent from this input type.
+ */
+export type DormantMainnetNonterminalReconciliationDatabaseOutcome = 'PENDING' | 'UNKNOWN';
+
+/**
  * Audit-only commitment emitted by the volatile domain protocol. It is an
  * input to migration 0033, but it is never a durable compare-and-swap cursor.
  */
@@ -105,13 +112,11 @@ export interface RecordDormantMainnetFinancialActionBroadcastRequestV1 extends D
 export interface RecordDormantMainnetFinancialActionReconciliationRequestV1 extends DormantMainnetFinancialActionDurableTransitionRequestCommonV1 {
   readonly observationId: string;
   readonly transactionId: string;
-  readonly outcome: DormantMainnetReconciliationDatabaseOutcome;
+  readonly outcome: DormantMainnetNonterminalReconciliationDatabaseOutcome;
   readonly transactionPosition: string | null;
   readonly transactionBlockId: string | null;
   readonly finalizedPosition: string;
   readonly finalizedBlockId: string;
-  readonly effectEvidenceSha256: string | null;
-  readonly failureEvidenceSha256: string | null;
   readonly sourceEvidenceSha256: string;
   readonly observedAt: string;
 }

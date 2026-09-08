@@ -31,6 +31,7 @@ import {
   type DormantMainnetFinancialActionDatabaseConfirmedResultV1,
   type DormantMainnetFinancialActionDatabaseOutcomeUnknownV1,
   type DormantMainnetFinancialActionDurableOperation,
+  type DormantMainnetNonterminalReconciliationDatabaseOutcome,
   type DormantMainnetReconciliationDatabaseOutcome,
   type DormantMainnetWalletBroadcastDatabaseOutcome,
   type MainnetFinancialActionDatabaseNetworkId,
@@ -122,8 +123,6 @@ const RECONCILIATION_KEYS = Object.freeze([
   'transactionBlockId',
   'finalizedPosition',
   'finalizedBlockId',
-  'effectEvidenceSha256',
-  'failureEvidenceSha256',
   'sourceEvidenceSha256',
   'observedAt',
 ] as const);
@@ -212,6 +211,8 @@ const BROADCAST_OUTCOMES: readonly DormantMainnetWalletBroadcastDatabaseOutcome[
 ]);
 const RECONCILIATION_OUTCOMES: readonly DormantMainnetReconciliationDatabaseOutcome[] =
   Object.freeze(['PENDING', 'UNKNOWN', 'FINALIZED_SUCCESS', 'FINALIZED_FAILURE', 'REORGED_OUT']);
+const NONTERMINAL_RECONCILIATION_OUTCOMES: readonly DormantMainnetNonterminalReconciliationDatabaseOutcome[] =
+  Object.freeze(['PENDING', 'UNKNOWN']);
 const PROVIDER_BINDINGS = new Set([
   'eip155:1:aave:aave-v3',
   'eip155:1:morpho:morpho-blue',
@@ -414,7 +415,7 @@ type DormantMainnetFinancialActionLifecycleDatabaseCommandV1 =
         CursorDatabaseArgumentsV1 & {
           observationId: string;
           transactionId: string;
-          outcome: DormantMainnetReconciliationDatabaseOutcome;
+          outcome: DormantMainnetNonterminalReconciliationDatabaseOutcome;
           transactionPosition: string | null;
           transactionBlockId: string | null;
           finalizedPosition: string;
@@ -825,11 +826,13 @@ function encodeReconciliation(
   }
   const cursor = reviewedCursor.cursor;
   if (
-    !RECONCILIATION_OUTCOMES.includes(record.outcome as DormantMainnetReconciliationDatabaseOutcome)
+    !NONTERMINAL_RECONCILIATION_OUTCOMES.includes(
+      record.outcome as DormantMainnetNonterminalReconciliationDatabaseOutcome,
+    )
   ) {
     return invalid(code);
   }
-  const outcome = record.outcome as DormantMainnetReconciliationDatabaseOutcome;
+  const outcome = record.outcome as DormantMainnetNonterminalReconciliationDatabaseOutcome;
   const transactionPosition = nullableUint64(record.transactionPosition, code);
   const transactionBlockId = nullableChainIdentity(
     cursor.networkId,
@@ -840,8 +843,8 @@ function encodeReconciliation(
   if ((transactionPosition === null) !== (transactionBlockId === null)) return invalid(code);
   const finalizedPosition = uint64(record.finalizedPosition, code);
   const finalizedBlockId = chainIdentity(cursor.networkId, record.finalizedBlockId, 'BLOCK', code);
-  const effectEvidenceSha256 = nullableDigest(record.effectEvidenceSha256, code);
-  const failureEvidenceSha256 = nullableDigest(record.failureEvidenceSha256, code);
+  const effectEvidenceSha256 = null;
+  const failureEvidenceSha256 = null;
   const sourceEvidenceSha256 = digest(record.sourceEvidenceSha256, code);
   assertReconciliationShape(
     outcome,
@@ -857,9 +860,7 @@ function encodeReconciliation(
       BigInt(finalizedPosition) - BigInt(reviewedCursor.metadata.finalizedPosition);
     if (
       comparison < 0n ||
-      (comparison === 0n &&
-        finalizedBlockId !== reviewedCursor.metadata.finalizedBlockId &&
-        outcome !== 'REORGED_OUT')
+      (comparison === 0n && finalizedBlockId !== reviewedCursor.metadata.finalizedBlockId)
     ) {
       return invalid(code);
     }

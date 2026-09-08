@@ -75,8 +75,6 @@ const PAYLOAD_DIGEST = digest('b');
 const SIGNATURE_DIGEST = digest('c');
 const EVIDENCE_DIGEST = digest('d');
 const SOURCE_DIGEST = digest('e');
-const EFFECT_DIGEST = digest('f');
-const FAILURE_DIGEST = 'ab'.repeat(32);
 const BLOCK_IDENTITY_DIGEST = 'bc'.repeat(32);
 const FINALIZED_BLOCK_IDENTITY_DIGEST = 'cd'.repeat(32);
 const IDENTITY_KEY_V1 = createWalletRegistrationKey(
@@ -221,7 +219,7 @@ function broadcastRequest(
 
 function reconciliationRequest(
   cursor: DormantMainnetFinancialActionClmaDatabaseCursorV1,
-  outcome: 'PENDING' | 'UNKNOWN' | 'FINALIZED_SUCCESS' | 'FINALIZED_FAILURE' | 'REORGED_OUT',
+  outcome: 'PENDING' | 'UNKNOWN',
   networkId: typeof ETHEREUM | typeof SOLANA = ETHEREUM,
   observedAt = BROADCAST_AT,
 ): RecordDormantMainnetFinancialActionReconciliationRequestV1 {
@@ -241,8 +239,6 @@ function reconciliationRequest(
     transactionBlockId: unknown ? null : transactionBlockId,
     finalizedPosition: outcome === 'PENDING' ? '99' : '100',
     finalizedBlockId,
-    effectEvidenceSha256: outcome === 'FINALIZED_SUCCESS' ? EFFECT_DIGEST : null,
-    failureEvidenceSha256: outcome === 'FINALIZED_FAILURE' ? FAILURE_DIGEST : null,
     sourceEvidenceSha256: SOURCE_DIGEST,
     observedAt,
   });
@@ -536,7 +532,7 @@ describe('PostgresDormantMainnetFinancialActionLifecycleDurableAdapter', () => {
     expect(query).not.toHaveBeenCalled();
   });
 
-  it('uses fixed one-call SQL and supports direct reconciliation plus authenticated review', async () => {
+  it('uses fixed one-call SQL, limits direct reconciliation to uncertainty, and reads terminal state', async () => {
     const test = fixture();
     const prepared = await prepareConfirmed(test);
     expect(Reflect.ownKeys(prepared.result.cursor)).toHaveLength(9);
@@ -548,26 +544,6 @@ describe('PostgresDormantMainnetFinancialActionLifecycleDurableAdapter', () => {
     resolveOnce(test.query, queryResult(reconciliationRow(prepared.request, 'PENDING')));
     const reconciliationCapability = await test.adapter.recordReconciliation(reconciliation);
     const reconciled = confirmed(test.adapter, reconciliationCapability, reconciliation);
-
-    const finalRequest = reconciliationRequest(
-      reconciled.cursor,
-      'FINALIZED_SUCCESS',
-      ETHEREUM,
-      POST_EXPIRY_AT,
-    );
-    resolveOnce(
-      test.query,
-      queryResult(
-        reconciliationRow(prepared.request, 'FINALIZED_SUCCESS', ETHEREUM, {
-          lifecycle_revision: '4',
-          current_snapshot_sha256: 'de'.repeat(32),
-          effective_at: POST_EXPIRY_AT,
-          recorded_at: '2026-09-07T12:05:01.000Z',
-        }),
-      ),
-    );
-    const finalCapability = await test.adapter.recordReconciliation(finalRequest);
-    const finalized = confirmed(test.adapter, finalCapability, finalRequest);
 
     const read = readRequest();
     resolveOnce(
@@ -583,7 +559,7 @@ describe('PostgresDormantMainnetFinancialActionLifecycleDurableAdapter', () => {
       ),
     );
     const readCapability = await test.adapter.read(read);
-    const readResult = confirmed(test.adapter, readCapability, read);
+    const finalized = confirmed(test.adapter, readCapability, read);
 
     expect([prepared.result.stage, bound.result.stage, reconciled.stage, finalized.stage]).toEqual([
       'PREPARED',
@@ -591,7 +567,7 @@ describe('PostgresDormantMainnetFinancialActionLifecycleDurableAdapter', () => {
       'RECONCILIATION_AMBIGUOUS',
       'FINALIZED_SUCCESS',
     ]);
-    expect(readResult.databaseRecordOutcome).toBe('READ');
+    expect(finalized.databaseRecordOutcome).toBe('READ');
     expect(finalized).toMatchObject({
       terminal: true,
       recoveryMode: 'NONE',
@@ -602,16 +578,15 @@ describe('PostgresDormantMainnetFinancialActionLifecycleDurableAdapter', () => {
       automaticRetryAllowed: false,
       ledgerSettlementAuthority: false,
     });
-    expect(test.query).toHaveBeenCalledTimes(5);
+    expect(test.query).toHaveBeenCalledTimes(4);
     const calls = test.query.mock.calls as [string, readonly unknown[], AbortSignal][];
     expect(calls.map(([sql]) => sql.match(/FROM ([a-z0-9_]+)/u)?.[1])).toEqual([
       'prepare_mainnet_financial_action_lifecycle_v2',
       'bind_mainnet_financial_action_submission',
       'record_mainnet_financial_action_reconciliation_observation',
-      'record_mainnet_financial_action_reconciliation_observation',
       'read_mainnet_financial_action_lifecycle',
     ]);
-    expect(calls.map(([, values]) => values.length)).toEqual([32, 9, 16, 16, 2]);
+    expect(calls.map(([, values]) => values.length)).toEqual([32, 9, 16, 2]);
     const ethereumCandidates = walletIdentityCandidates(prepared.request);
     expect(calls[0]?.[1][30]).toEqual(ethereumCandidates.map(({ version }) => version));
     expect(calls[0]?.[1][31]).toEqual(ethereumCandidates.map(({ value }) => value));
@@ -620,10 +595,10 @@ describe('PostgresDormantMainnetFinancialActionLifecycleDurableAdapter', () => {
       Buffer.alloc(32, 0x11).toString('base64url'),
     );
     expect(calls.every(([, , signal]) => signal instanceof AbortSignal)).toBe(true);
-    expect(test.adapter.reviewResult(finalCapability, finalRequest)).toBe(finalized);
-    expect(test.adapter.reviewResult(finalCapability, { ...finalRequest })).toBeNull();
-    expect(test.adapter.reviewResult({ ...finalized }, finalRequest)).toBeNull();
-    expect(test.adapter.reviewResult(finalCapability, read)).toBeNull();
+    expect(test.adapter.reviewResult(readCapability, read)).toBe(finalized);
+    expect(test.adapter.reviewResult(readCapability, { ...read })).toBeNull();
+    expect(test.adapter.reviewResult({ ...finalized }, read)).toBeNull();
+    expect(test.adapter.reviewResult(readCapability, reconciliation)).toBeNull();
   });
 
   it('accepts canonical Solana identities and records a wallet broadcast without authority', async () => {
@@ -758,25 +733,37 @@ describe('PostgresDormantMainnetFinancialActionLifecycleDurableAdapter', () => {
     expect(test.query).toHaveBeenCalledTimes(1);
   });
 
-  it.each([
-    ['UNKNOWN', 'RECONCILIATION_AMBIGUOUS', false],
-    ['FINALIZED_FAILURE', 'FINALIZED_FAILURE', true],
-    ['REORGED_OUT', 'REORG_QUARANTINED', true],
-  ] as const)(
-    'binds %s reconciliation to its only valid state',
-    async (outcome, stage, terminal) => {
+  it('binds UNKNOWN reconciliation to nonterminal ambiguous state', async () => {
+    const test = fixture();
+    const prepared = await prepareConfirmed(test);
+    const bound = await bindConfirmed(test, prepared);
+    const request = reconciliationRequest(bound.result.cursor, 'UNKNOWN');
+    resolveOnce(test.query, queryResult(reconciliationRow(prepared.request, 'UNKNOWN')));
+
+    const capability = await test.adapter.recordReconciliation(request);
+    const result = confirmed(test.adapter, capability, request);
+
+    expect(result.stage).toBe('RECONCILIATION_AMBIGUOUS');
+    expect(result.terminal).toBe(false);
+    expect(result.requiresManualReconciliation).toBe(false);
+  });
+
+  it.each(['FINALIZED_SUCCESS', 'FINALIZED_FAILURE', 'REORGED_OUT'] as const)(
+    'rejects caller-authored terminal reconciliation %s before database I/O',
+    async (outcome) => {
       const test = fixture();
       const prepared = await prepareConfirmed(test);
       const bound = await bindConfirmed(test, prepared);
-      const request = reconciliationRequest(bound.result.cursor, outcome);
-      resolveOnce(test.query, queryResult(reconciliationRow(prepared.request, outcome)));
+      const baseline = test.query.mock.calls.length;
+      const request = frozenNull({
+        ...reconciliationRequest(bound.result.cursor, 'PENDING'),
+        outcome,
+      });
 
-      const capability = await test.adapter.recordReconciliation(request);
-      const result = confirmed(test.adapter, capability, request);
-
-      expect(result.stage).toBe(stage);
-      expect(result.terminal).toBe(terminal);
-      expect(result.requiresManualReconciliation).toBe(outcome === 'REORGED_OUT');
+      await expect(test.adapter.recordReconciliation(request as never)).rejects.toMatchObject({
+        code: 'INVALID_RECONCILIATION_REQUEST',
+      });
+      expect(test.query).toHaveBeenCalledTimes(baseline);
     },
   );
 

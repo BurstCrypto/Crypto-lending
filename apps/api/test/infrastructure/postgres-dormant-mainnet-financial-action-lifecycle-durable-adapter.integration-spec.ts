@@ -706,8 +706,6 @@ describeWithPostgres('PostgreSQL dormant mainnet financial action durable adapte
         transactionBlockId: null,
         finalizedPosition: '21000000',
         finalizedBlockId: FINALIZED_BLOCK_ID,
-        effectEvidenceSha256: null,
-        failureEvidenceSha256: null,
         sourceEvidenceSha256: digest(),
         observedAt: reconciliationObservedAt.toISOString(),
       });
