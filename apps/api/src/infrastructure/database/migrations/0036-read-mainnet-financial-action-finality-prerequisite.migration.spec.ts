@@ -16,16 +16,16 @@ describe('migration 0036 authenticated-finality prerequisite reads', () => {
   const down = sql(migration.downSql);
   const verifier = migration.verifySql ?? '';
 
-  it('supersedes 0035 and registers both variants last', () => {
+  it('supersedes 0035 and registers both variants immediately before 0037', () => {
     expect(migration).toMatchObject({ id: '0036', supersedesVerificationOf: ['0035'] });
     expect(migration.transactional).not.toBe(false);
-    expect(DATABASE_MIGRATION_LIST.at(-1)).toBe(
+    expect(DATABASE_MIGRATION_LIST.at(-2)).toBe(
       createMainnetFinancialActionFinalityPrerequisiteReadMigrationV0036,
     );
-    expect(DATABASE_TEST_SCHEMA_MIGRATION_LIST.at(-1)).toBe(
+    expect(DATABASE_TEST_SCHEMA_MIGRATION_LIST.at(-2)).toBe(
       createMainnetFinancialActionFinalityPrerequisiteReadTestSchemaMigrationV0036,
     );
-    expect(DATABASE_MIGRATION_LIST.map(({ id }) => id).slice(-8)).toEqual([
+    expect(DATABASE_MIGRATION_LIST.map(({ id }) => id).slice(-9)).toEqual([
       '0029',
       '0030',
       '0031',
@@ -34,6 +34,7 @@ describe('migration 0036 authenticated-finality prerequisite reads', () => {
       '0034',
       '0035',
       '0036',
+      '0037',
     ]);
   });
 

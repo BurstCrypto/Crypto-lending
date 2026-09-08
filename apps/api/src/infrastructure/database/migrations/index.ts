@@ -124,6 +124,10 @@ import {
   createMainnetFinancialActionFinalityPrerequisiteReadMigrationV0036,
   createMainnetFinancialActionFinalityPrerequisiteReadTestSchemaMigrationV0036,
 } from './0036-read-mainnet-financial-action-finality-prerequisite.migration';
+import {
+  createMainnetFinancialActionAtomicFinalityPersistenceMigrationV0037,
+  createMainnetFinancialActionAtomicFinalityPersistenceTestSchemaMigrationV0037,
+} from './0037-atomically-persist-mainnet-financial-action-finality.migration';
 import type { DatabaseMigration } from './migration';
 
 /**
@@ -168,6 +172,7 @@ export const DATABASE_TEST_SCHEMA_MIGRATION_LIST: readonly DatabaseMigration[] =
   createMainnetFinancialActionWalletIdentityBindingTestSchemaMigrationV0034,
   createMainnetFinancialActionAuthenticatedFinalityTestSchemaMigrationV0035,
   createMainnetFinancialActionFinalityPrerequisiteReadTestSchemaMigrationV0036,
+  createMainnetFinancialActionAtomicFinalityPersistenceTestSchemaMigrationV0037,
 ]);
 
 export const DATABASE_MIGRATION_LIST: readonly DatabaseMigration[] = Object.freeze([
@@ -207,6 +212,7 @@ export const DATABASE_MIGRATION_LIST: readonly DatabaseMigration[] = Object.free
   createMainnetFinancialActionWalletIdentityBindingMigrationV0034,
   createMainnetFinancialActionAuthenticatedFinalityMigrationV0035,
   createMainnetFinancialActionFinalityPrerequisiteReadMigrationV0036,
+  createMainnetFinancialActionAtomicFinalityPersistenceMigrationV0037,
 ]);
 
 export type { DatabaseMigration } from './migration';
@@ -368,3 +374,8 @@ export {
   createMainnetFinancialActionFinalityPrerequisiteReadMigrationV0036,
   createMainnetFinancialActionFinalityPrerequisiteReadTestSchemaMigrationV0036,
 } from './0036-read-mainnet-financial-action-finality-prerequisite.migration';
+export {
+  createMainnetFinancialActionAtomicFinalityPersistenceMigration,
+  createMainnetFinancialActionAtomicFinalityPersistenceMigrationV0037,
+  createMainnetFinancialActionAtomicFinalityPersistenceTestSchemaMigrationV0037,
+} from './0037-atomically-persist-mainnet-financial-action-finality.migration';
