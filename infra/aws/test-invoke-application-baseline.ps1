@@ -355,6 +355,24 @@ function Invoke-FocusedTest {
         [scriptblock] $Body
     )
 
+    # Each independent case needs a current fixture instant. Native Linux fakes
+    # can make the complete suite exceed the production five-minute window.
+    # Explicit stale-clock cases still replace these values inside their body.
+    $fixtureCaseNow = [DateTimeOffset]::UtcNow
+    $script:transitionValidationAt = $fixtureCaseNow.ToString('yyyy-MM-ddTHH:mm:ssZ', [System.Globalization.CultureInfo]::InvariantCulture)
+    $script:authWalletValidationAt = $fixtureCaseNow.AddMinutes(-1).ToString('yyyy-MM-ddTHH:mm:ssZ', [System.Globalization.CultureInfo]::InvariantCulture)
+    foreach ($fixtureArguments in @($updateArguments, $applicationUpdateArguments, $rotationArguments, $authWalletAdoptionArguments, $authWalletTransitionArguments, $redisOperatorAdoptionArguments, $redisOperatorTransitionArguments)) {
+        if ($fixtureArguments.Contains('FixedSlotCredentialTransitionValidationAt')) {
+            $fixtureArguments.FixedSlotCredentialTransitionValidationAt = $script:transitionValidationAt
+        }
+        foreach ($fixtureClock in @('AuthWalletTransitionValidationAt', 'RedisOperatorTransitionValidationAt')) {
+            if ($fixtureArguments.Contains($fixtureClock)) {
+                $fixtureArguments[$fixtureClock] = $script:authWalletValidationAt
+            }
+        }
+    }
+    $env:FAKE_AUTH_WALLET_INITIAL_VALIDATION_AT = $script:authWalletValidationAt
+    $env:FAKE_REDIS_OPERATOR_INITIAL_VALIDATION_AT = $script:authWalletValidationAt
     & $Body
     $script:passed++
     Write-Host "PASS: $Name"
@@ -1353,10 +1371,20 @@ if ($isWindowsPlatform) {
 }
 else {
     $fakeNodeCommandPath = Join-Path $fakeAwsDirectory 'node'
+    # -File does not propagate a nested script's LASTEXITCODE on normal return.
+    # Mirror the in-process Windows fake at the native Linux process boundary.
+    @'
+param(
+    [Parameter(ValueFromRemainingArguments = $true)]
+    [string[]] $NodeArguments
+)
+& (Join-Path $PSScriptRoot 'node.ps1') @NodeArguments
+exit $LASTEXITCODE
+'@ | Set-Content -LiteralPath (Join-Path $fakeAwsDirectory 'node-entry.ps1') -Encoding Ascii
     @'
 #!/usr/bin/env sh
 script_directory=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-exec pwsh -NoProfile -File "$script_directory/node.ps1" "$@"
+exec pwsh -NoProfile -File "$script_directory/node-entry.ps1" "$@"
 '@ | Set-Content -LiteralPath $fakeNodeCommandPath -Encoding Ascii
     & chmod +x $fakeNodeCommandPath
     if ($LASTEXITCODE -ne 0) {
@@ -3428,14 +3456,20 @@ try {
     }
 
     Invoke-FocusedTest -Name 'UPDATE rejects a stale caller-supplied validation instant with zero AWS calls' -Body {
-        Clear-AwsMarker
-        $arguments = Copy-ArgumentMap -Map $updateArguments
-        $arguments.Action = 'Plan'
-        $arguments.FixedSlotCredentialTransitionValidationAt = $transitionFixtureNow.AddMinutes(-10).ToString('yyyy-MM-ddTHH:mm:ssZ', [System.Globalization.CultureInfo]::InvariantCulture)
-        $result = Invoke-Guard -Arguments $arguments
-        Assert-Condition (-not $result.Succeeded) 'UPDATE accepted a stale transition validation instant.'
-        Assert-Condition ($result.Output -match 'current within the reviewed five-minute window') 'Stale validation instant rejection was not explicit.'
-        Assert-Condition ((Get-AwsMarkerText) -eq '') 'Stale transition validation instant reached AWS discovery.'
+        foreach ($staleCase in @(
+                @{ Arguments = $updateArguments; Clock = 'FixedSlotCredentialTransitionValidationAt' },
+                @{ Arguments = $authWalletTransitionArguments; Clock = 'AuthWalletTransitionValidationAt' },
+                @{ Arguments = $redisOperatorTransitionArguments; Clock = 'RedisOperatorTransitionValidationAt' }
+            )) {
+            Clear-AwsMarker
+            $arguments = Copy-ArgumentMap -Map $staleCase.Arguments
+            $arguments.Action = 'Plan'
+            $arguments[$staleCase.Clock] = [DateTimeOffset]::UtcNow.AddMinutes(-10).ToString('yyyy-MM-ddTHH:mm:ssZ', [System.Globalization.CultureInfo]::InvariantCulture)
+            $result = Invoke-Guard -Arguments $arguments
+            Assert-Condition (-not $result.Succeeded) "UPDATE accepted a stale $($staleCase.Clock) instant."
+            Assert-Condition ($result.Output -match 'current within the reviewed five-minute window') "Stale $($staleCase.Clock) rejection was not explicit: $($result.Output)"
+            Assert-Condition ((Get-AwsMarkerText) -eq '') 'Stale transition validation instant reached AWS discovery.'
+        }
     }
 
     Invoke-FocusedTest -Name 'UPDATE rejects deployed credential-version drift before artifact reads or change-set creation' -Body {
@@ -4302,7 +4336,7 @@ try {
             $result = Invoke-Guard -Arguments $authWalletTransitionArguments
             $marker = Get-AwsMarkerText
             Assert-Condition (-not $result.Succeeded) "AUTH_WALLET_TRANSITION accepted $($changeCase.Name)."
-            Assert-Condition ($result.Output -match 'AUTH_WALLET_TRANSITION') "$($changeCase.Name) rejection did not identify the strict auth/wallet allowlist."
+            Assert-Condition ($result.Output -match 'AUTH_WALLET_TRANSITION') "$($changeCase.Name) rejection did not identify the strict auth/wallet allowlist: $($result.Output)"
             Assert-Condition ($marker -notmatch 'cloudformation execute-change-set') "AUTH_WALLET_TRANSITION executed with $($changeCase.Name)."
         }
     }
