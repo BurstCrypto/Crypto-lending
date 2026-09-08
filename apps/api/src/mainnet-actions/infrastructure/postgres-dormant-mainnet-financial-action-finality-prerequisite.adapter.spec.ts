@@ -23,7 +23,7 @@ import {
 import {
   DORMANT_MAINNET_FINANCIAL_ACTION_FINALITY_SIDECAR_VERSION,
   DORMANT_MAINNET_FINANCIAL_ACTION_FINALITY_SIDECAR_RESULT_USE,
-  type DormantMainnetFinancialActionFinalitySidecarDurablePort,
+  type DormantMainnetFinancialActionEffectiveSafetyReaderPort,
 } from '../application/ports/dormant-mainnet-financial-action-finality-sidecar-durable.port';
 import {
   MAINNET_FINANCIAL_ACTION_FINALITY_PREREQUISITE_ISSUER_VERSION,
@@ -261,7 +261,7 @@ function setup(
   const effectiveSafety = {
     sidecarVersion: DORMANT_MAINNET_FINANCIAL_ACTION_FINALITY_SIDECAR_VERSION,
     reviewResult: jest.fn(() => null),
-  } as unknown as DormantMainnetFinancialActionFinalitySidecarDurablePort;
+  } as unknown as DormantMainnetFinancialActionEffectiveSafetyReaderPort;
   const registry = MAINNET_SUPPORTED_ASSET_REGISTRY.latest;
   const asset = registry.assets.find(
     (item) => item.networkId === networkId && item.stablecoin === 'USDC',
@@ -412,7 +412,7 @@ interface PostTestContext {
   readonly wallet: MainnetFinancialActionFinalityWalletReaderPort;
   readonly walletAddress: ReturnType<typeof parseWalletAddress>;
   readonly lifecycle: DormantMainnetFinancialActionLifecycleDurablePort;
-  readonly effectiveSafety: DormantMainnetFinancialActionFinalitySidecarDurablePort;
+  readonly effectiveSafety: DormantMainnetFinancialActionEffectiveSafetyReaderPort;
   readonly row: TestContext['row'];
 }
 
@@ -575,7 +575,7 @@ function setupPost(
         ? effectiveSafetyCapability
         : null,
     ),
-  } as unknown as DormantMainnetFinancialActionFinalitySidecarDurablePort;
+  } as unknown as DormantMainnetFinancialActionEffectiveSafetyReaderPort;
   const row = {
     ...common.row,
     lifecycle_revision: '4',

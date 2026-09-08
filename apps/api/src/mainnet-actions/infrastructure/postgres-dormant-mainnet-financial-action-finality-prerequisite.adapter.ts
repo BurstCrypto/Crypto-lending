@@ -41,8 +41,8 @@ import {
   DORMANT_MAINNET_FINANCIAL_ACTION_FINALITY_SIDECAR_VERSION,
   DORMANT_MAINNET_FINANCIAL_ACTION_FINALITY_SIDECAR_RESULT_USE,
   MAINNET_FINANCIAL_ACTION_EFFECTIVE_SAFETY_CURSOR_ENCODING,
+  type DormantMainnetFinancialActionEffectiveSafetyReaderPort,
   type DormantMainnetFinancialActionEffectiveSafetyDatabaseConfirmedResultV1,
-  type DormantMainnetFinancialActionFinalitySidecarDurablePort,
   type ReadMainnetFinancialActionEffectiveSafetyStateRequestV1,
 } from '../application/ports/dormant-mainnet-financial-action-finality-sidecar-durable.port';
 import {
@@ -325,7 +325,7 @@ interface CapturedChainEvidence {
 
 interface CapturedEffectiveSafety {
   readonly review: CapturedMethod<
-    DormantMainnetFinancialActionFinalitySidecarDurablePort['reviewResult']
+    DormantMainnetFinancialActionEffectiveSafetyReaderPort['reviewResult']
   >;
 }
 
@@ -2036,7 +2036,7 @@ export class PostgresDormantMainnetFinancialActionFinalityPrerequisiteAdapter
   constructor(
     lifecycle: DormantMainnetFinancialActionLifecycleDurablePort,
     chainEvidence: ProviderPositionChainAnchorEvidenceRecorderPort,
-    effectiveSafety: DormantMainnetFinancialActionFinalitySidecarDurablePort,
+    effectiveSafety: DormantMainnetFinancialActionEffectiveSafetyReaderPort,
     wallet: MainnetFinancialActionFinalityWalletReaderPort,
     postgres: PostgresService,
     clock: MainnetFinancialActionFinalityPrerequisiteIssuerClock,
@@ -2058,9 +2058,7 @@ export class PostgresDormantMainnetFinancialActionFinalityPrerequisiteAdapter
       ),
     });
     this.#effectiveSafety = Object.freeze({
-      review: captureMethod<
-        DormantMainnetFinancialActionFinalitySidecarDurablePort['reviewResult']
-      >(
+      review: captureMethod<DormantMainnetFinancialActionEffectiveSafetyReaderPort['reviewResult']>(
         effectiveSafety,
         'reviewResult',
         'sidecarVersion',

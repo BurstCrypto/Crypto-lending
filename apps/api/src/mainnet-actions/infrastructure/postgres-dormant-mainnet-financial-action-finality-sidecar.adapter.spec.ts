@@ -27,14 +27,18 @@ import {
 import type {
   DormantMainnetFinancialActionAdmissionDatabaseConfirmedResultV1,
   DormantMainnetFinancialActionEffectiveSafetyDatabaseConfirmedResultV1,
+  DormantMainnetFinancialActionEffectiveSafetyReaderPort,
   DormantMainnetFinancialActionFinalityDatabaseOutcomeUnknownV1,
+  DormantMainnetFinancialActionFinalityPersistencePort,
+  DormantMainnetFinancialActionFinalitySidecarRequestV1,
+  DormantMainnetFinancialActionFinalitySidecarResultV1,
   ReadMainnetFinancialActionEffectiveSafetyStateRequestV1,
   RecordAuthenticatedMainnetFinancialActionAdmissionRequestV1,
   RecordMainnetFinancialActionPostFinalityReviewRequestV1,
 } from '../application/ports/dormant-mainnet-financial-action-finality-sidecar-durable.port';
 import {
   DORMANT_MAINNET_FINANCIAL_ACTION_FINALITY_SIDECAR_UNAVAILABLE,
-  PostgresDormantMainnetFinancialActionFinalitySidecarAdapter,
+  PostgresDormantMainnetFinancialActionEffectiveSafetyReaderAdapter,
 } from './postgres-dormant-mainnet-financial-action-finality-sidecar.adapter';
 
 const ACCOUNT_ID = '11111111-1111-4111-8111-111111111111';
@@ -414,6 +418,18 @@ function queryResult(row: Record<string, unknown>): unknown {
   return { rows: [row] };
 }
 
+function deferred<T>(): Readonly<{
+  promise: Promise<T>;
+  resolve(value: T): void;
+}> {
+  let resolvePromise: ((value: T) => void) | undefined;
+  const promise = new Promise<T>((resolve) => {
+    resolvePromise = resolve;
+  });
+  if (resolvePromise === undefined) throw new Error('deferred promise was not initialized');
+  return Object.freeze({ promise, resolve: resolvePromise });
+}
+
 function readRow(overrides: Partial<Record<string, unknown>> = {}): Record<string, unknown> {
   return {
     lifecycle_stage: 'FINALIZED_SUCCESS',
@@ -474,11 +490,60 @@ function reviewRow(overrides: Partial<Record<string, unknown>> = {}): Record<str
   };
 }
 
+interface TestSidecar {
+  readonly sidecarVersion: 1;
+  recordAuthenticatedAdmission(
+    request: RecordAuthenticatedMainnetFinancialActionAdmissionRequestV1,
+  ): Promise<unknown>;
+  recordPostFinalityReview(
+    request: RecordMainnetFinancialActionPostFinalityReviewRequestV1,
+  ): Promise<unknown>;
+  readEffectiveSafetyState(
+    request: ReadMainnetFinancialActionEffectiveSafetyStateRequestV1,
+  ): Promise<unknown>;
+  reviewResult(
+    capability: unknown,
+    request: DormantMainnetFinancialActionFinalitySidecarRequestV1,
+  ): DormantMainnetFinancialActionFinalitySidecarResultV1 | null;
+}
+
+function testSidecar(
+  reader: DormantMainnetFinancialActionEffectiveSafetyReaderPort,
+  persistence: DormantMainnetFinancialActionFinalityPersistencePort,
+): TestSidecar {
+  return Object.freeze({
+    sidecarVersion: reader.sidecarVersion,
+    recordAuthenticatedAdmission: (
+      request: RecordAuthenticatedMainnetFinancialActionAdmissionRequestV1,
+    ) => persistence.recordAuthenticatedAdmission(request),
+    recordPostFinalityReview: (request: RecordMainnetFinancialActionPostFinalityReviewRequestV1) =>
+      persistence.recordPostFinalityReview(request),
+    readEffectiveSafetyState: (request: ReadMainnetFinancialActionEffectiveSafetyStateRequestV1) =>
+      reader.readEffectiveSafetyState(request),
+    reviewResult: (
+      capability: unknown,
+      request: DormantMainnetFinancialActionFinalitySidecarRequestV1,
+    ) =>
+      reader.reviewResult(
+        capability,
+        request as ReadMainnetFinancialActionEffectiveSafetyStateRequestV1,
+      ) ??
+      persistence.reviewResult(
+        capability,
+        request as
+          | RecordAuthenticatedMainnetFinancialActionAdmissionRequestV1
+          | RecordMainnetFinancialActionPostFinalityReviewRequestV1,
+      ),
+  });
+}
+
 function fixture(
   implementation: (...arguments_: unknown[]) => Promise<unknown> = async () =>
     queryResult(readRow()),
 ): {
-  readonly adapter: PostgresDormantMainnetFinancialActionFinalitySidecarAdapter;
+  readonly adapter: TestSidecar;
+  readonly reader: PostgresDormantMainnetFinancialActionEffectiveSafetyReaderAdapter;
+  readonly persistence: DormantMainnetFinancialActionFinalityPersistencePort;
   readonly query: jest.Mock<Promise<unknown>, unknown[]>;
 } {
   return adapterFixture(inertProducer(), implementation);
@@ -488,13 +553,19 @@ function adapterFixture(
   producer: DormantMainnetFinancialActionFinalityEvidenceProducer,
   implementation: (...arguments_: unknown[]) => Promise<unknown>,
 ): {
-  readonly adapter: PostgresDormantMainnetFinancialActionFinalitySidecarAdapter;
+  readonly adapter: TestSidecar;
+  readonly reader: PostgresDormantMainnetFinancialActionEffectiveSafetyReaderAdapter;
+  readonly persistence: DormantMainnetFinancialActionFinalityPersistencePort;
   readonly query: jest.Mock<Promise<unknown>, unknown[]>;
 } {
   const query = jest.fn<Promise<unknown>, unknown[]>(implementation);
   const postgres = { queryWithCancellation: query } as unknown as PostgresService;
+  const reader = new PostgresDormantMainnetFinancialActionEffectiveSafetyReaderAdapter(postgres);
+  const persistence = reader.bindPersistence(producer);
   return {
-    adapter: new PostgresDormantMainnetFinancialActionFinalitySidecarAdapter(producer, postgres),
+    adapter: testSidecar(reader, persistence),
+    reader,
+    persistence,
     query,
   };
 }
@@ -506,7 +577,7 @@ function readRequest(
 }
 
 function reviewedRead(
-  adapter: PostgresDormantMainnetFinancialActionFinalitySidecarAdapter,
+  adapter: TestSidecar,
   capability: unknown,
   request: ReadMainnetFinancialActionEffectiveSafetyStateRequestV1,
 ): DormantMainnetFinancialActionEffectiveSafetyDatabaseConfirmedResultV1 {
@@ -518,7 +589,7 @@ function reviewedRead(
 }
 
 function reviewedAdmission(
-  adapter: PostgresDormantMainnetFinancialActionFinalitySidecarAdapter,
+  adapter: TestSidecar,
   capability: unknown,
   request: RecordAuthenticatedMainnetFinancialActionAdmissionRequestV1,
 ): DormantMainnetFinancialActionAdmissionDatabaseConfirmedResultV1 {
@@ -530,7 +601,7 @@ function reviewedAdmission(
 }
 
 function reviewedPostFinality(
-  adapter: PostgresDormantMainnetFinancialActionFinalitySidecarAdapter,
+  adapter: TestSidecar,
   capability: unknown,
   request: RecordMainnetFinancialActionPostFinalityReviewRequestV1,
 ): DormantMainnetFinancialActionEffectiveSafetyDatabaseConfirmedResultV1 {
@@ -545,6 +616,27 @@ function reviewedPostFinality(
 }
 
 describe('PostgresDormantMainnetFinancialActionFinalitySidecarAdapter', () => {
+  it('reads before producer construction and binds exactly one frozen persistence facet', async () => {
+    const query = jest.fn(() => Promise.resolve(queryResult(readRow())));
+    const reader = new PostgresDormantMainnetFinancialActionEffectiveSafetyReaderAdapter({
+      queryWithCancellation: query,
+    } as unknown as PostgresService);
+    const request = readRequest();
+
+    const capability = await reader.readEffectiveSafetyState(request);
+    expect(reader.reviewResult(capability, request)).toBe(capability);
+    expect(reader).not.toHaveProperty('recordAuthenticatedAdmission');
+    expect(reader).not.toHaveProperty('recordPostFinalityReview');
+
+    const persistence = reader.bindPersistence(inertProducer());
+    expect(Object.isFrozen(persistence)).toBe(true);
+    expect(persistence).not.toHaveProperty('readEffectiveSafetyState');
+    expect(() => reader.bindPersistence(inertProducer())).toThrow(
+      DORMANT_MAINNET_FINANCIAL_ACTION_FINALITY_SIDECAR_UNAVAILABLE,
+    );
+    expect(query).toHaveBeenCalledTimes(1);
+  });
+
   it('double-reviews genuine admission evidence and dispatches one exact 24-value call', async () => {
     const signal = new AbortController().signal;
     const evidence = await genuineReconciliationEvidence(signal);
@@ -1165,10 +1257,9 @@ describe('PostgresDormantMainnetFinancialActionFinalitySidecarAdapter', () => {
 
     for (const item of cases) {
       const query = jest.fn(item.implementation);
-      const adapter = new PostgresDormantMainnetFinancialActionFinalitySidecarAdapter(
-        inertProducer(),
-        { queryWithCancellation: query } as unknown as PostgresService,
-      );
+      const adapter = new PostgresDormantMainnetFinancialActionEffectiveSafetyReaderAdapter({
+        queryWithCancellation: query,
+      } as unknown as PostgresService);
       const capability = await adapter.readEffectiveSafetyState(item.request);
       const result = adapter.reviewResult(capability, item.request);
       expect(result).toMatchObject({
@@ -1241,6 +1332,46 @@ describe('PostgresDormantMainnetFinancialActionFinalitySidecarAdapter', () => {
     expect(test.query).toHaveBeenCalledTimes(3);
     expect(recovered.cursor).not.toBeNull();
     expect(recovered.cursor).not.toBe(firstRead.cursor);
+  });
+
+  it('allows only one concurrent dispatch for the same reader-issued cursor', async () => {
+    const signal = new AbortController().signal;
+    const evidence = await genuinePostFinalityEvidence(signal, 'FINALITY_REAFFIRMED');
+    const pendingWrite = deferred<unknown>();
+    let call = 0;
+    const test = adapterFixture(evidence.producer, () => {
+      call += 1;
+      return call === 1 ? Promise.resolve(queryResult(readRow())) : pendingWrite.promise;
+    });
+    const read = readRequest(signal);
+    const readResult = reviewedRead(
+      test.adapter,
+      await test.reader.readEffectiveSafetyState(read),
+      read,
+    );
+    if (readResult.cursor === null) throw new Error('expected eligible cursor');
+    const request = nullRecord({
+      evidenceCapability: evidence.capability,
+      evidenceRequest: evidence.request,
+      effectiveSafetyCursor: readResult.cursor,
+      effectiveSafetyReadRequest: read,
+      signal,
+    }) satisfies RecordMainnetFinancialActionPostFinalityReviewRequestV1;
+
+    const first = test.persistence.recordPostFinalityReview(request);
+    await expect(test.persistence.recordPostFinalityReview(request)).rejects.toBe(
+      DORMANT_MAINNET_FINANCIAL_ACTION_FINALITY_SIDECAR_UNAVAILABLE,
+    );
+    expect(test.query).toHaveBeenCalledTimes(2);
+
+    pendingWrite.resolve(queryResult(reviewRow()));
+    const capability = await first;
+    expect(test.persistence.reviewResult(capability, request)).toMatchObject({
+      outcome: 'DATABASE_STATE_CONFIRMED',
+      operation: 'RECORD_POST_FINALITY_REVIEW',
+      databaseRecordOutcome: 'RECORDED',
+    });
+    expect(test.query).toHaveBeenCalledTimes(2);
   });
 
   it('binds result capabilities to the exact request and adapter instance', async () => {

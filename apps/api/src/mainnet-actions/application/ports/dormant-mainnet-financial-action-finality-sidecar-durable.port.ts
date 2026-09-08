@@ -89,6 +89,10 @@ export type DormantMainnetFinancialActionFinalitySidecarRequestV1 =
   | RecordMainnetFinancialActionPostFinalityReviewRequestV1
   | ReadMainnetFinancialActionEffectiveSafetyStateRequestV1;
 
+export type DormantMainnetFinancialActionFinalityPersistenceRequestV1 =
+  | RecordAuthenticatedMainnetFinancialActionAdmissionRequestV1
+  | RecordMainnetFinancialActionPostFinalityReviewRequestV1;
+
 interface DormantMainnetFinancialActionFinalitySidecarResultCommonV1 {
   readonly sidecarVersion: typeof DORMANT_MAINNET_FINANCIAL_ACTION_FINALITY_SIDECAR_VERSION;
   readonly use: typeof DORMANT_MAINNET_FINANCIAL_ACTION_FINALITY_SIDECAR_RESULT_USE;
@@ -159,11 +163,28 @@ export type DormantMainnetFinancialActionFinalitySidecarResultV1 =
   | DormantMainnetFinancialActionFinalityDatabaseOutcomeUnknownV1;
 
 /**
- * Dormant, direct-import-only migration-0035 boundary. It registers no
- * implementation and grants no source, database, signing, broadcast, retry,
- * resend, transaction-construction, or settlement authority.
+ * Postgres-only migration-0035 read boundary. It can be constructed before an
+ * evidence producer and privately owns every effective-safety cursor. The
+ * concrete factory may later bind one persistence writer without exporting
+ * cursor-minting or cursor-consumption authority.
  */
-export interface DormantMainnetFinancialActionFinalitySidecarDurablePort {
+export interface DormantMainnetFinancialActionEffectiveSafetyReaderPort {
+  readonly sidecarVersion: typeof DORMANT_MAINNET_FINANCIAL_ACTION_FINALITY_SIDECAR_VERSION;
+  readEffectiveSafetyState(
+    request: ReadMainnetFinancialActionEffectiveSafetyStateRequestV1,
+  ): Promise<unknown>;
+  reviewResult(
+    capability: unknown,
+    request: ReadMainnetFinancialActionEffectiveSafetyStateRequestV1,
+  ): DormantMainnetFinancialActionFinalitySidecarResultV1 | null;
+}
+
+/**
+ * Producer-bound migration-0037 mutation boundary. The concrete implementation
+ * receives cursor review/consumption only through its reader factory's private
+ * closure and therefore cannot accept a cursor minted by another reader.
+ */
+export interface DormantMainnetFinancialActionFinalityPersistencePort {
   readonly sidecarVersion: typeof DORMANT_MAINNET_FINANCIAL_ACTION_FINALITY_SIDECAR_VERSION;
   recordAuthenticatedAdmission(
     request: RecordAuthenticatedMainnetFinancialActionAdmissionRequestV1,
@@ -171,11 +192,8 @@ export interface DormantMainnetFinancialActionFinalitySidecarDurablePort {
   recordPostFinalityReview(
     request: RecordMainnetFinancialActionPostFinalityReviewRequestV1,
   ): Promise<unknown>;
-  readEffectiveSafetyState(
-    request: ReadMainnetFinancialActionEffectiveSafetyStateRequestV1,
-  ): Promise<unknown>;
   reviewResult(
     capability: unknown,
-    request: DormantMainnetFinancialActionFinalitySidecarRequestV1,
+    request: DormantMainnetFinancialActionFinalityPersistenceRequestV1,
   ): DormantMainnetFinancialActionFinalitySidecarResultV1 | null;
 }

@@ -14,7 +14,7 @@ import type {
   ReadDormantMainnetFinancialActionDurableRequestV1,
 } from './dormant-mainnet-financial-action-lifecycle-durable.port';
 import type {
-  DormantMainnetFinancialActionFinalitySidecarDurablePort,
+  DormantMainnetFinancialActionEffectiveSafetyReaderPort,
   ReadMainnetFinancialActionEffectiveSafetyStateRequestV1,
 } from './dormant-mainnet-financial-action-finality-sidecar-durable.port';
 
@@ -170,6 +170,6 @@ export interface MainnetFinancialActionFinalityPrerequisiteIssuerPort extends Ma
 export type MainnetFinancialActionFinalityPrerequisiteIssuerDependencies = Readonly<{
   lifecycle: DormantMainnetFinancialActionLifecycleDurablePort;
   chainEvidence: ProviderPositionChainAnchorEvidenceRecorderPort;
-  effectiveSafety: DormantMainnetFinancialActionFinalitySidecarDurablePort;
+  effectiveSafety: DormantMainnetFinancialActionEffectiveSafetyReaderPort;
   wallet: MainnetFinancialActionFinalityWalletReaderPort;
 }>;

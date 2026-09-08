@@ -16,8 +16,10 @@ import {
   type DormantMainnetFinancialActionAdmissionDatabaseConfirmedResultV1,
   type DormantMainnetFinancialActionEffectiveSafetyCursorV1,
   type DormantMainnetFinancialActionEffectiveSafetyDatabaseConfirmedResultV1,
+  type DormantMainnetFinancialActionEffectiveSafetyReaderPort,
   type DormantMainnetFinancialActionFinalityDatabaseOutcomeUnknownV1,
-  type DormantMainnetFinancialActionFinalitySidecarDurablePort,
+  type DormantMainnetFinancialActionFinalityPersistencePort,
+  type DormantMainnetFinancialActionFinalityPersistenceRequestV1,
   type DormantMainnetFinancialActionFinalitySidecarOperation,
   type DormantMainnetFinancialActionFinalitySidecarRequestV1,
   type DormantMainnetFinancialActionFinalitySidecarResultV1,
@@ -1376,43 +1378,58 @@ function invokeReview<Method extends (...arguments_: never[]) => unknown>(
 }
 
 /**
- * Direct-import-only migration-0037 adapter. Construction captures its
- * producer and database boundaries but performs no I/O. Each public method
- * dispatches at most one fixed SQL call and owns no retry, transaction helper,
- * timer, source endpoint, signer, broadcaster, resender, or settlement path.
+ * Direct-import-only effective-safety reader and persistence factory.
+ * Construction captures only PostgreSQL, so it can be given to the
+ * prerequisite issuer before that issuer is given to the evidence producer.
+ * Exactly one producer-backed persistence facet may then be bound. Cursor
+ * minting, review, and consumption stay in this instance's private state.
  */
-export class PostgresDormantMainnetFinancialActionFinalitySidecarAdapter implements DormantMainnetFinancialActionFinalitySidecarDurablePort {
+export class PostgresDormantMainnetFinancialActionEffectiveSafetyReaderAdapter implements DormantMainnetFinancialActionEffectiveSafetyReaderPort {
   readonly sidecarVersion = DORMANT_MAINNET_FINANCIAL_ACTION_FINALITY_SIDECAR_VERSION;
 
-  readonly #reconciliationReview: CapturedMethod<ReviewReconciliationCandidate>;
-  readonly #postFinalityReview: CapturedMethod<ReviewPostFinalityCandidate>;
+  #reconciliationReview: CapturedMethod<ReviewReconciliationCandidate> | null = null;
+  #postFinalityReview: CapturedMethod<ReviewPostFinalityCandidate> | null = null;
   readonly #databaseQuery: CapturedMethod<QueryWithCancellation>;
   readonly #issuedResults = new WeakMap<object, IssuedResult>();
   readonly #requestMethods = new WeakMap<object, DatabaseMethod>();
   readonly #issuedCursors = new WeakMap<object, IssuedCursor>();
   readonly #spentCursors = new WeakSet<object>();
+  #boundPersistence: BoundMainnetFinancialActionFinalityPersistence | null = null;
 
-  constructor(
-    producer: DormantMainnetFinancialActionFinalityEvidenceProducer,
-    postgres: PostgresService,
-  ) {
-    this.#reconciliationReview = captureProducerReview<ReviewReconciliationCandidate>(
-      producer,
-      'reviewReconciliationAdmissionCandidate',
-    );
-    this.#postFinalityReview = captureProducerReview<ReviewPostFinalityCandidate>(
-      producer,
-      'reviewPostFinalityReviewCandidate',
-    );
+  constructor(postgres: PostgresService) {
     this.#databaseQuery = captureMethod<QueryWithCancellation>(postgres, 'queryWithCancellation');
   }
 
-  async recordAuthenticatedAdmission(
+  bindPersistence(
+    producer: DormantMainnetFinancialActionFinalityEvidenceProducer,
+  ): DormantMainnetFinancialActionFinalityPersistencePort {
+    if (this.#boundPersistence !== null) return fail();
+    const reconciliationReview = captureProducerReview<ReviewReconciliationCandidate>(
+      producer,
+      'reviewReconciliationAdmissionCandidate',
+    );
+    const postFinalityReview = captureProducerReview<ReviewPostFinalityCandidate>(
+      producer,
+      'reviewPostFinalityReviewCandidate',
+    );
+    const persistence = new BoundMainnetFinancialActionFinalityPersistence(
+      (request) => this.#recordAuthenticatedAdmission(request),
+      (request) => this.#recordPostFinalityReview(request),
+      (capability, request) => this.#reviewPersistenceResult(capability, request),
+    );
+    this.#reconciliationReview = reconciliationReview;
+    this.#postFinalityReview = postFinalityReview;
+    this.#boundPersistence = persistence;
+    return persistence;
+  }
+
+  async #recordAuthenticatedAdmission(
     requestInput: RecordAuthenticatedMainnetFinancialActionAdmissionRequestV1,
   ): Promise<unknown> {
     const request = reviewedAdmissionRequest(requestInput);
+    const review = this.#reconciliationReview ?? fail();
     const firstCandidate = invokeReview(
-      this.#reconciliationReview,
+      review,
       request.evidenceCapability,
       request.evidenceRequest,
     );
@@ -1422,7 +1439,7 @@ export class PostgresDormantMainnetFinancialActionFinalitySidecarAdapter impleme
 
     const repeatedRequest = reviewedAdmissionRequest(requestInput);
     const secondCandidate = invokeReview(
-      this.#reconciliationReview,
+      review,
       request.evidenceCapability,
       request.evidenceRequest,
     );
@@ -1446,16 +1463,17 @@ export class PostgresDormantMainnetFinancialActionFinalitySidecarAdapter impleme
     );
   }
 
-  async recordPostFinalityReview(
+  async #recordPostFinalityReview(
     requestInput: RecordMainnetFinancialActionPostFinalityReviewRequestV1,
   ): Promise<unknown> {
     const request = reviewedPostFinalityRequest(requestInput);
+    const review = this.#postFinalityReview ?? fail();
     const cursorSeal = this.#reviewCursor(
       request.effectiveSafetyCursor,
       request.effectiveSafetyReadRequest,
     );
     const firstCandidate = invokeReview(
-      this.#postFinalityReview,
+      review,
       request.evidenceCapability,
       request.evidenceRequest,
     );
@@ -1493,7 +1511,7 @@ export class PostgresDormantMainnetFinancialActionFinalitySidecarAdapter impleme
       repeatedRequest.effectiveSafetyReadRequest,
     );
     const secondCandidate = invokeReview(
-      this.#postFinalityReview,
+      review,
       request.evidenceCapability,
       request.evidenceRequest,
     );
@@ -1550,7 +1568,26 @@ export class PostgresDormantMainnetFinancialActionFinalitySidecarAdapter impleme
 
   reviewResult(
     capability: unknown,
+    request: ReadMainnetFinancialActionEffectiveSafetyStateRequestV1,
+  ): DormantMainnetFinancialActionFinalitySidecarResultV1 | null {
+    return this.#reviewIssuedResult(capability, request, 'readEffectiveSafetyState');
+  }
+
+  #reviewPersistenceResult(
+    capability: unknown,
+    request: DormantMainnetFinancialActionFinalityPersistenceRequestV1,
+  ): DormantMainnetFinancialActionFinalitySidecarResultV1 | null {
+    const method = this.#requestMethods.get(request);
+    if (method !== 'recordAuthenticatedAdmission' && method !== 'recordPostFinalityReview') {
+      return null;
+    }
+    return this.#reviewIssuedResult(capability, request, method);
+  }
+
+  #reviewIssuedResult(
+    capability: unknown,
     request: DormantMainnetFinancialActionFinalitySidecarRequestV1,
+    method: DatabaseMethod,
   ): DormantMainnetFinancialActionFinalitySidecarResultV1 | null {
     try {
       if (
@@ -1566,7 +1603,8 @@ export class PostgresDormantMainnetFinancialActionFinalitySidecarAdapter impleme
       const issued = this.#issuedResults.get(capability);
       return issued?.result === capability &&
         issued.request === request &&
-        this.#requestMethods.get(request) === issued.method
+        issued.method === method &&
+        this.#requestMethods.get(request) === method
         ? issued.result
         : null;
     } catch {
@@ -1706,5 +1744,36 @@ export class PostgresDormantMainnetFinancialActionFinalitySidecarAdapter impleme
   ): DormantMainnetFinancialActionFinalitySidecarResultV1 {
     this.#issuedResults.set(result, Object.freeze({ method, request, result }));
     return result;
+  }
+}
+
+class BoundMainnetFinancialActionFinalityPersistence implements DormantMainnetFinancialActionFinalityPersistencePort {
+  readonly sidecarVersion = DORMANT_MAINNET_FINANCIAL_ACTION_FINALITY_SIDECAR_VERSION;
+
+  constructor(
+    private readonly recordAdmission: DormantMainnetFinancialActionFinalityPersistencePort['recordAuthenticatedAdmission'],
+    private readonly recordReview: DormantMainnetFinancialActionFinalityPersistencePort['recordPostFinalityReview'],
+    private readonly review: DormantMainnetFinancialActionFinalityPersistencePort['reviewResult'],
+  ) {
+    Object.freeze(this);
+  }
+
+  recordAuthenticatedAdmission(
+    request: RecordAuthenticatedMainnetFinancialActionAdmissionRequestV1,
+  ): Promise<unknown> {
+    return this.recordAdmission(request);
+  }
+
+  recordPostFinalityReview(
+    request: RecordMainnetFinancialActionPostFinalityReviewRequestV1,
+  ): Promise<unknown> {
+    return this.recordReview(request);
+  }
+
+  reviewResult(
+    capability: unknown,
+    request: DormantMainnetFinancialActionFinalityPersistenceRequestV1,
+  ): DormantMainnetFinancialActionFinalitySidecarResultV1 | null {
+    return this.review(capability, request);
   }
 }
