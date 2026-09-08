@@ -249,17 +249,41 @@ authority-controlled states quarantine permanently without rewriting terminal
 history or authorizing a ledger reversal, resend, settlement, signing, or
 broadcast.
 
+Migrations `0036` and `0037` add owner-only finality-prerequisite reads and an
+atomic finality-persistence wrapper. The direct-import-only composition repeats
+the wallet, lifecycle, authority, evidence, deadline, revision, and snapshot
+checks at persistence time; it cannot turn a stale or copied prerequisite into
+terminal history. Commits `aa6bdc8` and `35f372f` add migration `0038` and the
+matching adapters so an already signed action remains readable and
+reconcilable after its wallet is revoked, but only when the signed event was
+recorded no later than the revocation. Revocation never restores preparation,
+signing, broadcast, resend, provider-write, or settlement authority.
+
+Commit `f7fb447` adds offline signed-command verification for Ethereum mainnet
+and Solana mainnet. Ethereum verification accepts canonical chain-1 EIP-1559
+type-2 transactions only, recovers the expected EOA signer, enforces low-`s`
+signatures and the intent fee ceiling, and derives a signer-and-nonce replay
+identity. Solana verification accepts canonical legacy or v0 wire transactions
+without address lookup tables or durable nonce, verifies the Ed25519 signature,
+requires the current wallet as the sole signer and fee payer, and rejects unused
+static keys. Both paths require an exact immutable provider write manifest and
+return digest-only, one-shot evidence. The production manifest registry remains
+empty and all-deny, and this verifier has no RPC, persistence, construction,
+signing, broadcast, retry, or runtime registration.
+
 This closes the local contract, schema, and adapter portions of durable replay,
-wallet-identity binding, authenticated-finality admission, and append-only
-post-finality quarantine. It does not create API/worker composition, a runtime
-grant, controlled authority-row population, concrete prerequisite or chain
-sources, unresolved-work discovery/claim/lease processing, a scheduled
-reviewer/reconciler, exact signed-payload verification, downstream ledger
-remediation, a signer, a broadcaster, a mainnet provider binding, or write
-authority. Migrations `0033` through `0035` are registered solely in the
-cumulative migration index; their functions remain unavailable to application
-principals, both adapters and the producer are unregistered, both `0035`
-authority tables are empty, and all policy limits and approvals remain zero.
+wallet-identity binding, authenticated-finality admission, append-only
+post-finality quarantine, and static signed-command verification. It does not
+create API/worker composition, a runtime grant, controlled authority-row
+population, concrete prerequisite or chain sources, unresolved-work
+discovery/claim/lease processing, a scheduled reviewer/reconciler, durable
+signed-verification-proof binding, downstream ledger remediation, a signer, a
+broadcaster, a mainnet provider binding, or write authority. Migrations `0033`
+through `0038` are registered solely in the cumulative migration index; their
+functions remain unavailable to application principals, the adapters, producer,
+and verifier are unregistered, both `0035` authority tables and the production
+write-manifest registry are empty, and all policy limits and approvals remain
+zero.
 
 ## Additional gates before any real-value write
 
@@ -276,11 +300,12 @@ authority tables are empty, and all policy limits and approvals remain zero.
   exact deployment identities, then populate the empty `0035` authority tables
   through a separately controlled, audited owner workflow. An authority row is
   evidence admission only and must never grant write or settlement authority.
-- Implement and independently review the concrete prerequisite/source adapters
-  and exact transaction-payload and wallet-signature verification. Separately
-  review and compose the existing address-bound `0034` preparation and `0035`
-  sidecar before any runtime registration or database grant. Every source must
-  cooperatively stop on abort/deadline.
+- Implement and independently review the concrete prerequisite/source adapters.
+  Persist and cross-bind the existing exact transaction-payload and
+  wallet-signature verification to an authenticated lifecycle cursor before any
+  runtime registration or database grant. Separately review and compose the
+  address-bound `0034` preparation and `0035`-`0038` finality/recovery path.
+  Every source must cooperatively stop on abort/deadline.
 - Add durable unresolved-work discovery, claim/lease reconciliation, and a
   post-finality review scheduler without automatic resubmission; never log HMAC
   candidates or opaque attestations.
