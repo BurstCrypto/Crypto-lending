@@ -190,6 +190,42 @@ describe('WalletMetadataRewrapCoordinator', () => {
     expect(repository.complete).not.toHaveBeenCalled();
   });
 
+  it('accepts an exact verification alias backed by a configured non-active read key', async () => {
+    const address = '0x1111111111111111111111111111111111111111';
+    const original = preparedWallet('eip155:1', address, 'EVM_EIP191_EOA');
+    const prepared = Object.freeze({
+      ...original,
+      verificationAddressDigest: digestWalletIdentity(IDENTITY_V1, 'eip155:1', address),
+    });
+    const repository = repositoryWith(prepared);
+    const coordinator = new WalletMetadataRewrapCoordinator(repository, CONFIG);
+
+    await expect(
+      coordinator.rewrap({ commandId: COMMAND_ID, accountId: ACCOUNT_ID, walletId: WALLET_ID }),
+    ).resolves.toEqual({ status: 'completed', commandId: COMMAND_ID });
+    expect(repository.complete).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects a verification alias whose key version is absent from configured read keys', async () => {
+    const address = '0x1111111111111111111111111111111111111111';
+    const identityV3 = createWalletRegistrationKey(
+      'identity-hmac',
+      3,
+      randomBytes(32).toString('base64url'),
+    );
+    const prepared = Object.freeze({
+      ...preparedWallet('eip155:1', address, 'EVM_EIP191_EOA'),
+      verificationAddressDigest: digestWalletIdentity(identityV3, 'eip155:1', address),
+    });
+    const repository = repositoryWith(prepared);
+    const coordinator = new WalletMetadataRewrapCoordinator(repository, CONFIG);
+
+    await expect(
+      coordinator.rewrap({ commandId: COMMAND_ID, accountId: ACCOUNT_ID, walletId: WALLET_ID }),
+    ).rejects.toEqual(new WalletMetadataRewrapError());
+    expect(repository.complete).not.toHaveBeenCalled();
+  });
+
   it('rejects wrong AAD, inactive identity aliases, and non-exact schema-v1 metadata generically', async () => {
     const address = '0x1111111111111111111111111111111111111111';
     const original = preparedWallet('eip155:1', address, 'EVM_EIP191_EOA');

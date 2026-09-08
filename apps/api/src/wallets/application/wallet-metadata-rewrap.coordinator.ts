@@ -157,6 +157,10 @@ export class WalletMetadataRewrapCoordinator {
 
       const networkId = mainnetNetwork(prepared.chainId);
       const currentRegistry = supportedAssetRegistryForEnvironment('MAINNET').latest;
+      const verificationIdentityKey = walletRegistrationKeyForVersion(
+        this.config.identityHmacKeys,
+        prepared.verificationAddressDigest.version,
+      );
       if (
         prepared.commandId !== input.commandId ||
         prepared.accountId !== input.accountId ||
@@ -168,9 +172,7 @@ export class WalletMetadataRewrapCoordinator {
         !(prepared.expiresAt instanceof Date) ||
         !Number.isFinite(prepared.expiresAt.getTime()) ||
         prepared.encryptedAddress.keyVersion >= targetKey.version ||
-        prepared.encryptedMetadata.keyVersion >= targetKey.version ||
-        prepared.verificationAddressDigest.version !==
-          this.config.identityHmacKeys.activeWriteVersion
+        prepared.encryptedMetadata.keyVersion >= targetKey.version
       ) {
         return fail();
       }
@@ -195,14 +197,7 @@ export class WalletMetadataRewrapCoordinator {
         canonicalAddress !== address ||
         !walletRegistrationDigestEquals(
           prepared.verificationAddressDigest,
-          digestWalletIdentity(
-            walletRegistrationKeyForVersion(
-              this.config.identityHmacKeys,
-              prepared.verificationAddressDigest.version,
-            ),
-            networkId,
-            canonicalAddress,
-          ),
+          digestWalletIdentity(verificationIdentityKey, networkId, canonicalAddress),
         )
       ) {
         return fail();
