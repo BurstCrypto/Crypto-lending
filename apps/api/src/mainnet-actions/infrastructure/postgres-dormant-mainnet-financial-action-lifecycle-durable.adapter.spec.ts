@@ -1256,6 +1256,23 @@ describe('PostgresDormantMainnetFinancialActionLifecycleDurableAdapter', () => {
     }
   });
 
+  it('does not rebind an issued result when the same request replaces its signal', async () => {
+    const test = fixture();
+    const mutable = {
+      ...readRequest(),
+    } as ReadDormantMainnetFinancialActionDurableRequestV1 & { signal: AbortSignal };
+    test.query.mockImplementationOnce(() => {
+      throw new Error('database unavailable');
+    });
+
+    const capability = await test.adapter.read(mutable);
+    expect(test.adapter.reviewResult(capability, mutable)).not.toBeNull();
+
+    mutable.signal = new AbortController().signal;
+    expect(test.adapter.reviewResult(capability, mutable)).toBeNull();
+    expect(test.query).toHaveBeenCalledTimes(1);
+  });
+
   it('retains the exact issued cursor when the caller mutates a request during dispatch', async () => {
     const test = fixture();
     const prepared = await prepareConfirmed(test);

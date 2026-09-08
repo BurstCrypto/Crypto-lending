@@ -2125,6 +2125,7 @@ interface CapturedMethod<Method extends (...arguments_: never[]) => unknown> {
 interface IssuedResult {
   readonly method: DatabaseMethod;
   readonly request: DormantMainnetFinancialActionDurableRequestV1;
+  readonly signal: AbortSignal;
   readonly result: DormantMainnetFinancialActionDurableResultV1;
 }
 
@@ -2303,10 +2304,15 @@ export class PostgresDormantMainnetFinancialActionLifecycleDurableAdapter implem
         return null;
       }
       const issued = this.#issuedResults.get(capability);
+      const requestSignal = Object.getOwnPropertyDescriptor(request, 'signal');
       if (
         issued === undefined ||
         issued.result !== capability ||
         issued.request !== request ||
+        requestSignal === undefined ||
+        !requestSignal.enumerable ||
+        !('value' in requestSignal) ||
+        requestSignal.value !== issued.signal ||
         this.#requestMethods.get(request) !== issued.method
       ) {
         return null;
@@ -2333,7 +2339,12 @@ export class PostgresDormantMainnetFinancialActionLifecycleDurableAdapter implem
         command.signal,
       ]);
     } catch {
-      return this.#issue(method, request, this.#codec.databaseOutcomeUnknown(command));
+      return this.#issue(
+        method,
+        request,
+        command.signal,
+        this.#codec.databaseOutcomeUnknown(command),
+      );
     }
 
     try {
@@ -2342,18 +2353,24 @@ export class PostgresDormantMainnetFinancialActionLifecycleDurableAdapter implem
       const queryResult = (await reviewedPending) as unknown;
       if (isAborted(command.signal)) throw new Error('DATABASE_OUTCOME_UNKNOWN');
       const result = this.#codec.decode(command, singleRow(queryResult));
-      return this.#issue(method, request, result);
+      return this.#issue(method, request, command.signal, result);
     } catch {
-      return this.#issue(method, request, this.#codec.databaseOutcomeUnknown(command));
+      return this.#issue(
+        method,
+        request,
+        command.signal,
+        this.#codec.databaseOutcomeUnknown(command),
+      );
     }
   }
 
   #issue(
     method: DatabaseMethod,
     request: DormantMainnetFinancialActionDurableRequestV1,
+    signal: AbortSignal,
     result: DormantMainnetFinancialActionDurableResultV1,
   ): DormantMainnetFinancialActionDurableResultV1 {
-    this.#issuedResults.set(result, Object.freeze({ method, request, result }));
+    this.#issuedResults.set(result, Object.freeze({ method, request, signal, result }));
     return result;
   }
 }
