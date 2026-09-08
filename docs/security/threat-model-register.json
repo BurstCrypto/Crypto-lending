@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "ticket": "KAN-49",
-  "modelVersion": "2026-09-07-authenticated-finality-v1",
+  "modelVersion": "2026-09-08-durable-recovery-v1",
   "localStatus": "READY_FOR_INDEPENDENT_REVIEW",
   "scope": "Crypto Lending repository application, wallet-validation, smart-lending external evidence, data-plane, operator, and supply-chain boundaries",
   "independentApproval": {
@@ -226,7 +226,11 @@
       "id": "DATA-001",
       "name": "Account profile contact and residency data",
       "classification": "RESTRICTED",
-      "cia": { "confidentiality": "HIGH", "integrity": "HIGH", "availability": "MEDIUM" },
+      "cia": {
+        "confidentiality": "HIGH",
+        "integrity": "HIGH",
+        "availability": "MEDIUM"
+      },
       "stores": [
         "Encrypted short-lived pre-authentication browser cookie during registration",
         "PostgreSQL account_profiles"
@@ -245,7 +249,11 @@
       "id": "DATA-002",
       "name": "OIDC identity mapping and subject digest",
       "classification": "RESTRICTED",
-      "cia": { "confidentiality": "HIGH", "integrity": "HIGH", "availability": "HIGH" },
+      "cia": {
+        "confidentiality": "HIGH",
+        "integrity": "HIGH",
+        "availability": "HIGH"
+      },
       "stores": ["PostgreSQL authentication_oidc_identities"],
       "retention": "POLICY_PENDING_IDENTITY_MAPPING_RETAINED",
       "logging": "NEVER_RAW_ISSUER_SUBJECT_OR_DIGEST",
@@ -259,7 +267,11 @@
       "id": "DATA-003",
       "name": "Authentication attempts, sessions, CSRF state, and replay evidence",
       "classification": "RESTRICTED",
-      "cia": { "confidentiality": "HIGH", "integrity": "HIGH", "availability": "HIGH" },
+      "cia": {
+        "confidentiality": "HIGH",
+        "integrity": "HIGH",
+        "availability": "HIGH"
+      },
       "stores": [
         "Browser host-only cookies",
         "PostgreSQL authentication tables as versioned digests"
@@ -276,7 +288,11 @@
       "id": "DATA-004",
       "name": "Wallet seed phrases, private keys, and production signing credentials",
       "classification": "PROHIBITED",
-      "cia": { "confidentiality": "HIGH", "integrity": "HIGH", "availability": "HIGH" },
+      "cia": {
+        "confidentiality": "HIGH",
+        "integrity": "HIGH",
+        "availability": "HIGH"
+      },
       "stores": [],
       "retention": "NEVER_COLLECT",
       "logging": "NEVER",
@@ -287,7 +303,11 @@
       "id": "DATA-005",
       "name": "Ephemeral wallet ownership-proof and pairing material",
       "classification": "RESTRICTED",
-      "cia": { "confidentiality": "HIGH", "integrity": "HIGH", "availability": "MEDIUM" },
+      "cia": {
+        "confidentiality": "HIGH",
+        "integrity": "HIGH",
+        "availability": "MEDIUM"
+      },
       "stores": [
         "Restricted browser, wallet, and API process memory while a challenge is issued and verified",
         "Vendor-managed wallet connection state outside application persistence",
@@ -308,7 +328,11 @@
       "id": "DATA-006",
       "name": "Ledger plans, journals, postings, balances, fees, and valuations",
       "classification": "RESTRICTED",
-      "cia": { "confidentiality": "HIGH", "integrity": "HIGH", "availability": "HIGH" },
+      "cia": {
+        "confidentiality": "HIGH",
+        "integrity": "HIGH",
+        "availability": "HIGH"
+      },
       "stores": ["Append-only PostgreSQL ledger tables"],
       "retention": "FINANCIAL_RETENTION_POLICY_PENDING_NO_DELETION_PATH",
       "logging": "NO_AMOUNTS_BALANCES_OR_POSTINGS",
@@ -322,7 +346,11 @@
       "id": "DATA-007",
       "name": "Ledger capability and idempotency material",
       "classification": "RESTRICTED",
-      "cia": { "confidentiality": "HIGH", "integrity": "HIGH", "availability": "HIGH" },
+      "cia": {
+        "confidentiality": "HIGH",
+        "integrity": "HIGH",
+        "availability": "HIGH"
+      },
       "stores": ["Purpose-separated digests and immutable results in PostgreSQL"],
       "retention": "RAW_CAPABILITY_NEVER_PERSISTED; DIGEST_AND_RESULT_POLICY_PENDING",
       "logging": "NEVER_RAW",
@@ -333,7 +361,11 @@
       "id": "DATA-008",
       "name": "Account, authentication, financial audit, and financial-action safety records",
       "classification": "RESTRICTED",
-      "cia": { "confidentiality": "HIGH", "integrity": "HIGH", "availability": "HIGH" },
+      "cia": {
+        "confidentiality": "HIGH",
+        "integrity": "HIGH",
+        "availability": "HIGH"
+      },
       "stores": [
         "Append-only PostgreSQL audit and ledger tables",
         "Append-only PostgreSQL authenticated reconciliation admissions, authority-control events, and post-finality reviews after migration 0035; authority tables start empty and every function remains owner-only"
@@ -354,7 +386,11 @@
       "id": "DATA-009",
       "name": "Structured operational logs and correlation identifiers",
       "classification": "RESTRICTED",
-      "cia": { "confidentiality": "MEDIUM", "integrity": "HIGH", "availability": "MEDIUM" },
+      "cia": {
+        "confidentiality": "MEDIUM",
+        "integrity": "HIGH",
+        "availability": "MEDIUM"
+      },
       "stores": ["Designed CloudWatch API, web, and worker log groups"],
       "retention": "14_DAYS_DEFAULT_ALLOWED_1_3_5_7_14_30_60_90",
       "logging": "API_AND_WORKER_ALLOWLISTED_FIELDS_ONLY; WEB_FRAMEWORK_ERROR_PATH_PENDING",
@@ -365,7 +401,11 @@
       "id": "DATA-010",
       "name": "Transactional outbox envelopes and failure state",
       "classification": "RESTRICTED",
-      "cia": { "confidentiality": "MEDIUM", "integrity": "HIGH", "availability": "HIGH" },
+      "cia": {
+        "confidentiality": "MEDIUM",
+        "integrity": "HIGH",
+        "availability": "HIGH"
+      },
       "stores": ["PostgreSQL job_outbox"],
       "retention": "PUBLISHED_7_DAYS_DEFAULT; FAILED_30_DAYS_DEFAULT; PENDING_NO_EXPIRY_POLICY_PENDING",
       "logging": "NO_PAYLOAD_OR_RAW_TRANSPORT_ERROR",
@@ -380,7 +420,11 @@
       "id": "DATA-011",
       "name": "SQS work messages and dead-letter records",
       "classification": "RESTRICTED",
-      "cia": { "confidentiality": "MEDIUM", "integrity": "HIGH", "availability": "HIGH" },
+      "cia": {
+        "confidentiality": "MEDIUM",
+        "integrity": "HIGH",
+        "availability": "HIGH"
+      },
       "stores": ["SQS source queue", "SQS dead-letter queue"],
       "retention": "SOURCE_4_DAYS; DEAD_LETTER_14_DAYS",
       "logging": "NO_BODY_ATTRIBUTES_RECEIPT_HANDLE_OR_QUEUE_URL",
@@ -391,7 +435,11 @@
       "id": "DATA-012",
       "name": "Rate-limit source pseudonyms and counters",
       "classification": "RESTRICTED",
-      "cia": { "confidentiality": "HIGH", "integrity": "HIGH", "availability": "MEDIUM" },
+      "cia": {
+        "confidentiality": "HIGH",
+        "integrity": "HIGH",
+        "availability": "MEDIUM"
+      },
       "stores": ["PostgreSQL authentication_rate_limit_buckets as keyed digests"],
       "retention": "CLEANUP_INDEX_PRESENT; DELETION_SCHEDULE_POLICY_PENDING",
       "logging": "NO_RAW_IP_OR_DIGEST",
@@ -405,7 +453,11 @@
       "id": "DATA-013",
       "name": "Unauthorized copies of runtime credentials and cryptographic key material in business persistence, logs, or review evidence",
       "classification": "PROHIBITED",
-      "cia": { "confidentiality": "HIGH", "integrity": "HIGH", "availability": "HIGH" },
+      "cia": {
+        "confidentiality": "HIGH",
+        "integrity": "HIGH",
+        "availability": "HIGH"
+      },
       "stores": [],
       "retention": "NEVER_COLLECT",
       "logging": "NEVER",
@@ -416,7 +468,11 @@
       "id": "DATA-014",
       "name": "Supported chain, contract, mint, source, version, and fingerprint metadata",
       "classification": "PUBLIC",
-      "cia": { "confidentiality": "LOW", "integrity": "HIGH", "availability": "HIGH" },
+      "cia": {
+        "confidentiality": "LOW",
+        "integrity": "HIGH",
+        "availability": "HIGH"
+      },
       "stores": ["Version-controlled immutable registry snapshots"],
       "retention": "APPEND_ONLY_VERSION_HISTORY",
       "logging": "VERSION_AND_FINGERPRINT_ALLOWED; OBSERVED_WALLET_IDENTITY_NOT_ALLOWED",
@@ -427,7 +483,11 @@
       "id": "DATA-015",
       "name": "Source, dependency, build, and review evidence",
       "classification": "INTERNAL",
-      "cia": { "confidentiality": "MEDIUM", "integrity": "HIGH", "availability": "MEDIUM" },
+      "cia": {
+        "confidentiality": "MEDIUM",
+        "integrity": "HIGH",
+        "availability": "MEDIUM"
+      },
       "stores": ["Git repository", "Short-lived review artifacts"],
       "retention": "VERSION_HISTORY; GENERATED_ARTIFACT_RETENTION_EXPLICIT_PER_WORKFLOW",
       "logging": "NO_CREDENTIALS_CUSTOMER_DATA_OR_PRIVATE_PATHS",
@@ -438,7 +498,11 @@
       "id": "DATA-016",
       "name": "Billing, deployment, and cleanup control records",
       "classification": "INTERNAL",
-      "cia": { "confidentiality": "MEDIUM", "integrity": "HIGH", "availability": "MEDIUM" },
+      "cia": {
+        "confidentiality": "MEDIUM",
+        "integrity": "HIGH",
+        "availability": "MEDIUM"
+      },
       "stores": ["Reviewed repository records and operator evidence"],
       "retention": "DECISION_AND_EXPIRY_BOUND; NO_SECRET_OR_PII_CONTENT",
       "logging": "BOUNDED_IDENTIFIERS_AND_OUTCOMES_ONLY",
@@ -449,7 +513,11 @@
       "id": "DATA-017",
       "name": "Registered chain-qualified wallet identity and bounded connection metadata",
       "classification": "RESTRICTED",
-      "cia": { "confidentiality": "HIGH", "integrity": "HIGH", "availability": "HIGH" },
+      "cia": {
+        "confidentiality": "HIGH",
+        "integrity": "HIGH",
+        "availability": "HIGH"
+      },
       "stores": [
         "PostgreSQL registered_wallets stores the canonical address and server-authored metadata only as versioned AES-256-GCM ciphertext plus a versioned keyed address digest for active-identity uniqueness",
         "PostgreSQL wallet_ownership_challenges stores account, proof-scheme, chain, registry, lifecycle, versioned keyed address, domain, message, and nonce digests, plus an AES-256-GCM sealed challenge-binding record while pending; it never stores a raw nonce, signed message, or signature",
@@ -468,7 +536,11 @@
       "id": "DATA-018",
       "name": "Smart-lending market corroboration, provider-position coverage, finalized checkpoints, authenticated reconciliation and post-finality evidence, route quote requests, and quote responses",
       "classification": "RESTRICTED",
-      "cia": { "confidentiality": "HIGH", "integrity": "HIGH", "availability": "HIGH" },
+      "cia": {
+        "confidentiality": "HIGH",
+        "integrity": "HIGH",
+        "availability": "HIGH"
+      },
       "stores": [
         "API process memory only in the current dormant adapters",
         "Append-only PostgreSQL Aave finalized-checkpoint events plus a guarded current-head pointer after migration 0017; the writer remains unregistered",
@@ -497,7 +569,11 @@
       "id": "DATA-019",
       "name": "Release candidate, deployment-destination, deployed-target, post-provision target-identity enrollment, technical-evidence, RDS/provider supporting-capture, and public-launch decision records",
       "classification": "INTERNAL",
-      "cia": { "confidentiality": "MEDIUM", "integrity": "HIGH", "availability": "HIGH" },
+      "cia": {
+        "confidentiality": "MEDIUM",
+        "integrity": "HIGH",
+        "availability": "HIGH"
+      },
       "stores": [
         "Version-controlled empty authority, deployment-destination, and deployed-target registries",
         "Short-lived CI release artifacts",
@@ -1003,7 +1079,10 @@
         "Owner-only migrations 0033 and 0034 atomically prepare an append-only Ethereum/Solana action lifecycle, preserve exact replay and compare-and-swap identities, and refuse unbound history or lossy rollback",
         "The direct-import-only durable adapter derives the canonical wallet-address HMAC candidates internally, calls only address-bound V2 once, never automatically retries an uncertain database outcome, and exposes no signing, broadcast, or settlement authority",
         "Migration 0035 uses a deferred constraint trigger to require every migration-0033 reconciliation terminal event to receive its exact authenticated admission in the same transaction, while immutable identities make exact replay idempotent and conflicting replay fail closed",
-        "The direct-import-only authenticated-finality sidecar accepts only producer-issued capabilities and frozen exact-data requests, consumes an adapter-issued same-instance one-shot database cursor, executes one fixed database call without retry, and returns read-only recovery after an ambiguous database outcome"
+        "The direct-import-only authenticated-finality sidecar accepts only producer-issued capabilities and frozen exact-data requests, consumes an adapter-issued same-instance one-shot database cursor, executes one fixed database call without retry, and returns read-only recovery after an ambiguous database outcome",
+        "Offline Ethereum and Solana signed-command verifiers require exact canonical payload and wallet-signature bindings against an immutable manifest; migration 0039 and the one-shot binder atomically persist digest-only proof before signed submission, while the production write-manifest registry remains empty",
+        "Migrations 0038-0041 and direct-import-only readers preserve already signed action recovery through wallet revocation, identity-key rotation and revoked-wallet metadata-key retirement without restoring preparation, signing, broadcast or settlement authority",
+        "Migration 0042 and the dormant PostgreSQL two-queue adapter provide atomic server-timed claims, fencing, expiry, bounded attempts, sticky manual review and authenticated durable completion; signed or unknown-outcome work remains reconciliation-only, and no worker or runtime grant exists"
       ],
       "owner": "Ledger and Backend",
       "status": "MITIGATED_LOCAL",
@@ -1018,10 +1097,15 @@
         "apps/api/src/mainnet-actions/infrastructure/postgres-dormant-mainnet-financial-action-lifecycle-durable.adapter.ts",
         "apps/api/src/mainnet-actions/application/dormant-mainnet-financial-action-finality-evidence.producer.ts",
         "apps/api/src/mainnet-actions/infrastructure/postgres-dormant-mainnet-financial-action-finality-sidecar.adapter.ts",
-        "apps/api/src/infrastructure/database/migrations/0035-create-mainnet-financial-action-authenticated-finality.migration.ts"
+        "apps/api/src/infrastructure/database/migrations/0035-create-mainnet-financial-action-authenticated-finality.migration.ts",
+        "apps/api/src/mainnet-actions/infrastructure/offline-dormant-mainnet-financial-action-signed-submission.verifier.ts",
+        "apps/api/src/mainnet-actions/application/dormant-mainnet-financial-action-two-queue.scheduler.ts",
+        "apps/api/src/mainnet-actions/infrastructure/postgres-dormant-mainnet-financial-action-two-queue-scheduler.adapter.ts",
+        "apps/api/test/infrastructure/mainnet-financial-action-durable-scheduler.integration-spec.ts",
+        "infra/providers/dormant-mainnet-action-recovery-inventory.mjs"
       ],
-      "residualRisk": "The local database, authenticated evidence contract, and direct-import-only adapters preserve restart-safe intent, replay, submission, ambiguous-broadcast, authenticated reconciliation, and post-finality safety state, but no runtime is authorized to submit, discover, or claim unresolved work. Concrete prerequisite and source adapters, authority rows, provider-side idempotency, exact signed-payload verification, and live recovery behavior remain absent or unproved.",
-      "followUp": "Approve exact transaction manifests, prerequisite and independently controlled source adapters, and authority records; add payload/signature verification plus durable unresolved-work claim/lease processing; then independently review and exercise authenticated submission and reconciliation before granting or registering a runtime"
+      "residualRisk": "The local database, exact signed-command verifier and proof binder, wallet recovery readers, and durable fenced two-queue scheduler preserve append-only state and bounded recovery. No runtime is authorized to submit or process unresolved work. Migrations 0039-0042 remain unregistered; source/deployment authorities and write manifests remain empty. Independently controlled live sources, provider-side idempotency, runtime composition and deployed recovery behavior remain absent or unproved.",
+      "followUp": "Approve exact transaction manifests, independently controlled source adapters and authority records; independently review the existing prerequisite, verified-bind, recovery and durable scheduling boundaries, then exercise authenticated submission and recovery before granting or registering a runtime"
     },
     {
       "id": "THR-LEDGER-003",
@@ -1070,10 +1154,13 @@
         "Continuity backfill and quarantine recovery require two distinct agreeing sources across every contiguous block, are bounded to 64 blocks, and cannot roll back or skip history",
         "Single-use recovery authorization is bound to operation, sources, chain, deployment, current state, target, approver, nonce, issuance time, and an exclusive expiry before the locked database mutation",
         "The dormant Ethereum/Solana financial-action lifecycle records prepared, wallet-signed, broadcast-observed, and reconciled states append-only; the adapter never resends or retries an uncertain post-dispatch database result and permits read-only recovery",
-        "Address-bound V2 validates the current ACTIVE/nonrevoked registered-wallet identity before any lifecycle row can exist, including after key rotation, and wallet revocation makes replay fail closed",
+        "Address-bound V2 validates the current ACTIVE/nonrevoked registered-wallet identity before preparation, including after key rotation; revocation denies new preparation while authenticated post-bind recovery remains available",
         "The dormant producer admits only SUPPLY and WITHDRAW on exact Ethereum or Solana mainnet identities, requires exactly two distinct independently captured primary and corroborating source bindings plus exact source and deployment authority fingerprints, binds wallet, provider, protocol, market, asset, action, amount, transaction, and finality facts, and leaves all signing, broadcast, resend, settlement, and ledger authority false",
         "The producer uses the earliest caller deadline or evidence/authority expiry with a 30-second maximum and requires source implementations to honor cancellation and settle; the sidecar then uses a producer-issued capability, frozen exact request, same-instance one-shot compare-and-swap cursor, one fixed database call, no automatic retry, and read-only recovery after ambiguity",
-        "Migration 0035 records authenticated reconciliation admissions, authority-control events, and post-finality reviews append-only; authority, unauthenticated-terminal, reorganization, and sticky deep-reorganization quarantine are safety overlays that never rewrite migration-0033 terminal history and never authorize or reverse ledger settlement"
+        "Migration 0035 records authenticated reconciliation admissions, authority-control events, and post-finality reviews append-only; authority, unauthenticated-terminal, reorganization, and sticky deep-reorganization quarantine are safety overlays that never rewrite migration-0033 terminal history and never authorize or reverse ledger settlement",
+        "Offline Ethereum and Solana signed-command verifiers require exact canonical payload and wallet-signature bindings against an immutable manifest; migration 0039 and the one-shot binder atomically persist digest-only proof before signed submission, while the production write-manifest registry remains empty",
+        "Migrations 0038-0041 and direct-import-only readers preserve already signed action recovery through wallet revocation, identity-key rotation and revoked-wallet metadata-key retirement without restoring preparation, signing, broadcast or settlement authority",
+        "Migration 0042 and the dormant PostgreSQL two-queue adapter provide atomic server-timed claims, fencing, expiry, bounded attempts, sticky manual review and authenticated durable completion; signed or unknown-outcome work remains reconciliation-only, and no worker or runtime grant exists"
       ],
       "owner": "Blockchain, Ledger, and SRE",
       "status": "OPEN_FOLLOW_UP",
@@ -1090,10 +1177,15 @@
         "apps/api/src/mainnet-actions/application/ports/mainnet-financial-action-finality-evidence-source.port.ts",
         "apps/api/src/mainnet-actions/application/ports/dormant-mainnet-financial-action-finality-sidecar-durable.port.ts",
         "apps/api/src/mainnet-actions/infrastructure/postgres-dormant-mainnet-financial-action-finality-sidecar.adapter.ts",
-        "apps/api/src/infrastructure/database/migrations/0035-create-mainnet-financial-action-authenticated-finality.migration.ts"
+        "apps/api/src/infrastructure/database/migrations/0035-create-mainnet-financial-action-authenticated-finality.migration.ts",
+        "apps/api/src/mainnet-actions/infrastructure/offline-dormant-mainnet-financial-action-signed-submission.verifier.ts",
+        "apps/api/src/mainnet-actions/application/dormant-mainnet-financial-action-two-queue.scheduler.ts",
+        "apps/api/src/mainnet-actions/infrastructure/postgres-dormant-mainnet-financial-action-two-queue-scheduler.adapter.ts",
+        "apps/api/test/infrastructure/mainnet-financial-action-durable-scheduler.integration-spec.ts",
+        "infra/providers/dormant-mainnet-action-recovery-inventory.mjs"
       ],
-      "residualRisk": "The authenticated-finality producer, sidecar, and owner-only schema remain local, dormant, and unregistered. Source and deployment authority tables are empty; no concrete prerequisite adapter, source adapter, runtime reconciliation or review scheduler, provider credential, or signing and settlement path exists. A source that violates its port contract cannot be physically cancelled after the producer stops awaiting it. Exact signed-payload verification, live finality and reorganization drills, and a downstream ledger-remediation policy for quarantined actions remain absent.",
-      "followUp": "Independently approve and implement the exact prerequisite and two-source adapters, controlled authority population, payload/signature verification, durable unresolved-work claim/lease reconciliation, and runtime post-finality review scheduler; define ledger-remediation policy that does not rewrite history, then complete live recovery, finality, and reorganization drills before enabling chain processing"
+      "residualRisk": "The authenticated-finality producer, prerequisite readers, sidecar, signed-command verifier, wallet recovery and durable scheduler remain dormant and unregistered. Source and deployment authority tables and write manifests are empty; no live source adapter, scheduled runtime execution, provider credential, signing or settlement path is enabled. A source that violates its port contract cannot be physically cancelled after the producer stops awaiting it. Live finality and reorganization drills, independent review, and downstream ledger-remediation policy remain absent.",
+      "followUp": "Independently approve the two-source adapters and controlled authority population; review and operationalize the existing prerequisite, signature-proof, recovery and durable scheduling code; define a ledger-remediation policy that does not rewrite history, then complete deployed recovery, finality and reorganization drills before enabling chain processing"
     },
     {
       "id": "THR-ADMIN-001",

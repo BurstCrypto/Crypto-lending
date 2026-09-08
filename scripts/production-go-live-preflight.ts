@@ -773,11 +773,11 @@ const REVIEWED_PROVIDER_POSITION_READ_ARTIFACT_SHA256 = Object.freeze({
   providerPositionChainAnchorRecordIntentReconciliationLifecycleSource:
     '4b0bd742fe5508c2c18b07c10ae7feb4c5a2d888c1498fde8ee01a784fc040dc',
   providerPositionMigrationIndexSource:
-    'a70554e3ccbd6af9f2e37beeef2c6db9e3351bf8a350f94ea6f8b85f6cfc47a8',
+    '3ceea27f4922a0e72022d6aac83504083c96b683a1b711aa37ce91acced4f35f',
   providerPositionAdmissionCoordinatorSource:
     'bcd6324695359cd3ef43ac6620da2b756c379c75fe5c0e99897791996b3312eb',
   providerPositionDeadlineRunnerSource:
-    '6910ff27ce6b29d06d7f3fc20743779196259bda5518b1b4ada7f82b9c2c3f97',
+    'b66f15f92cba4659afbe90fa01a3afd1b6a452efb6155e4fae8fd8b9aa69a130',
   providerPositionRuntimeBoundsSource:
     '342895e5e4bafca127c67db519e8ca252b0b75377a1e9311e00639e74a32d812',
   providerPositionRuntimeCompositionSource:
@@ -791,11 +791,11 @@ const REVIEWED_PROVIDER_POSITION_READ_ARTIFACT_SHA256 = Object.freeze({
   registeredPortfolioWalletReaderSource:
     'b1722a4f8480b0e78e0aa913ad851f8a6d3b4ede0e272639c1afb92893d08d0d',
   walletRegistrationServiceSource:
-    '1961a2bf8b3bbfd56d849f831753bc5944a4f2f32f636acc4aed28fe28899c3f',
+    'b687bf9c348fa63996f06a7663f74c647974e8093036502eb99519d2cc841841',
   walletRegistrationRepositoryPortSource:
-    'e137f3df48f13c95ef8f01c3290c1a11247cc69c022b04f8ceb368a91d978d8a',
+    '83fa822a8484bc7622e120ded799cd0df8ee5ce2ae5d3cd956cdd0d8325ab091',
   postgresWalletRegistrationRepositorySource:
-    '00b46e4ab87be7e65559ca7ddc925d3226a1302ca742a5ddfb797034fd795707',
+    '0315e723a3008e553ca39954a7f79f78532edca0d733c931825a85c5bfeffb7d',
   providerPositionPostgresServiceSource:
     '3f8c97e8ed9c9e0ccddb75dba088e911f37869c3f7e066cf5642e95d82934e48',
   providerPositionCoverageSource:
@@ -974,7 +974,7 @@ const REVIEWED_BALANCE_CONSUMER_ARTIFACT_SHA256 = Object.freeze({
   sqsModuleSource: 'dc958100bd372500a9428c28cc6219a4cb00db61314a63478368d0b0cf95221b',
   sqsTokensSource: REVIEWED_SQS_TOKENS_SOURCE_SHA256,
   apiPackageSource: 'c911e7171be6ff64908d1c15fc1d240f51ace8e8b90d6bcad4c605c994439774',
-  rootPackageSource: '9f7583096273eef7a9d1e90ce7914977353d3dfeb610d2514f80b4f53baf39b5',
+  rootPackageSource: 'f73952897715df0ed3589b6dff33429a8690d7108379e9ce83abcc747d4bed6c',
   rootPackageLockSource: 'ac745baf70f2e70b3ba779612f0a3cc2b10692860a47c54c927a1e4805b2e6a6',
   applicationTemplateSource: '58b040eea3858661d45ab0f1334457c0b937cfb8179bad665aa3bb649171807c',
   applicationValidatorSource: '3da9441a8d3c5de0b47b88fd0c11d489c940234702f768ea9774279f7fab3e00',
@@ -1001,7 +1001,7 @@ const REVIEWED_BALANCE_CONSUMER_ARTIFACT_SHA256 = Object.freeze({
     '9ff329c1ce601cc2b830036239b2f16f34ebe6163aca57e033714d2e8718010f',
   mainnetBalanceAgreementEvidenceV2MigrationSource:
     'c9afef59a9101d568597eb37845d6d2a997edf63f1496d3d04296075fcc61fff',
-  migrationIndexSource: 'a70554e3ccbd6af9f2e37beeef2c6db9e3351bf8a350f94ea6f8b85f6cfc47a8',
+  migrationIndexSource: '3ceea27f4922a0e72022d6aac83504083c96b683a1b711aa37ce91acced4f35f',
   releaseManifestSource: 'a06a41af34ec8f52a8001572aef68a2e3ea38520318152a4953b575f877745d6',
   productionContainerValidatorSource:
     'a9fbc9e638f4a33266e823ff8c07a9b53703e1bc8f1f4f46eab30c7b50a9b0b0',
@@ -8204,7 +8204,7 @@ function hasDormantProviderPositionReadBoundaryContract(
     postgresWalletLegacyQuery,
   );
   const postgresWalletCancellableSignal = postgresWalletRegistrationRepository.indexOf(
-    'signal,',
+    '(query, values, signal);',
     postgresWalletCancellableQuery,
   );
   const postgresWalletReturnedIdentity = postgresWalletRegistrationRepository.indexOf(
@@ -9422,7 +9422,7 @@ function hasDormantProviderPositionReadBoundaryContract(
     walletServiceAccountParse > walletServiceList &&
     walletServiceRepositoryRead > walletServiceAccountParse &&
     walletServiceForwarding > walletServiceRepositoryRead &&
-    exactExecutableLineCount(walletRegistrationService, 'readonly signal: AbortSignal;') === 1 &&
+    exactExecutableLineCount(walletRegistrationService, 'readonly signal: AbortSignal;') === 2 &&
     exactExecutableLineCount(walletRegistrationService, 'options?: ListActiveWalletsOptions,') ===
       1 &&
     exactExecutableLineCount(
@@ -9453,7 +9453,7 @@ function hasDormantProviderPositionReadBoundaryContract(
     ) === 1 &&
     exactExecutableLineCount(
       postgresWalletRegistrationRepository,
-      ': await this.postgres.queryWithCancellation<ActiveWalletRow>(',
+      ': await this.postgres.queryWithCancellation<ActiveWalletRow>(query, values, signal);',
     ) === 1 &&
     walletRosterCancellationBridgeSources.every(
       (source) =>
@@ -9647,7 +9647,7 @@ const API_RUNTIME_PINNED_INPUT_PATHS = Object.freeze([
   'tsconfig.json',
 ]);
 const REVIEWED_API_RUNTIME_REPOSITORY_SNAPSHOT_SHA256 =
-  'd1854a4f4e55ed4321e06a7bf6684bdf164f82819b8a4e751c0c94b8747621e5';
+  '251c92bbcda6bbf18494e6f59e38b927fee85de20cc40adfb5006c139ea5a92d';
 const API_RUNTIME_OWNED_DEPLOYMENT_IDENTITY_PATHS = new Set([
   'blockchain-sync/infrastructure/rpc/ethereum-mainnet-balance-deployment-identity.verifier.ts',
   'blockchain-sync/infrastructure/rpc/ethereum-mainnet-balance-deployment.manifest.ts',

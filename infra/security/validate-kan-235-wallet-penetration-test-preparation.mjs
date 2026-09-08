@@ -16,9 +16,9 @@ export const MAX_PREPARATION_BYTES = 16_384;
 export const MAX_SIDECAR_BYTES = 65;
 export const MAX_THREAT_MODEL_BYTES = 131_072;
 export const EXPECTED_PREPARATION_SHA256 =
-  'c7ebd6f1bf05b18452e11348ef3aed6b567f3be5786091e3d5fb253ca78f4b7f';
+  'b7deaf72e7a95e81d6cf3df2032c39edf0de9b0ed50080638955c0d93a385839';
 export const EXPECTED_THREAT_MODEL_SHA256 =
-  '9feb17ecd393ac826e27cbf7695a28573d340b5b698fa58ed215b86beffae765';
+  '62a1f6da708333ce4ecf8e46278370ec5beb7c4a325dc32c28f2a330798b5607';
 export const PREPARATION_FILE_ERROR =
   'KAN-235 preparation record, sidecar, or reviewed threat model is missing, unsafe, or unreadable.';
 export const PREPARATION_JSON_ERROR =
@@ -217,7 +217,7 @@ function validatePreparationRecordInternal(record) {
   if (record.artifactId !== 'KAN_235_WALLET_PENETRATION_TEST_PREPARATION_V1') {
     errors.push('artifactId must retain the preparation-only schema identity.');
   }
-  if (record.preparedOn !== '2026-09-04') errors.push('preparedOn must retain the review date.');
+  if (record.preparedOn !== '2026-09-08') errors.push('preparedOn must retain the review date.');
   if (record.status !== 'PENDING_EXTERNAL_REVIEW') {
     errors.push('status must remain PENDING_EXTERNAL_REVIEW.');
   }

@@ -212,7 +212,11 @@ describeWithInfrastructure('live docker-compose infrastructure', () => {
       const postgres = new PostgresService(postgresPool);
       const redis = new RedisService(redisClient);
       const sqs = new SqsService(sqsClient, config);
-      const migrations = new MigrationRunner(postgresPool, DATABASE_TEST_SCHEMA_MIGRATION_LIST);
+      const migrations = new MigrationRunner(
+        postgresPool,
+        DATABASE_TEST_SCHEMA_MIGRATION_LIST,
+        postgres,
+      );
       const health = new InfrastructureHealthService(postgres, migrations, redis, sqs);
 
       await expect(migrations.up()).resolves.toEqual(
@@ -221,7 +225,14 @@ describeWithInfrastructure('live docker-compose infrastructure', () => {
       await expect(
         postgresPool.query("SELECT to_regclass('ledger_journals') AS ledger_table"),
       ).resolves.toMatchObject({ rows: [{ ledger_table: 'ledger_journals' }] });
-      await expect(health.check(5_000)).resolves.toMatchObject({ status: 'ok' });
+      await expect(health.check(5_000)).resolves.toEqual({
+        status: 'ok',
+        checks: {
+          postgres: { status: 'up', latencyMs: expect.any(Number) },
+          redis: { status: 'up', latencyMs: expect.any(Number) },
+          sqs: { status: 'up', latencyMs: expect.any(Number) },
+        },
+      });
 
       const testQueues = await createIsolatedTestQueues(sqsClient, config.sqs.maxReceiveCount);
       testQueueUrl = testQueues.queueUrl;

@@ -34,9 +34,7 @@ describe('OutboxWorkerHealthService', () => {
     expect(migrations.assertUpToDate).toHaveBeenCalledTimes(1);
     expect(sqs.healthCheck).toHaveBeenCalledTimes(1);
     const postgresSignal = postgres.healthCheck.mock.calls[0]?.[0] as AbortSignal | undefined;
-    const migrationSignal = migrations.assertUpToDate.mock.calls[0]?.[0] as
-      | AbortSignal
-      | undefined;
+    const migrationSignal = migrations.assertUpToDate.mock.calls[0]?.[0] as AbortSignal | undefined;
     expect(postgresSignal).toBeInstanceOf(AbortSignal);
     expect(migrationSignal).toBe(postgresSignal);
     expect(postgresSignal?.aborted).toBe(false);

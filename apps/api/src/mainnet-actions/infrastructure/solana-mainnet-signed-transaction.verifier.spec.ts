@@ -14,6 +14,10 @@ import {
   verifySolanaMainnetSignedTransaction,
   type VerifiedSolanaMainnetSignedTransaction,
 } from './solana-mainnet-signed-transaction.verifier';
+import {
+  decodeCanonicalSolanaPublicKey,
+  encodeSolanaBase58,
+} from './solana-mainnet-public-key.codec';
 
 const WALLET = Keypair.fromSeed(Uint8Array.from({ length: 32 }, (_, index) => index + 1));
 const SECOND_SIGNER = Keypair.fromSeed(Uint8Array.from({ length: 32 }, (_, index) => index + 33));
@@ -59,6 +63,49 @@ function verify(
 }
 
 describe('Solana mainnet signed-transaction verifier', () => {
+  it('matches SDK public-key encoding including zero prefixes and rejects noncanonical keys', () => {
+    for (let leadingZeros = 0; leadingZeros <= 32; leadingZeros += 1) {
+      const bytes = Uint8Array.from({ length: 32 }, (_, index) =>
+        index < leadingZeros ? 0 : index + 1,
+      );
+      const address = new PublicKey(bytes).toBase58();
+      expect(encodeSolanaBase58(bytes)).toBe(address);
+      expect(decodeCanonicalSolanaPublicKey(address)).toEqual(Buffer.from(bytes));
+      expect(() => decodeCanonicalSolanaPublicKey('1' + address)).toThrow();
+    }
+    expect(() => decodeCanonicalSolanaPublicKey('z'.repeat(44))).toThrow();
+  });
+
+  it.each(['legacy', 0] as const)(
+    'rejects every truncated %s message, trailing bytes and overlong vectors',
+    (version) => {
+      const wire = Buffer.from(signedWire(version), 'base64');
+      for (let length = 0; length < wire.length; length += 1) {
+        expect(() => verify(wire.subarray(0, length).toString('base64'))).toThrow();
+      }
+      for (const prefix of [
+        [0x81, 0],
+        [0x81, 0x80, 0],
+        [0xff, 0xff, 0x04],
+      ]) {
+        const overlong = Buffer.concat([Buffer.from(prefix), wire.subarray(1)]);
+        expect(() => verify(overlong.toString('base64'))).toThrow(
+          expect.objectContaining({ code: 'INVALID_SOLANA_SIGNED_TRANSACTION' }),
+        );
+      }
+      expect(() => verify(Buffer.concat([wire, Buffer.from([0])]).toString('base64'))).toThrow();
+      const accountLengthOffset = 65 + (version === 0 ? 1 : 0) + 3;
+      const overlongAccountLength = Buffer.concat([
+        wire.subarray(0, accountLengthOffset),
+        Buffer.from([(wire[accountLengthOffset] ?? 0) | 0x80, 0]),
+        wire.subarray(accountLengthOffset + 1),
+      ]);
+      expect(() => verify(overlongAccountLength.toString('base64'))).toThrow(
+        expect.objectContaining({ code: 'INVALID_SOLANA_SIGNED_TRANSACTION' }),
+      );
+    },
+  );
+
   it.each(['legacy', 0] as const)(
     'verifies a canonical complete %s wire transaction and every required signature',
     (version) => {

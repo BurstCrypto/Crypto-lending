@@ -146,6 +146,23 @@ test('rejects oversized controlled inputs with a fixed path-free error', () => {
   }
 });
 
+test('keeps the expanded application guard input bounded with a value-free error', () => {
+  const mutation = withTemporaryArtifact(
+    'applicationGuard',
+    'oversized-application-guard.ps1',
+    Buffer.alloc(262_145, 0x20),
+  );
+  try {
+    assert.deepEqual(mutation.result.errors, [
+      'Application invocation guard must be a non-empty, stable, single-link regular file of at most 262144 bytes at a canonical local path.',
+    ]);
+    assert.equal(mutation.result.errors.join('\n').includes(mutation.path), false);
+    assert.equal(mutation.result.awsCallsMade, 0);
+  } finally {
+    mutation.cleanup();
+  }
+});
+
 test('rejects hard-linked controlled inputs before policy parsing', () => {
   const directory = mkdtempSync(join(tmpdir(), 'kan-229-linked-policy-'));
   const sourcePath = join(directory, 'source.json');

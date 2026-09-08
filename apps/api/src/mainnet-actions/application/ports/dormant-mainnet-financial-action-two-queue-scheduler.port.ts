@@ -9,6 +9,8 @@ export const DORMANT_MAINNET_FINANCIAL_ACTION_RECONCILIATION_CLAIM_USE =
   'DORMANT_MAINNET_FINANCIAL_ACTION_RECONCILIATION_CLAIM_ONLY' as const;
 export const DORMANT_MAINNET_FINANCIAL_ACTION_SOURCE_CLAIM_USE =
   'DORMANT_MAINNET_FINANCIAL_ACTION_DURABLE_SOURCE_CLAIM_ONLY' as const;
+export const DORMANT_MAINNET_FINANCIAL_ACTION_SOURCE_COMPLETION_USE =
+  'DORMANT_MAINNET_FINANCIAL_ACTION_DURABLE_SOURCE_COMPLETION_ONLY' as const;
 export const DORMANT_MAINNET_FINANCIAL_ACTION_CLAIM_CAPABILITY_USE =
   'DORMANT_MAINNET_FINANCIAL_ACTION_OPAQUE_CLAIM_CAPABILITY_ONLY' as const;
 export const DORMANT_MAINNET_FINANCIAL_ACTION_CLAIM_VIEW_USE =
@@ -114,8 +116,9 @@ export interface DormantMainnetFinancialActionReconciliationSourceClaimV1 extend
 }
 
 /**
- * Future durable adapters own lease creation and persistence. Claim requests
- * deliberately contain no lease ID, fencing token, attempt, or timestamp.
+ * Durable adapters own lease creation and persistence. Claim requests
+ * deliberately contain no lease ID, fencing token, attempt, or timestamp;
+ * completion is accepted only through the source's authenticated claim.
  */
 export interface DormantMainnetFinancialActionTwoQueueClaimSourcePort {
   readonly schedulerVersion: typeof DORMANT_MAINNET_FINANCIAL_ACTION_SCHEDULER_VERSION;
@@ -133,6 +136,28 @@ export interface DormantMainnetFinancialActionTwoQueueClaimSourcePort {
     capability: unknown,
     request: ClaimDormantMainnetFinancialActionReconciliationRequestV1,
   ): DormantMainnetFinancialActionReconciliationSourceClaimV1 | null;
+  completePreBroadcast(
+    sourceClaimCapability: unknown,
+    claimRequest: ClaimDormantMainnetFinancialActionPreBroadcastRequestV1,
+    request: CompleteDormantMainnetFinancialActionPreBroadcastRequestV1,
+  ): Promise<unknown>;
+  completeReconciliation(
+    sourceClaimCapability: unknown,
+    claimRequest: ClaimDormantMainnetFinancialActionReconciliationRequestV1,
+    request: CompleteDormantMainnetFinancialActionReconciliationRequestV1,
+  ): Promise<unknown>;
+  reviewPreBroadcastCompletion(
+    capability: unknown,
+    sourceClaimCapability: unknown,
+    claimRequest: ClaimDormantMainnetFinancialActionPreBroadcastRequestV1,
+    request: CompleteDormantMainnetFinancialActionPreBroadcastRequestV1,
+  ): DormantMainnetFinancialActionSourceCompletionV1 | null;
+  reviewReconciliationCompletion(
+    capability: unknown,
+    sourceClaimCapability: unknown,
+    claimRequest: ClaimDormantMainnetFinancialActionReconciliationRequestV1,
+    request: CompleteDormantMainnetFinancialActionReconciliationRequestV1,
+  ): DormantMainnetFinancialActionSourceCompletionV1 | null;
 }
 
 export interface DormantMainnetFinancialActionClaimCapabilityV1 extends SchedulerAuthorityDenialV1 {
@@ -182,6 +207,39 @@ export interface CompleteDormantMainnetFinancialActionReconciliationRequestV1 ex
 export type CompleteDormantMainnetFinancialActionRequestV1 =
   | CompleteDormantMainnetFinancialActionPreBroadcastRequestV1
   | CompleteDormantMainnetFinancialActionReconciliationRequestV1;
+
+/**
+ * Authenticated view of the exact durable completion row. Implementations must
+ * issue this only after the database owns the lease/fence transition.
+ */
+export interface DormantMainnetFinancialActionSourceCompletionV1 extends SchedulerAuthorityDenialV1 {
+  readonly schedulerVersion: typeof DORMANT_MAINNET_FINANCIAL_ACTION_SCHEDULER_VERSION;
+  readonly use: typeof DORMANT_MAINNET_FINANCIAL_ACTION_SOURCE_COMPLETION_USE;
+  readonly mayPersist: false;
+  readonly recordOutcome: 'RECORDED' | 'REPLAYED';
+  readonly queue: 'PRE_BROADCAST' | 'RECONCILIATION';
+  readonly jobId: string;
+  readonly accountId: string;
+  readonly intentId: string;
+  readonly lifecycleRevision: string;
+  readonly lifecycleSnapshotSha256: string;
+  readonly attempt: number;
+  readonly maximumAttempts: number;
+  readonly leaseId: string;
+  readonly fencingToken: string;
+  readonly requestedDisposition:
+    | CompleteDormantMainnetFinancialActionPreBroadcastRequestV1['disposition']
+    | CompleteDormantMainnetFinancialActionReconciliationRequestV1['disposition'];
+  readonly completionDisposition:
+    | 'COMPLETED'
+    | 'TERMINAL_FAILURE'
+    | 'RELEASE_PRE_BROADCAST_ONLY'
+    | 'RELEASE_RECONCILIATION_ONLY'
+    | 'MANUAL_REVIEW_REQUIRED'
+    | 'ATTEMPT_LIMIT_REACHED';
+  readonly resultingJobStatus: 'READY' | 'COMPLETED' | 'MANUAL_REVIEW';
+  readonly completedAt: string;
+}
 
 export interface DormantMainnetFinancialActionCompletionCapabilityV1 extends SchedulerAuthorityDenialV1 {
   readonly schedulerVersion: typeof DORMANT_MAINNET_FINANCIAL_ACTION_SCHEDULER_VERSION;

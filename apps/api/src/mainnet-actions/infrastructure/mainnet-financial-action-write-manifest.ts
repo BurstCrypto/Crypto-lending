@@ -1,6 +1,6 @@
 import { isProxy } from 'node:util/types';
 
-import { PublicKey } from '@solana/web3.js';
+import { decodeCanonicalSolanaPublicKey } from './solana-mainnet-public-key.codec';
 import { keccak256, stringToHex } from 'viem';
 
 import type { DormantMainnetFinancialActionIntentV1 } from '../domain/dormant-mainnet-financial-action';
@@ -236,8 +236,7 @@ function canonicalEvmAddress(value: unknown): string {
 function canonicalSolanaAddress(value: unknown): string {
   if (typeof value !== 'string') return invalidManifest();
   try {
-    const key = new PublicKey(value);
-    if (key.toBase58() !== value) return invalidManifest();
+    decodeCanonicalSolanaPublicKey(value);
     return value;
   } catch {
     return invalidManifest();
@@ -624,7 +623,7 @@ function expectedSolanaData(
     }
     const address =
       segment.source === 'STATIC' ? segment.value : addressFromIntent(intent, segment.source);
-    return Buffer.from(new PublicKey(canonicalSolanaAddress(address)).toBytes());
+    return decodeCanonicalSolanaPublicKey(canonicalSolanaAddress(address));
   });
   return Buffer.concat(chunks).toString('hex');
 }

@@ -88,6 +88,99 @@ import {
 
 const baseline = loadDormantMainnetActionBoundarySnapshot();
 
+test('pins every recovery, signed verification, key-rotation, and scheduler artifact', () => {
+  assert.equal(baseline.recoverySchedulerSources.size, 42);
+  for (const [path, source] of baseline.recoverySchedulerSources) {
+    const changed = snapshot();
+    changed.recoverySchedulerSources.set(path, `${source}\n`);
+    assert.ok(
+      validateDormantMainnetActionBoundarySnapshot(changed).includes(
+        `reviewed recovery or scheduler artifact drifted: ${path}`,
+      ),
+    );
+  }
+  const omitted = snapshot();
+  omitted.recoverySchedulerSources.delete(omitted.recoverySchedulerSources.keys().next().value);
+  assert.ok(
+    validateDormantMainnetActionBoundarySnapshot(omitted).includes(
+      'recovery and scheduler artifact inventory is incomplete or extended',
+    ),
+  );
+});
+
+test('rejects scheduler grant, lease, durable-completion, and production-manifest widening', () => {
+  const migrationPath =
+    'apps/api/src/infrastructure/database/migrations/0042-create-mainnet-financial-action-durable-scheduler.migration.ts';
+  const schedulerPath =
+    'apps/api/src/mainnet-actions/application/dormant-mainnet-financial-action-two-queue.scheduler.ts';
+  const changed = snapshot();
+  changed.recoverySchedulerSources.set(
+    migrationPath,
+    changed.recoverySchedulerSources
+      .get(migrationPath)
+      .replace('FOR UPDATE OF job SKIP LOCKED', 'FOR UPDATE OF job'),
+  );
+  assert.ok(
+    validateDormantMainnetActionBoundarySnapshot(changed).includes(
+      'durable scheduler lost concurrency or quarantine control: FOR UPDATE OF job SKIP LOCKED',
+    ),
+  );
+  changed.recoverySchedulerSources.set(
+    migrationPath,
+    baseline.recoverySchedulerSources.get(migrationPath) + '\n// GRANT EXECUTE TO public\n',
+  );
+  assert.ok(
+    validateDormantMainnetActionBoundarySnapshot(changed).some((error) =>
+      error.startsWith('recovery/scheduler migration widened owner authority'),
+    ),
+  );
+  changed.recoverySchedulerSources.set(
+    schedulerPath,
+    changed.recoverySchedulerSources
+      .get(schedulerPath)
+      .replace('completedAt: durableCompletion.completedAt', 'completedAt: this.now().text'),
+  );
+  assert.ok(
+    validateDormantMainnetActionBoundarySnapshot(changed).includes(
+      'scheduler completion must be one-shot and authenticated by the durable source',
+    ),
+  );
+  const manifestPath =
+    'apps/api/src/mainnet-actions/infrastructure/mainnet-financial-action-write-manifest.ts';
+  changed.recoverySchedulerSources.set(
+    manifestPath,
+    changed.recoverySchedulerSources
+      .get(manifestPath)
+      .replace('Object.freeze([]);', 'Object.freeze([{}]);'),
+  );
+  assert.ok(
+    validateDormantMainnetActionBoundarySnapshot(changed).includes(
+      'production write manifests must remain empty',
+    ),
+  );
+});
+
+test('rejects scheduler runtime wiring and unilateral registration of the dormant successor migrations', () => {
+  mutationReports(
+    'runtime scheduler',
+    'dormant recovery/scheduler source is referenced by runtime source apps/api/src/scheduler-worker.ts',
+    (changed) => {
+      changed.runtimeSources.set(
+        'apps/api/src/scheduler-worker.ts',
+        "import './mainnet-actions/infrastructure/postgres-dormant-mainnet-financial-action-two-queue-scheduler.adapter';\n",
+      );
+    },
+  );
+  mutationReports(
+    'successor registration',
+    '0039-0042 must remain outside runtime migration registration',
+    (changed) => {
+      changed.migrationIndexSource +=
+        "\nimport './0042-create-mainnet-financial-action-durable-scheduler.migration';\n";
+    },
+  );
+});
+
 function snapshot() {
   return {
     boundarySource: baseline.boundarySource,
@@ -130,6 +223,7 @@ function snapshot() {
     atomicFinalityMigrationIntegrationSpecSource:
       baseline.atomicFinalityMigrationIntegrationSpecSource,
     migrationIndexSource: baseline.migrationIndexSource,
+    recoverySchedulerSources: new Map(baseline.recoverySchedulerSources),
     runtimeSources: new Map(baseline.runtimeSources),
   };
 }
@@ -156,6 +250,8 @@ function writeFixture(repositoryRoot, path, source) {
 }
 
 function writeCompleteReviewedFixture(repositoryRoot) {
+  for (const [path, source] of baseline.recoverySchedulerSources)
+    writeFixture(repositoryRoot, path, source);
   for (const [path, source] of [
     [ACTION_BOUNDARY_PATH, baseline.boundarySource],
     [ACTION_BOUNDARY_SPEC_PATH, baseline.specSource],
@@ -281,11 +377,11 @@ test('the exact Ethereum and Solana lending action candidate boundary is dormant
   assert.equal(REVIEWED_DATABASE_MIGRATION_INDEX_SHA256.length, 64);
   assert.equal(
     REVIEWED_ACTION_LIFECYCLE_POSTGRES_ADAPTER_SHA256,
-    'f9838bddf9ff23573fa2fe920d28fbf9a84d16ffeda74446faea33ecc292d872',
+    'b2a21481711153b4dd9482d18a0f9a0a1b391c142772f558523545e9fcd73c66',
   );
   assert.equal(
     REVIEWED_ACTION_LIFECYCLE_POSTGRES_ADAPTER_SPEC_SHA256,
-    '04ad605487eb8eee7375e59077f0daec37ba6308e2979c3be83c38af3f8d88c0',
+    '089acbe297762e20d5a3ee065d36642dd802f7997660fe2340203de6b23d84e1',
   );
   assert.equal(
     REVIEWED_ACTION_LIFECYCLE_POSTGRES_ADAPTER_INTEGRATION_SPEC_SHA256,
@@ -297,7 +393,7 @@ test('the exact Ethereum and Solana lending action candidate boundary is dormant
   );
   assert.equal(
     REVIEWED_ACTION_LIFECYCLE_MIGRATION_SPEC_SHA256,
-    'b5b558323cf7d6fe425c5a178a0793311487275cde7cfafc8995cbce0ec15e93',
+    'c14640d07c43ec41e5cda394f1f1c1cfccb5cb227541fce55a230cc7a94545e9',
   );
   assert.equal(
     REVIEWED_ACTION_WALLET_IDENTITY_BINDING_MIGRATION_SHA256,
@@ -305,7 +401,7 @@ test('the exact Ethereum and Solana lending action candidate boundary is dormant
   );
   assert.equal(
     REVIEWED_ACTION_WALLET_IDENTITY_BINDING_MIGRATION_SPEC_SHA256,
-    '2b26f2cdfc56518ffe70e4c5825f525fa774b8167aff77e7e5d17580a4ea0ad1',
+    '389e1b6c28265e841ec9b3afcce9f80bd103fe5cc630592b974632058fcc4c74',
   );
   assert.equal(
     REVIEWED_ACTION_WALLET_IDENTITY_BINDING_MIGRATION_INTEGRATION_SPEC_SHA256,
@@ -313,7 +409,7 @@ test('the exact Ethereum and Solana lending action candidate boundary is dormant
   );
   assert.equal(
     REVIEWED_DATABASE_MIGRATION_INDEX_SHA256,
-    '74d3ba9cdd354954b8577ccfa1474e7b44f7db834186e352280e8f26b9e0d74a',
+    '3ceea27f4922a0e72022d6aac83504083c96b683a1b711aa37ce91acced4f35f',
   );
   assert.deepEqual(
     [
@@ -330,17 +426,17 @@ test('the exact Ethereum and Solana lending action candidate boundary is dormant
       REVIEWED_ACTION_ATOMIC_FINALITY_MIGRATION_INTEGRATION_SPEC_SHA256,
     ],
     [
-      'cc9237081dbb88a9459465e49b5a077f443fd8ae2e52cd5b5e29e8451f4c5c30',
-      'abf193132225cbea4ad7ae54ba33912694f75f960b540560cac92ba5c0d52ea8',
-      '43ad27fbb5a662db28e71f847446d265d35ffbb485aba20213d812f3461b7ffa',
-      'd8531f14274744cf94e5db487c17b5d61bf87b584e41d3b0a6ca3538463ce7ef',
-      'ffde15529cc4e4525b37075873adbcec97bb3fadc1cdbb0ab3131d3ad570bace',
+      'f4ab74832dd8ff63608989129c728a0f66d789fdc784338f5661e72a6acefdda',
+      'ba81fa57285644e5976094b5bf831486a5aaa276a318452db9c5e4b240fa98e1',
+      '9224299e2df17f177ec6a1f6b46898a4fcff21464a69aad2af2255713b182f63',
+      'e0e03424b4f8e4735541c3d0649cda89c3d0d7abccef8e6eb1298cda07bc73a8',
+      'c72cc2b093fc3bbeb8f5fbcfd88c270e57db7617e6c4f85afe8a11c504a4349b',
       'ee6fb9a68cb3766a5a146ee9a435895ce13c5645976a4a0df9761c88e3c91bcb',
-      'a014c28bcbb20521af30de9bc5e378a385693cfbf2178e0fe9f414af45122501',
+      'e94876618f421970d26e8385a292e42f1924529b93dc00574144e416a2488391',
       'c2f93d2974e5ffd81ac7894798edd4dc5af77f73ae14d4ed3d9df3617af1d073',
       '174ac457309a3ef938c72f93ba2158b7e3887ac40560db0fa92a5bba5e4e439c',
-      '4223b5def362996df6e24dab026e62d1ac109eccfa4bb92cfb0b8d54543770e4',
-      'df82a07a912f4c214f4e38f6bd1b5ab2ab8a846b2704c5814ffd316222999506',
+      'fbaf4c633c1a66f9248a5566bbafa0184a47f533f39764d55ea740ae86fbb326',
+      '5a572918e6c0802852760a4235e9476f792a47f1c9d046fd5bccfa335dde66c6',
     ],
   );
 });
@@ -936,7 +1032,7 @@ test('0036 prerequisites and 0037 atomic persistence remain exact and authority-
     '0036 prerequisite adapter SQL or one-shot dispatch allowlist changed',
     (value) => {
       value.finalityPrerequisiteAdapterSource = value.finalityPrerequisiteAdapterSource.replace(
-        'read_mainnet_financial_action_reconciliation_prerequisite_v1',
+        'read_mainnet_financial_action_reconciliation_prerequisite_v2',
         'write_mainnet_financial_action_reconciliation_prerequisite_v1',
       );
     },
@@ -1716,6 +1812,12 @@ test('repository loading rejects missing reviewed artifacts with a value-free er
         baseline.atomicFinalityMigrationIntegrationSpecSource,
       ],
     ]) {
+      writeFixture(repositoryRoot, path, source);
+      assert.deepEqual(validateDormantMainnetActionBoundaryFiles(repositoryRoot), [
+        ACTION_BOUNDARY_INPUT_ERROR,
+      ]);
+    }
+    for (const [path, source] of baseline.recoverySchedulerSources) {
       writeFixture(repositoryRoot, path, source);
       assert.deepEqual(validateDormantMainnetActionBoundaryFiles(repositoryRoot), [
         ACTION_BOUNDARY_INPUT_ERROR,

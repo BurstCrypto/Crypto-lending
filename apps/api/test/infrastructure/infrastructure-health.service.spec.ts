@@ -37,11 +37,9 @@ describe('InfrastructureHealthService', () => {
       },
     });
     const postgresSignal = (postgres.healthCheck as jest.Mock).mock.calls[0]?.[0] as
-      | AbortSignal
-      | undefined;
+      AbortSignal | undefined;
     const migrationSignal = (migrations.assertUpToDate as jest.Mock).mock.calls[0]?.[0] as
-      | AbortSignal
-      | undefined;
+      AbortSignal | undefined;
     expect(postgresSignal).toBeInstanceOf(AbortSignal);
     expect(migrationSignal).toBe(postgresSignal);
     expect(postgresSignal?.aborted).toBe(false);
@@ -335,8 +333,7 @@ describe('InfrastructureHealthService', () => {
     });
     const sqsSignal = (sqs.healthCheck as jest.Mock).mock.calls[0]?.[0] as AbortSignal | undefined;
     const postgresSignal = (postgres.healthCheck as jest.Mock).mock.calls[0]?.[0] as
-      | AbortSignal
-      | undefined;
+      AbortSignal | undefined;
     expect(sqsSignal?.aborted).toBe(true);
     expect(postgresSignal?.aborted).toBe(true);
     expect(migrations.assertUpToDate).not.toHaveBeenCalled();
@@ -406,11 +403,9 @@ describe('InfrastructureHealthService', () => {
     expect(postgres.healthCheck).toHaveBeenCalledTimes(2);
     expect(migrations.assertUpToDate).toHaveBeenCalledTimes(1);
     const retriedPostgresSignal = (postgres.healthCheck as jest.Mock).mock.calls[1]?.[0] as
-      | AbortSignal
-      | undefined;
+      AbortSignal | undefined;
     const retriedMigrationSignal = (migrations.assertUpToDate as jest.Mock).mock.calls[0]?.[0] as
-      | AbortSignal
-      | undefined;
+      AbortSignal | undefined;
     expect(retriedMigrationSignal).toBe(retriedPostgresSignal);
   });
 

@@ -37,7 +37,8 @@ const EXPECTED_WEB_PACKAGE_NAME = '@crypto-lending/web';
 const SEMVER_PATTERN =
   /^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/u;
 
-export const MAX_RUNTIME_FILE_BYTES = 16 * 1024 * 1024;
+// The reviewed Next.js trace includes libvips native libraries of about 18 MiB.
+export const MAX_RUNTIME_FILE_BYTES = 32 * 1024 * 1024;
 export const MAX_RUNTIME_AGGREGATE_BYTES = 64 * 1024 * 1024;
 export const MAX_RUNTIME_FILES = 4_096;
 export const MAX_RUNTIME_ENTRIES = 8_192;

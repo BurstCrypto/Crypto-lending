@@ -156,30 +156,8 @@ function schemaMigrationsForIsolatedLegacyRole(
   // Migration 0004 is immutable in production. Its role literal is replaced
   // only inside this isolated test database so the suite never mutates the
   // cluster-global canonical crypto_runtime compatibility bridge.
-  return DATABASE_TEST_SCHEMA_MIGRATION_LIST.filter(
-    ({ id }) =>
-      id !== '0007' &&
-      id !== '0008' &&
-      id !== '0009' &&
-      id !== '0010' &&
-      id !== '0011' &&
-      id !== '0012' &&
-      id !== '0013' &&
-      id !== '0014' &&
-      id !== '0015' &&
-      id !== '0016' &&
-      id !== '0017' &&
-      id !== '0018' &&
-      id !== '0019' &&
-      id !== '0020' &&
-      id !== '0021' &&
-      id !== '0022' &&
-      id !== '0023' &&
-      id !== '0024' &&
-      id !== '0025' &&
-      id !== '0026' &&
-      id !== '0027' &&
-      id !== '0028',
+  return DATABASE_TEST_SCHEMA_MIGRATION_LIST.filter(({ id }) =>
+    ['0001', '0002', '0003', '0004', '0006'].includes(id),
   ).map((migration) =>
     migration.id === '0004'
       ? {
@@ -522,7 +500,7 @@ describeWithPostgres('KAN-232 PostgreSQL principal boundary', () => {
           workerLogin,
           balanceConsumerLogin,
         ),
-      ).rejects.toThrow('do not match the reviewed contract');
+      ).rejects.toThrow(/do(?:es)? not match the reviewed contract/u);
       await expect(
         admin.query(
           `SELECT rolcanlogin, rolpassword
@@ -609,7 +587,7 @@ describeWithPostgres('KAN-232 PostgreSQL principal boundary', () => {
       );
       await expect(
         runBootstrapArtifact(database, names, apiOld, workerLogin, balanceConsumerLogin),
-      ).rejects.toThrow('do not match the reviewed contract');
+      ).rejects.toThrow(/do(?:es)? not match the reviewed contract/u);
       await admin.query(
         `REVOKE ${quoteIdentifier(names.legacyRuntimeRole)}
          FROM ${quoteIdentifier(balanceConsumerLogin)}`,
@@ -622,7 +600,7 @@ describeWithPostgres('KAN-232 PostgreSQL principal boundary', () => {
       );
       await expect(
         runBootstrapArtifact(database, names, apiOld, workerLogin, balanceConsumerLogin),
-      ).rejects.toThrow('do not match the reviewed contract');
+      ).rejects.toThrow(/do(?:es)? not match the reviewed contract/u);
       await admin.query(`DROP ROLE ${quoteIdentifier(malformedBalanceConsumerLogin)}`);
       createdRoles.splice(createdRoles.indexOf(malformedBalanceConsumerLogin), 1);
 
@@ -633,7 +611,7 @@ describeWithPostgres('KAN-232 PostgreSQL principal boundary', () => {
       );
       await expect(
         runBootstrapArtifact(database, names, apiOld, workerLogin, balanceConsumerLogin),
-      ).rejects.toThrow('do not match the reviewed contract');
+      ).rejects.toThrow(/do(?:es)? not match the reviewed contract/u);
       await admin.query(`DROP ROLE ${quoteIdentifier(excessBalanceConsumerLogin)}`);
       createdRoles.splice(createdRoles.indexOf(excessBalanceConsumerLogin), 1);
 
@@ -757,7 +735,7 @@ describeWithPostgres('KAN-232 PostgreSQL principal boundary', () => {
       );
       await expect(
         runBootstrapArtifact(database, names, apiOld, workerLogin, balanceConsumerNew),
-      ).rejects.toThrow('do not match the reviewed contract');
+      ).rejects.toThrow(/do(?:es)? not match the reviewed contract/u);
       await admin.query(`DROP ROLE ${quoteIdentifier(excessBalanceConsumerSuccessor)}`);
       createdRoles.splice(createdRoles.indexOf(excessBalanceConsumerSuccessor), 1);
 
@@ -785,17 +763,32 @@ describeWithPostgres('KAN-232 PostgreSQL principal boundary', () => {
          FROM ${quoteIdentifier(balanceConsumerLogin)}`,
       );
 
-      await admin.query(
-        `GRANT SELECT (id) ON TABLE public.job_outbox
-         TO ${quoteIdentifier(balanceConsumerLogin)}`,
-      );
-      await expect(
-        runBootstrapArtifact(database, names, apiOld, workerLogin, balanceConsumerNew),
-      ).rejects.toThrow('database boundary does not match');
-      await admin.query(
-        `REVOKE SELECT (id) ON TABLE public.job_outbox
-         FROM ${quoteIdentifier(balanceConsumerLogin)}`,
-      );
+      databaseAdmin = new Pool({
+        connectionString: roleUrl(
+          testDatabaseUrl as string,
+          database,
+          bootstrapRole,
+          adminUrl.password,
+        ),
+        max: 1,
+      });
+      try {
+        // The bootstrap catalogs are scoped to this isolated database.
+        await databaseAdmin.query(
+          `GRANT SELECT (id) ON TABLE public.job_outbox
+           TO ${quoteIdentifier(balanceConsumerLogin)}`,
+        );
+        await expect(
+          runBootstrapArtifact(database, names, apiOld, workerLogin, balanceConsumerNew),
+        ).rejects.toThrow('database boundary does not match');
+      } finally {
+        await databaseAdmin.query(
+          `REVOKE SELECT (id) ON TABLE public.job_outbox
+           FROM ${quoteIdentifier(balanceConsumerLogin)}`,
+        );
+        await databaseAdmin.end();
+        databaseAdmin = undefined;
+      }
 
       await admin.query(`ALTER ROLE ${quoteIdentifier(balanceConsumerLogin)} NOLOGIN`);
       await admin.query(

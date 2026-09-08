@@ -128,7 +128,10 @@ function anchorSets(options: FixtureOptions): Readonly<Record<NetworkId, AnchorS
   });
 }
 
-function sourcePair(networkId: NetworkId, expiresAt: string) {
+function sourcePair(
+  networkId: NetworkId,
+  expiresAt: string,
+): ProviderPositionChainAnchorEvidenceSourcePairRegistryContentV1['pairs'][number] {
   return frozen({
     networkId,
     approvalId: `${networkId === ETHEREUM ? 'ethereum' : 'solana'}-approval-001`,

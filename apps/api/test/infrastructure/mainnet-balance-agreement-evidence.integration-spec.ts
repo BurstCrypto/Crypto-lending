@@ -50,6 +50,10 @@ const NUMERIC_DEPLOYMENT_FINGERPRINT = '1'.repeat(64);
 const MIGRATIONS_THROUGH_0031 = DATABASE_TEST_SCHEMA_MIGRATION_LIST.filter(
   ({ id }) => id <= '0031',
 );
+// This suite audits the 0031 -> 0032 upgrade and 0032 rollback contract.
+const MIGRATIONS_THROUGH_0032 = DATABASE_TEST_SCHEMA_MIGRATION_LIST.filter(
+  ({ id }) => id <= '0032',
+);
 const EXPECTED_V2_CHECK_CATALOG = Object.freeze([
   Object.freeze({
     name: 'balance_sync_financial_agreement_v2_column_binding_check',
@@ -754,7 +758,7 @@ describeWithPostgres('mainnet balance two-source agreement evidence boundary', (
   });
 
   it('preserves zero-row V1 and its fail-closed objects while V2 accepts coordinator evidence', async () => {
-    runner = new MigrationRunner(operationPool, DATABASE_TEST_SCHEMA_MIGRATION_LIST);
+    runner = new MigrationRunner(operationPool, MIGRATIONS_THROUGH_0032);
     await expect(runner.up()).resolves.toEqual(['0032']);
     await expect(
       operationPool.query<{ evidence_count: string }>(

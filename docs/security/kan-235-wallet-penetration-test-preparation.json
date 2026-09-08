@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "ticket": "KAN-235",
   "artifactId": "KAN_235_WALLET_PENETRATION_TEST_PREPARATION_V1",
-  "preparedOn": "2026-09-04",
+  "preparedOn": "2026-09-08",
   "status": "PENDING_EXTERNAL_REVIEW",
   "evidenceStatus": "PENDING",
   "decisionStatus": "PENDING",
@@ -24,7 +24,7 @@
     "releaseTreeSha": null,
     "releaseManifestSha256": null,
     "threatModelPath": "docs/security/threat-model-register.json",
-    "threatModelSha256": "9feb17ecd393ac826e27cbf7695a28573d340b5b698fa58ed215b86beffae765",
+    "threatModelSha256": "62a1f6da708333ce4ecf8e46278370ec5beb7c4a325dc32c28f2a330798b5607",
     "walletReviewPrerequisite": {
       "ticket": "KAN-227",
       "status": "PENDING",

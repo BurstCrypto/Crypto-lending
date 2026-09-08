@@ -13,6 +13,7 @@ import {
   DORMANT_MAINNET_FINANCIAL_ACTION_RECONCILIATION_COMPLETION_USE,
   DORMANT_MAINNET_FINANCIAL_ACTION_SCHEDULER_VERSION,
   DORMANT_MAINNET_FINANCIAL_ACTION_SOURCE_CLAIM_USE,
+  DORMANT_MAINNET_FINANCIAL_ACTION_SOURCE_COMPLETION_USE,
   type ClaimDormantMainnetFinancialActionPreBroadcastRequestV1,
   type ClaimDormantMainnetFinancialActionReconciliationRequestV1,
   type CompleteDormantMainnetFinancialActionPreBroadcastRequestV1,
@@ -22,6 +23,7 @@ import {
   type DormantMainnetFinancialActionReconciliationJobV1,
   type DormantMainnetFinancialActionReconciliationSourceClaimV1,
   type DormantMainnetFinancialActionSchedulerClock,
+  type DormantMainnetFinancialActionSourceCompletionV1,
   type DormantMainnetFinancialActionTwoQueueClaimSourcePort,
 } from './ports/dormant-mainnet-financial-action-two-queue-scheduler.port';
 
@@ -148,10 +150,69 @@ function reconciliationSourceClaim(
   }) as DormantMainnetFinancialActionReconciliationSourceClaimV1;
 }
 
+function sourceCompletion(
+  claim:
+    | DormantMainnetFinancialActionPreBroadcastSourceClaimV1
+    | DormantMainnetFinancialActionReconciliationSourceClaimV1,
+  requestedDisposition:
+    | CompleteDormantMainnetFinancialActionPreBroadcastRequestV1['disposition']
+    | CompleteDormantMainnetFinancialActionReconciliationRequestV1['disposition'],
+  overrides: Readonly<Record<string, unknown>> = {},
+): DormantMainnetFinancialActionSourceCompletionV1 {
+  const maximumAttempts =
+    DORMANT_MAINNET_FINANCIAL_ACTION_ATTEMPT_POLICY[claim.queue].maximumAttempts;
+  const isRetry =
+    requestedDisposition === 'RETRY_PRE_BROADCAST_REVIEW_ONLY' ||
+    requestedDisposition === 'RETRY_RECONCILIATION_ONLY';
+  const attemptLimitReached = isRetry && claim.attempt >= maximumAttempts;
+  const completionDisposition = attemptLimitReached
+    ? 'ATTEMPT_LIMIT_REACHED'
+    : requestedDisposition === 'RETRY_PRE_BROADCAST_REVIEW_ONLY'
+      ? 'RELEASE_PRE_BROADCAST_ONLY'
+      : requestedDisposition === 'RETRY_RECONCILIATION_ONLY'
+        ? 'RELEASE_RECONCILIATION_ONLY'
+        : requestedDisposition === 'PRE_BROADCAST_TERMINAL_FAILURE'
+          ? 'TERMINAL_FAILURE'
+          : requestedDisposition === 'MANUAL_REVIEW_REQUIRED'
+            ? 'MANUAL_REVIEW_REQUIRED'
+            : 'COMPLETED';
+  const resultingJobStatus =
+    completionDisposition === 'COMPLETED'
+      ? 'COMPLETED'
+      : completionDisposition === 'RELEASE_PRE_BROADCAST_ONLY' ||
+          completionDisposition === 'RELEASE_RECONCILIATION_ONLY'
+        ? 'READY'
+        : 'MANUAL_REVIEW';
+  return frozen({
+    schedulerVersion: DORMANT_MAINNET_FINANCIAL_ACTION_SCHEDULER_VERSION,
+    use: DORMANT_MAINNET_FINANCIAL_ACTION_SOURCE_COMPLETION_USE,
+    mayPersist: false,
+    ...AUTHORITY_DENIAL,
+    recordOutcome: 'RECORDED',
+    queue: claim.queue,
+    jobId: claim.job.jobId,
+    accountId: claim.job.accountId,
+    intentId: claim.job.intentId,
+    lifecycleRevision: claim.job.lifecycleRevision,
+    lifecycleSnapshotSha256: claim.job.lifecycleSnapshotSha256,
+    attempt: claim.attempt,
+    maximumAttempts,
+    leaseId: claim.leaseId,
+    fencingToken: claim.fencingToken,
+    requestedDisposition,
+    completionDisposition,
+    resultingJobStatus,
+    completedAt: NOW,
+    ...overrides,
+  }) as DormantMainnetFinancialActionSourceCompletionV1;
+}
+
 class IssuingSource implements DormantMainnetFinancialActionTwoQueueClaimSourcePort {
   readonly schedulerVersion = DORMANT_MAINNET_FINANCIAL_ACTION_SCHEDULER_VERSION;
   preBroadcastClaim: unknown = preBroadcastSourceClaim();
   reconciliationClaim: unknown = reconciliationSourceClaim();
+  completionOverrides: Readonly<Record<string, unknown>> = {};
+  completionCalls = 0;
   readonly #issued = new WeakMap<
     object,
     Readonly<{
@@ -159,22 +220,44 @@ class IssuingSource implements DormantMainnetFinancialActionTwoQueueClaimSourceP
       request:
         | ClaimDormantMainnetFinancialActionPreBroadcastRequestV1
         | ClaimDormantMainnetFinancialActionReconciliationRequestV1;
+      claim: unknown;
+    }>
+  >();
+  readonly #completed = new WeakMap<
+    object,
+    Readonly<{
+      sourceClaimCapability: object;
+      claimRequest:
+        | ClaimDormantMainnetFinancialActionPreBroadcastRequestV1
+        | ClaimDormantMainnetFinancialActionReconciliationRequestV1;
+      request:
+        | CompleteDormantMainnetFinancialActionPreBroadcastRequestV1
+        | CompleteDormantMainnetFinancialActionReconciliationRequestV1;
+      result: DormantMainnetFinancialActionSourceCompletionV1;
     }>
   >();
 
   claimPreBroadcast(
     request: ClaimDormantMainnetFinancialActionPreBroadcastRequestV1,
   ): Promise<unknown> {
+    if (this.preBroadcastClaim === null) return Promise.resolve(null);
     const capability = frozen({ sourceClaim: true });
-    this.#issued.set(capability, frozen({ queue: 'PRE_BROADCAST', request }));
+    this.#issued.set(
+      capability,
+      frozen({ queue: 'PRE_BROADCAST', request, claim: this.preBroadcastClaim }),
+    );
     return Promise.resolve(capability);
   }
 
   claimReconciliation(
     request: ClaimDormantMainnetFinancialActionReconciliationRequestV1,
   ): Promise<unknown> {
+    if (this.reconciliationClaim === null) return Promise.resolve(null);
     const capability = frozen({ sourceClaim: true });
-    this.#issued.set(capability, frozen({ queue: 'RECONCILIATION', request }));
+    this.#issued.set(
+      capability,
+      frozen({ queue: 'RECONCILIATION', request, claim: this.reconciliationClaim }),
+    );
     return Promise.resolve(capability);
   }
 
@@ -185,7 +268,7 @@ class IssuingSource implements DormantMainnetFinancialActionTwoQueueClaimSourceP
     if (typeof capability !== 'object' || capability === null) return null;
     const issued = this.#issued.get(capability);
     return issued?.queue === 'PRE_BROADCAST' && issued.request === request
-      ? (this.preBroadcastClaim as DormantMainnetFinancialActionPreBroadcastSourceClaimV1)
+      ? (issued.claim as DormantMainnetFinancialActionPreBroadcastSourceClaimV1)
       : null;
   }
 
@@ -196,8 +279,110 @@ class IssuingSource implements DormantMainnetFinancialActionTwoQueueClaimSourceP
     if (typeof capability !== 'object' || capability === null) return null;
     const issued = this.#issued.get(capability);
     return issued?.queue === 'RECONCILIATION' && issued.request === request
-      ? (this.reconciliationClaim as DormantMainnetFinancialActionReconciliationSourceClaimV1)
+      ? (issued.claim as DormantMainnetFinancialActionReconciliationSourceClaimV1)
       : null;
+  }
+
+  completePreBroadcast(
+    sourceClaimCapability: unknown,
+    claimRequest: ClaimDormantMainnetFinancialActionPreBroadcastRequestV1,
+    request: CompleteDormantMainnetFinancialActionPreBroadcastRequestV1,
+  ): Promise<unknown> {
+    return this.complete('PRE_BROADCAST', sourceClaimCapability, claimRequest, request);
+  }
+
+  completeReconciliation(
+    sourceClaimCapability: unknown,
+    claimRequest: ClaimDormantMainnetFinancialActionReconciliationRequestV1,
+    request: CompleteDormantMainnetFinancialActionReconciliationRequestV1,
+  ): Promise<unknown> {
+    return this.complete('RECONCILIATION', sourceClaimCapability, claimRequest, request);
+  }
+
+  private complete(
+    queue: 'PRE_BROADCAST' | 'RECONCILIATION',
+    sourceClaimCapability: unknown,
+    claimRequest:
+      | ClaimDormantMainnetFinancialActionPreBroadcastRequestV1
+      | ClaimDormantMainnetFinancialActionReconciliationRequestV1,
+    request:
+      | CompleteDormantMainnetFinancialActionPreBroadcastRequestV1
+      | CompleteDormantMainnetFinancialActionReconciliationRequestV1,
+  ): Promise<unknown> {
+    this.completionCalls += 1;
+    if (typeof sourceClaimCapability !== 'object' || sourceClaimCapability === null)
+      return Promise.reject(new Error('invalid source capability'));
+    const issued = this.#issued.get(sourceClaimCapability);
+    if (issued?.queue !== queue || issued.request !== claimRequest)
+      return Promise.reject(new Error('invalid source claim'));
+    const capability = frozen({ sourceCompletion: true });
+    const result = sourceCompletion(
+      issued.claim as
+        | DormantMainnetFinancialActionPreBroadcastSourceClaimV1
+        | DormantMainnetFinancialActionReconciliationSourceClaimV1,
+      request.disposition,
+      this.completionOverrides,
+    );
+    this.#completed.set(
+      capability,
+      frozen({ sourceClaimCapability, claimRequest, request, result }),
+    );
+    return Promise.resolve(capability);
+  }
+
+  reviewPreBroadcastCompletion(
+    capability: unknown,
+    sourceClaimCapability: unknown,
+    claimRequest: ClaimDormantMainnetFinancialActionPreBroadcastRequestV1,
+    request: CompleteDormantMainnetFinancialActionPreBroadcastRequestV1,
+  ): DormantMainnetFinancialActionSourceCompletionV1 | null {
+    return this.reviewCompletion(
+      'PRE_BROADCAST',
+      capability,
+      sourceClaimCapability,
+      claimRequest,
+      request,
+    );
+  }
+
+  reviewReconciliationCompletion(
+    capability: unknown,
+    sourceClaimCapability: unknown,
+    claimRequest: ClaimDormantMainnetFinancialActionReconciliationRequestV1,
+    request: CompleteDormantMainnetFinancialActionReconciliationRequestV1,
+  ): DormantMainnetFinancialActionSourceCompletionV1 | null {
+    return this.reviewCompletion(
+      'RECONCILIATION',
+      capability,
+      sourceClaimCapability,
+      claimRequest,
+      request,
+    );
+  }
+
+  private reviewCompletion(
+    queue: 'PRE_BROADCAST' | 'RECONCILIATION',
+    capability: unknown,
+    sourceClaimCapability: unknown,
+    claimRequest:
+      | ClaimDormantMainnetFinancialActionPreBroadcastRequestV1
+      | ClaimDormantMainnetFinancialActionReconciliationRequestV1,
+    request:
+      | CompleteDormantMainnetFinancialActionPreBroadcastRequestV1
+      | CompleteDormantMainnetFinancialActionReconciliationRequestV1,
+  ): DormantMainnetFinancialActionSourceCompletionV1 | null {
+    if (typeof capability !== 'object' || capability === null) return null;
+    const completed = this.#completed.get(capability);
+    if (
+      completed === undefined ||
+      completed.result.queue !== queue ||
+      completed.sourceClaimCapability !== sourceClaimCapability ||
+      completed.claimRequest !== claimRequest ||
+      completed.request !== request
+    )
+      return null;
+    this.#completed.delete(capability);
+    return completed.result;
   }
 }
 
@@ -288,8 +473,34 @@ async function expectFailure(
 }
 
 describe('DormantMainnetFinancialActionTwoQueueScheduler', () => {
+  it('returns exact null for an empty durable queue without issuing a capability', async () => {
+    const source = new IssuingSource();
+    source.preBroadcastClaim = null;
+    source.reconciliationClaim = null;
+    const { scheduler } = schedulerFixture(source);
+    const preBroadcast = preBroadcastRequest();
+    const reconciliation = reconciliationRequest();
+
+    await expect(scheduler.claimPreBroadcast(preBroadcast)).resolves.toBeNull();
+    await expect(scheduler.claimReconciliation(reconciliation)).resolves.toBeNull();
+    expect(scheduler.reviewPreBroadcastClaim(null, preBroadcast)).toBeNull();
+    expect(scheduler.reviewReconciliationClaim(null, reconciliation)).toBeNull();
+    await expectFailure(
+      scheduler.completePreBroadcast(preBroadcastCompletionRequest(null, preBroadcast)),
+      'CLAIM_UNAVAILABLE',
+    );
+    expect(source.completionCalls).toBe(0);
+
+    const malformedSource = new IssuingSource();
+    malformedSource.preBroadcastClaim = undefined;
+    await expectFailure(
+      schedulerFixture(malformedSource).scheduler.claimPreBroadcast(preBroadcastRequest()),
+      'CLAIM_UNAVAILABLE',
+    );
+  });
+
   it('issues an opaque pre-broadcast lease and completes it once without gaining authority', async () => {
-    const { scheduler } = schedulerFixture();
+    const { scheduler, source } = schedulerFixture();
     const claimRequest = preBroadcastRequest();
     const claimCapability = await scheduler.claimPreBroadcast(claimRequest);
     const claim = scheduler.reviewPreBroadcastClaim(claimCapability, claimRequest);
@@ -342,7 +553,9 @@ describe('DormantMainnetFinancialActionTwoQueueScheduler', () => {
     });
     expect(scheduler.reviewCompletion(completionCapability, completionRequest)).toBeNull();
     expect(JSON.stringify(result)).not.toContain(RAW_SIGNED_TRANSACTION);
+    expect(source.completionCalls).toBe(1);
     await expectFailure(scheduler.completePreBroadcast(completionRequest), 'CLAIM_UNAVAILABLE');
+    expect(source.completionCalls).toBe(1);
   });
 
   it('keeps UNKNOWN and every transaction-bound retry in reconciliation only', async () => {
@@ -400,6 +613,29 @@ describe('DormantMainnetFinancialActionTwoQueueScheduler', () => {
       'CLAIM_UNAVAILABLE',
     );
   });
+
+  it.each(['BORROW', 'REPAY'])('rejects unsupported scheduled action %s', async (action) => {
+    const source = new IssuingSource();
+    source.preBroadcastClaim = preBroadcastSourceClaim(preBroadcastJob({ action }));
+    await expectFailure(
+      schedulerFixture(source).scheduler.claimPreBroadcast(preBroadcastRequest()),
+      'CLAIM_UNAVAILABLE',
+    );
+  });
+
+  it.each(['intentRecordFingerprintSha256', 'lifecycleSnapshotSha256'] as const)(
+    'rejects an all-zero %s from the durable source',
+    async (field) => {
+      const source = new IssuingSource();
+      source.preBroadcastClaim = preBroadcastSourceClaim(
+        preBroadcastJob({ [field]: '0'.repeat(64) }),
+      );
+      await expectFailure(
+        schedulerFixture(source).scheduler.claimPreBroadcast(preBroadcastRequest()),
+        'CLAIM_UNAVAILABLE',
+      );
+    },
+  );
 
   it.each([
     reconciliationJob({
@@ -701,6 +937,66 @@ describe('DormantMainnetFinancialActionTwoQueueScheduler', () => {
       'CLAIM_UNAVAILABLE',
     );
     expect(thenGetterRead).toBe(false);
+
+    let promiseThenGetterRead = false;
+    const nativePromiseWithAccessor = Object.defineProperty(
+      Promise.resolve(frozen({ sourceClaim: true })),
+      'then',
+      {
+        get(): unknown {
+          promiseThenGetterRead = true;
+          return undefined;
+        },
+      },
+    );
+    const promiseAccessorSource = new IssuingSource();
+    promiseAccessorSource.claimPreBroadcast = (() => nativePromiseWithAccessor) as never;
+    await expectFailure(
+      schedulerFixture(promiseAccessorSource).scheduler.claimPreBroadcast(preBroadcastRequest()),
+      'CLAIM_UNAVAILABLE',
+    );
+    expect(promiseThenGetterRead).toBe(false);
+  });
+
+  it.each([
+    ['queue', { queue: 'RECONCILIATION' }],
+    ['job', { jobId: '55555555-5555-4555-8555-555555555555' }],
+    ['account', { accountId: '55555555-5555-4555-8555-555555555555' }],
+    ['intent', { intentId: '55555555-5555-4555-8555-555555555555' }],
+    ['revision', { lifecycleRevision: '2' }],
+    ['snapshot', { lifecycleSnapshotSha256: 'c'.repeat(64) }],
+    ['attempt', { attempt: 2 }],
+    ['maximum attempts', { maximumAttempts: 12 }],
+    ['lease', { leaseId: '55555555-5555-4555-8555-555555555555' }],
+    ['fence', { fencingToken: '8' }],
+    ['requested disposition', { requestedDisposition: 'PRE_BROADCAST_REVIEW_COMPLETED' }],
+    ['completion disposition', { completionDisposition: 'COMPLETED' }],
+    ['resulting status', { resultingJobStatus: 'COMPLETED' }],
+    ['database timestamp', { completedAt: isoAfter(5 * 60_000) }],
+    ['authority', { apiMayBroadcast: true }],
+    ['extra raw material', { signedTransaction: RAW_SIGNED_TRANSACTION }],
+  ])('rejects a durable completion that does not cross-bind %s', async (_name, overrides) => {
+    const source = new IssuingSource();
+    source.completionOverrides = overrides;
+    const { scheduler } = schedulerFixture(source);
+    const claimRequest = preBroadcastRequest();
+    const claimCapability = await scheduler.claimPreBroadcast(claimRequest);
+    const request = preBroadcastCompletionRequest(claimCapability, claimRequest);
+    let failure: unknown;
+    try {
+      await scheduler.completePreBroadcast(request);
+    } catch (error) {
+      failure = error;
+    }
+    expect(failure).toMatchObject({
+      name: 'DormantMainnetFinancialActionSchedulerUnavailableError',
+      code: 'CLAIM_UNAVAILABLE',
+      message: 'Dormant mainnet financial-action scheduled work is unavailable.',
+    });
+    expect(JSON.stringify(failure)).not.toContain(RAW_SIGNED_TRANSACTION);
+    expect(source.completionCalls).toBe(1);
+    await expectFailure(scheduler.completePreBroadcast(request), 'CLAIM_UNAVAILABLE');
+    expect(source.completionCalls).toBe(1);
   });
 
   it.each([
@@ -741,6 +1037,7 @@ describe('DormantMainnetFinancialActionTwoQueueScheduler', () => {
       'DORMANT_MAINNET_FINANCIAL_ACTION_RECONCILIATION_COMPLETION_USE',
       'DORMANT_MAINNET_FINANCIAL_ACTION_SCHEDULER_VERSION',
       'DORMANT_MAINNET_FINANCIAL_ACTION_SOURCE_CLAIM_USE',
+      'DORMANT_MAINNET_FINANCIAL_ACTION_SOURCE_COMPLETION_USE',
     ]);
   });
 });

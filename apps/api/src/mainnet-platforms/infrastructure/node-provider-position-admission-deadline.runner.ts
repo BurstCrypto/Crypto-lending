@@ -25,10 +25,9 @@ const EVENT_TARGET_REMOVE_EVENT_LISTENER = Object.getOwnPropertyDescriptor(
   'removeEventListener',
 )?.value as EventTarget['removeEventListener'] | undefined;
 const DATE_GET_TIME = Object.getOwnPropertyDescriptor(Date.prototype, 'getTime')?.value as
-  | ((this: Date) => number)
-  | undefined;
-const DATE_TO_ISO_STRING = Object.getOwnPropertyDescriptor(Date.prototype, 'toISOString')
-  ?.value as ((this: Date) => string) | undefined;
+  ((this: Date) => number) | undefined;
+const DATE_TO_ISO_STRING = Object.getOwnPropertyDescriptor(Date.prototype, 'toISOString')?.value as
+  ((this: Date) => string) | undefined;
 const DATE_PARSE = Date.parse;
 const SYSTEM_SET_TIMEOUT = globalThis.setTimeout;
 const SYSTEM_CLEAR_TIMEOUT = globalThis.clearTimeout;
@@ -222,9 +221,7 @@ function parseRunRequest(value: unknown): ParsedDeadlineRunRequest {
  * result immediately, but this method deliberately waits for already-started
  * work to settle before returning so physical work cannot escape its caller.
  */
-export class NodeProviderPositionAdmissionDeadlineRunner
-  implements ProviderPositionAdmissionDeadlineRunner
-{
+export class NodeProviderPositionAdmissionDeadlineRunner implements ProviderPositionAdmissionDeadlineRunner {
   private readonly readClock!: () => unknown;
   private readonly scheduleTimer!: (callback: () => void, milliseconds: number) => unknown;
   private readonly cancelTimer!: (handle: unknown) => void;
@@ -236,7 +233,11 @@ export class NodeProviderPositionAdmissionDeadlineRunner
     const now = stableDataMember(clock, 'now');
     const schedule = stableDataMember(timerRuntime, 'schedule');
     const cancel = stableDataMember(timerRuntime, 'cancel');
-    if (typeof now !== 'function' || typeof schedule !== 'function' || typeof cancel !== 'function') {
+    if (
+      typeof now !== 'function' ||
+      typeof schedule !== 'function' ||
+      typeof cancel !== 'function'
+    ) {
       return fail('INVALID_CONFIGURATION');
     }
     this.readClock = () => Reflect.apply(now, clock, []);

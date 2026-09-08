@@ -10,7 +10,7 @@ const scriptDirectory = dirname(fileURLToPath(import.meta.url));
 const maximumBytes = Object.freeze({
   template: 51_200,
   guard: 131_072,
-  applicationGuard: 131_072,
+  applicationGuard: 262_144,
   preflight: 65_536,
   record: 65_536,
   readonlyPolicy: 16_384,

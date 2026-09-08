@@ -5,10 +5,7 @@ import { Pool } from 'pg';
 
 import { MigrationRunner } from '../../src/infrastructure/database/migration-runner.service';
 import { PostgresService } from '../../src/infrastructure/database/postgres.service';
-import {
-  createLedgerFeeAdjustmentIntegrityTestSchemaMigrationV0013,
-  DATABASE_TEST_SCHEMA_MIGRATION_LIST,
-} from '../../src/infrastructure/database/migrations';
+import { DATABASE_TEST_SCHEMA_MIGRATION_LIST } from '../../src/infrastructure/database/migrations';
 import { JobOutboxRepository } from '../../src/infrastructure/outbox/job-outbox.repository';
 import { assertLocalPrincipalFixture } from './local-principal-fixture-guard';
 
@@ -510,7 +507,7 @@ describeWithPostgres('KAN-186 yield operation PostgreSQL controls', () => {
     ).rejects.toMatchObject({ code: '55000' });
     await expect(runner.assertUpToDate()).resolves.toBeUndefined();
     await expect(
-      operationPool.query(createLedgerFeeAdjustmentIntegrityTestSchemaMigrationV0013.verifySql!),
+      operationPool.query(DATABASE_TEST_SCHEMA_MIGRATION_LIST.at(-1)!.verifySql!),
     ).resolves.toMatchObject({ rows: [{ valid: true }] });
   });
 });

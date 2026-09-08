@@ -5,6 +5,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { TextDecoder } from 'node:util';
 
 import { readSecureLocalFile } from '../shared/read-secure-local-file.mjs';
+import { RECOVERY_SCHEDULER_ARTIFACT_SHA256 } from './dormant-mainnet-action-recovery-inventory.mjs';
 
 export const REPOSITORY_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 export const ACTION_BOUNDARY_PATH =
@@ -98,67 +99,67 @@ export const REVIEWED_ACTION_LIFECYCLE_SPEC_SHA256 =
 export const REVIEWED_ACTION_LIFECYCLE_DURABLE_PORT_SHA256 =
   'aca652cb9770cdfafddf886fb14b52cbc216c4ce8c9041c64577c83df1490142';
 export const REVIEWED_ACTION_LIFECYCLE_POSTGRES_ADAPTER_SHA256 =
-  'f9838bddf9ff23573fa2fe920d28fbf9a84d16ffeda74446faea33ecc292d872';
+  'b2a21481711153b4dd9482d18a0f9a0a1b391c142772f558523545e9fcd73c66';
 export const REVIEWED_ACTION_LIFECYCLE_POSTGRES_ADAPTER_SPEC_SHA256 =
-  '04ad605487eb8eee7375e59077f0daec37ba6308e2979c3be83c38af3f8d88c0';
+  '089acbe297762e20d5a3ee065d36642dd802f7997660fe2340203de6b23d84e1';
 export const REVIEWED_ACTION_LIFECYCLE_POSTGRES_ADAPTER_INTEGRATION_SPEC_SHA256 =
   'a3d584df8529a6f15480d0cc469576236825ea26ba436eea8c632619d8854f0e';
 export const REVIEWED_ACTION_LIFECYCLE_MIGRATION_SHA256 =
   'c3840f3b3cd7de0e7dbf159c335fbe0784e55e81c936defdf618c9b0092ffa27';
 export const REVIEWED_ACTION_LIFECYCLE_MIGRATION_SPEC_SHA256 =
-  'b5b558323cf7d6fe425c5a178a0793311487275cde7cfafc8995cbce0ec15e93';
+  'c14640d07c43ec41e5cda394f1f1c1cfccb5cb227541fce55a230cc7a94545e9';
 export const REVIEWED_ACTION_WALLET_IDENTITY_BINDING_MIGRATION_SHA256 =
   '11fd11a882e81f417d0efdfbbb7da3c8bed0171ed9aec420068772e8c56a75a7';
 export const REVIEWED_ACTION_WALLET_IDENTITY_BINDING_MIGRATION_SPEC_SHA256 =
-  '2b26f2cdfc56518ffe70e4c5825f525fa774b8167aff77e7e5d17580a4ea0ad1';
+  '389e1b6c28265e841ec9b3afcce9f80bd103fe5cc630592b974632058fcc4c74';
 export const REVIEWED_ACTION_WALLET_IDENTITY_BINDING_MIGRATION_INTEGRATION_SPEC_SHA256 =
   '7aa0e97a3563468bd1c520a80876ee0f7c12939f13b3a8021d9e6bb44b49d31b';
 export const REVIEWED_DATABASE_MIGRATION_INDEX_SHA256 =
-  '74d3ba9cdd354954b8577ccfa1474e7b44f7db834186e352280e8f26b9e0d74a';
+  '3ceea27f4922a0e72022d6aac83504083c96b683a1b711aa37ce91acced4f35f';
 export const REVIEWED_ACTION_FINALITY_EVIDENCE_SOURCE_PORT_SHA256 =
   '27e42722799ec5e39d93b8ad010866f3dfec780d5d0511641faf2558633b3fa0';
 export const REVIEWED_ACTION_FINALITY_EVIDENCE_SOURCE_PORT_SPEC_SHA256 =
   'c5f845ad069803571e863b1c27000e297c027954cab38ceea09163d03dc47d73';
 export const REVIEWED_ACTION_FINALITY_EVIDENCE_PRODUCER_SHA256 =
-  '4e66132b1e5e84db60e06383f7d88dcb48d3a7f6982a6c4e569b480be2914ad5';
+  '2bb77f9ed9533cffedff794c7c8b58523d38b89b1afad6115fc342285a05560e';
 export const REVIEWED_ACTION_FINALITY_EVIDENCE_PRODUCER_SPEC_SHA256 =
-  '7270c0ea47201c2713e3e55057bd729fa4fd4fbe934ad0e64e400639414e8eb0';
+  'd3743b2eb3aea2a855b95f1ac9534612c6aa37e46a7fde318c9dc0df4908e3c5';
 export const REVIEWED_ACTION_FINALITY_SIDECAR_DURABLE_PORT_SHA256 =
-  '71279eb792fcdcf90ac03f8a11276d2f9a678128c50d65457e3c01832c1b7e61';
+  'aa54e9037fe7463fe00bbaf7d4caca19d698c2b5ac54e67a236202a24f0deebc';
 export const REVIEWED_ACTION_FINALITY_SIDECAR_DURABLE_PORT_SPEC_SHA256 =
   'aff0a8af77d2f8d2f3234a4baf1be1b18dbd325d36fd8949789830afed91a909';
 export const REVIEWED_ACTION_FINALITY_SIDECAR_POSTGRES_ADAPTER_SHA256 =
-  '0b8b46998701f1c921b83e83416541d040daba4a7865c39315a845db338cb3be';
+  'b62790bf0ed61360257f9a30f315c9a244c7009ad88abef8afd9620559690c8d';
 export const REVIEWED_ACTION_FINALITY_SIDECAR_POSTGRES_ADAPTER_SPEC_SHA256 =
-  '40d421a7700d9642e1714916348796dddb2a65437b117bd1d8d5cd7929d52450';
+  '42994e98702034cb4844e8da552fd892f0f19c9fc86cfd5c5c6f8f3fc23fd139';
 export const REVIEWED_ACTION_AUTHENTICATED_FINALITY_MIGRATION_SHA256 =
   'f0420669c0fcac4dcba8795851016bd8cc008bff4a56ab39d022ed0da3d110bd';
 export const REVIEWED_ACTION_AUTHENTICATED_FINALITY_MIGRATION_SPEC_SHA256 =
-  '140102f96f30d0349817c3317a7e3b2b0c678a7d5f7a62ca26e0645eb8b782b8';
+  'db27ef0514437f58d6ddea8085f642103d809a0e557cb2653a8ceb58f60bdde2';
 export const REVIEWED_ACTION_AUTHENTICATED_FINALITY_MIGRATION_INTEGRATION_SPEC_SHA256 =
   'f49767540e5cc352473fd0a8c595d351eb5688c02410a932bf17e263acb75673';
 export const REVIEWED_ACTION_FINALITY_PREREQUISITE_ISSUER_PORT_SHA256 =
-  'cc9237081dbb88a9459465e49b5a077f443fd8ae2e52cd5b5e29e8451f4c5c30';
+  'f4ab74832dd8ff63608989129c728a0f66d789fdc784338f5661e72a6acefdda';
 export const REVIEWED_ACTION_FINALITY_PREREQUISITE_POSTGRES_ADAPTER_SHA256 =
-  'abf193132225cbea4ad7ae54ba33912694f75f960b540560cac92ba5c0d52ea8';
+  'ba81fa57285644e5976094b5bf831486a5aaa276a318452db9c5e4b240fa98e1';
 export const REVIEWED_ACTION_FINALITY_PREREQUISITE_POSTGRES_ADAPTER_SPEC_SHA256 =
-  '43ad27fbb5a662db28e71f847446d265d35ffbb485aba20213d812f3461b7ffa';
+  '9224299e2df17f177ec6a1f6b46898a4fcff21464a69aad2af2255713b182f63';
 export const REVIEWED_ACTION_FINALITY_WALLET_READER_SHA256 =
-  'd8531f14274744cf94e5db487c17b5d61bf87b584e41d3b0a6ca3538463ce7ef';
+  'e0e03424b4f8e4735541c3d0649cda89c3d0d7abccef8e6eb1298cda07bc73a8';
 export const REVIEWED_ACTION_FINALITY_WALLET_READER_SPEC_SHA256 =
-  'ffde15529cc4e4525b37075873adbcec97bb3fadc1cdbb0ab3131d3ad570bace';
+  'c72cc2b093fc3bbeb8f5fbcfd88c270e57db7617e6c4f85afe8a11c504a4349b';
 export const REVIEWED_ACTION_FINALITY_PREREQUISITE_MIGRATION_SHA256 =
   'ee6fb9a68cb3766a5a146ee9a435895ce13c5645976a4a0df9761c88e3c91bcb';
 export const REVIEWED_ACTION_FINALITY_PREREQUISITE_MIGRATION_SPEC_SHA256 =
-  'a014c28bcbb20521af30de9bc5e378a385693cfbf2178e0fe9f414af45122501';
+  'e94876618f421970d26e8385a292e42f1924529b93dc00574144e416a2488391';
 export const REVIEWED_ACTION_FINALITY_PREREQUISITE_MIGRATION_INTEGRATION_SPEC_SHA256 =
   'c2f93d2974e5ffd81ac7894798edd4dc5af77f73ae14d4ed3d9df3617af1d073';
 export const REVIEWED_ACTION_ATOMIC_FINALITY_MIGRATION_SHA256 =
   '174ac457309a3ef938c72f93ba2158b7e3887ac40560db0fa92a5bba5e4e439c';
 export const REVIEWED_ACTION_ATOMIC_FINALITY_MIGRATION_SPEC_SHA256 =
-  '4223b5def362996df6e24dab026e62d1ac109eccfa4bb92cfb0b8d54543770e4';
+  'fbaf4c633c1a66f9248a5566bbafa0184a47f533f39764d55ea740ae86fbb326';
 export const REVIEWED_ACTION_ATOMIC_FINALITY_MIGRATION_INTEGRATION_SPEC_SHA256 =
-  'df82a07a912f4c214f4e38f6bd1b5ab2ab8a846b2704c5814ffd316222999506';
+  '5a572918e6c0802852760a4235e9476f792a47f1c9d046fd5bccfa335dde66c6';
 export const ACTION_BOUNDARY_INPUT_ERROR =
   'Dormant mainnet action boundary inputs must be stable, single-link regular UTF-8 files at canonical paths inside the repository and within the reviewed size limits.';
 
@@ -201,13 +202,21 @@ const EXPECTED_POSTGRES_ADAPTER_IMPORTS = Object.freeze([
   '../../wallets/infrastructure/crypto/wallet-registration-crypto',
   '../domain/dormant-mainnet-financial-action',
   '../application/ports/dormant-mainnet-financial-action-lifecycle-durable.port',
+  '../application/ports/dormant-mainnet-financial-action-signed-submission-verifier.port',
+  '../application/ports/dormant-mainnet-financial-action-verified-submission-binder.port',
+  '../domain/mainnet-financial-action-signed-verification-digest',
+  './mainnet-financial-action-write-manifest',
 ]);
 const EXPECTED_POSTGRES_ADAPTER_SPEC_IMPORTS = Object.freeze([
   '../../blockchain/domain/supported-asset-registry',
   '../../infrastructure/database/postgres.service',
   '../../wallets/infrastructure/crypto/wallet-registration-crypto',
   '../domain/dormant-mainnet-financial-action',
+  '../domain/mainnet-financial-action-signed-verification-digest',
   '../application/ports/dormant-mainnet-financial-action-lifecycle-durable.port',
+  '../application/ports/dormant-mainnet-financial-action-signed-submission-verifier.port',
+  '../application/ports/dormant-mainnet-financial-action-verified-submission-binder.port',
+  './mainnet-financial-action-write-manifest',
   './postgres-dormant-mainnet-financial-action-lifecycle-durable.adapter',
 ]);
 const EXPECTED_POSTGRES_ADAPTER_INTEGRATION_SPEC_IMPORTS = Object.freeze([
@@ -356,8 +365,6 @@ const EXPECTED_FINALITY_PREREQUISITE_ADAPTER_SPEC_IMPORTS = Object.freeze([
 const EXPECTED_FINALITY_WALLET_READER_IMPORTS = Object.freeze([
   'node:util/types',
   '../../accounts/domain/account-profile',
-  '../../blockchain/domain/supported-asset-registry',
-  '../../wallets/application/ports/wallet-registration-repository.port',
   '../../wallets/application/wallet-registration.service',
   '../../wallets/domain/wallet-identity',
   '../application/ports/mainnet-financial-action-finality-prerequisite-issuer.port',
@@ -368,6 +375,7 @@ const EXPECTED_FINALITY_WALLET_READER_SPEC_IMPORTS = Object.freeze([
   '../../blockchain/domain/supported-asset-registry',
   '../../wallets/application/ports/wallet-registration-repository.port',
   '../../wallets/application/wallet-registration.service',
+  '../../wallets/domain/wallet-identity',
   '../../wallets/domain/wallet-ownership-proof',
   '../../wallets/infrastructure/config/wallet-registration.config',
   '../../wallets/infrastructure/crypto/wallet-registration-crypto',
@@ -493,16 +501,18 @@ const EXPECTED_FINALITY_SIDECAR_PORT_EXPORTS = Object.freeze([
   'ReadMainnetFinancialActionEffectiveSafetyStateRequestV1',
   'RecordMainnetFinancialActionPostFinalityReviewRequestV1',
   'DormantMainnetFinancialActionFinalitySidecarRequestV1',
+  'DormantMainnetFinancialActionFinalityPersistenceRequestV1',
   'DormantMainnetFinancialActionAdmissionDatabaseConfirmedResultV1',
   'DormantMainnetFinancialActionEffectiveSafetyDatabaseConfirmedResultV1',
   'DormantMainnetFinancialActionFinalityDatabaseOutcomeUnknownV1',
   'DormantMainnetFinancialActionFinalitySidecarResultV1',
-  'DormantMainnetFinancialActionFinalitySidecarDurablePort',
+  'DormantMainnetFinancialActionEffectiveSafetyReaderPort',
+  'DormantMainnetFinancialActionFinalityPersistencePort',
 ]);
 const EXPECTED_FINALITY_SIDECAR_ADAPTER_EXPORTS = Object.freeze([
   'DormantMainnetFinancialActionFinalitySidecarUnavailableError',
   'DORMANT_MAINNET_FINANCIAL_ACTION_FINALITY_SIDECAR_UNAVAILABLE',
-  'PostgresDormantMainnetFinancialActionFinalitySidecarAdapter',
+  'PostgresDormantMainnetFinancialActionEffectiveSafetyReaderAdapter',
 ]);
 const EXPECTED_AUTHENTICATED_FINALITY_MIGRATION_EXPORTS = Object.freeze([
   'createMainnetFinancialActionAuthenticatedFinalityMigration',
@@ -523,8 +533,8 @@ const EXPECTED_FINALITY_PREREQUISITE_ISSUER_PORT_EXPORTS = Object.freeze([
   'MainnetFinancialActionReconciliationPrerequisiteIssuanceV1',
   'MainnetFinancialActionPostFinalityPrerequisiteIssuanceV1',
   'MainnetFinancialActionFinalityPrerequisiteIssuanceV1',
-  'ReadMainnetFinancialActionFinalityWalletRequestV1',
-  'MainnetFinancialActionFinalityWalletResultV1',
+  'ReadMainnetFinancialActionFinalityWalletRequestV2',
+  'MainnetFinancialActionFinalityWalletResultV2',
   'MainnetFinancialActionFinalityWalletReaderPort',
   'MainnetFinancialActionFinalityPrerequisiteIssuerClock',
   'MainnetFinancialActionFinalityPrerequisiteIssuerPort',
@@ -563,6 +573,7 @@ const EXPECTED_WALLET_IDENTITY_BINDING_MIGRATION_EXPORTS = Object.freeze([
 const EXPECTED_POSTGRES_ADAPTER_SQL_CONSTANTS = Object.freeze([
   'PREPARE_SQL',
   'BIND_SUBMISSION_SQL',
+  'BIND_VERIFIED_SUBMISSION_SQL',
   'RECORD_BROADCAST_SQL',
   'RECORD_RECONCILIATION_SQL',
   'READ_SQL',
@@ -570,6 +581,7 @@ const EXPECTED_POSTGRES_ADAPTER_SQL_CONSTANTS = Object.freeze([
 const EXPECTED_POSTGRES_ADAPTER_SQL_FUNCTIONS = Object.freeze([
   'prepare_mainnet_financial_action_lifecycle_v2',
   'bind_mainnet_financial_action_submission',
+  'bind_verified_mainnet_financial_action_submission_v2',
   'record_mainnet_financial_action_broadcast_observation',
   'record_mainnet_financial_action_reconciliation_observation',
   'read_mainnet_financial_action_lifecycle',
@@ -580,8 +592,8 @@ const EXPECTED_FINALITY_SIDECAR_SQL_CONSTANTS = Object.freeze([
   'READ_EFFECTIVE_SAFETY_SQL',
 ]);
 const EXPECTED_FINALITY_SIDECAR_SQL_FUNCTIONS = Object.freeze([
-  'record_authenticated_mainnet_financial_action_reconciliation_v2',
-  'record_mainnet_financial_action_post_finality_review_v2',
+  'record_authenticated_mainnet_financial_action_reconciliation_v3',
+  'record_mainnet_financial_action_post_finality_review_v3',
   'read_mainnet_financial_action_effective_safety_state_v1',
 ]);
 const EXPECTED_AUTHENTICATED_FINALITY_TABLES = Object.freeze([
@@ -629,6 +641,7 @@ const EXPECTED_PRODUCTION_MIGRATION_TAIL = Object.freeze([
   'createMainnetFinancialActionAuthenticatedFinalityMigrationV0035',
   'createMainnetFinancialActionFinalityPrerequisiteReadMigrationV0036',
   'createMainnetFinancialActionAtomicFinalityPersistenceMigrationV0037',
+  'createMainnetFinancialActionRevocationRecoveryMigrationV0038',
 ]);
 const EXPECTED_TEST_MIGRATION_TAIL = Object.freeze([
   'createProviderPositionChainAnchorEvidenceTestSchemaMigrationV0029',
@@ -640,6 +653,7 @@ const EXPECTED_TEST_MIGRATION_TAIL = Object.freeze([
   'createMainnetFinancialActionAuthenticatedFinalityTestSchemaMigrationV0035',
   'createMainnetFinancialActionFinalityPrerequisiteReadTestSchemaMigrationV0036',
   'createMainnetFinancialActionAtomicFinalityPersistenceTestSchemaMigrationV0037',
+  'createMainnetFinancialActionRevocationRecoveryTestSchemaMigrationV0038',
 ]);
 const EXPECTED_WALLET_IDENTITY_PREPARE_FUNCTION_IDENTITY =
   'prepare_mainnet_financial_action_lifecycle_v2(uuid,uuid,uuid,uuid,uuid,uuid,uuid,text,text,uuid,text,text,text,text,integer,text,text,text,smallint,text,text,text,text,integer,text,text,text,timestamp with time zone,timestamp with time zone,uuid,smallint[],text[])';
@@ -726,6 +740,7 @@ const PROHIBITED_WALLET_IDENTITY_CANDIDATE_SINK =
 const PROHIBITED_DURABLE_AUTHORITY =
   /(?:\b(?:sendRawTransaction|sendTransaction|signTransaction|broadcastTransaction|eth_sendRawTransaction|writeContract|JsonRpcProvider|WalletClient|PrivateKeyAccount)\b|\b(?:job_outbox|outbox|enqueue)\b|\b(?:mayAuthorizeFinancialAction|apiMaySign|apiMayBroadcast|mayResendTransaction|automaticRetryAllowed|ledgerSettlementAuthority)\s*:\s*true\b|\bledger_settlement_authority\s*=\s*true\b)/iu;
 const REVIEWED_DORMANT_SOURCE_PATHS = new Set([
+  ...Object.keys(RECOVERY_SCHEDULER_ARTIFACT_SHA256),
   ACTION_BOUNDARY_PATH,
   ACTION_LIFECYCLE_PATH,
   ACTION_LIFECYCLE_DURABLE_PORT_PATH,
@@ -1500,8 +1515,8 @@ function validateDormantDurableLifecycleSnapshot(
   if (
     databaseExecution === null ||
     occurrences(postgresAdapterSource, 'queryWithCancellation') !== 2 ||
-    occurrences(postgresAdapterSource, '#databaseQuery') !== 3 ||
-    occurrences(postgresAdapterSource, 'Reflect.apply(this.#databaseQuery') !== 1 ||
+    occurrences(postgresAdapterSource, '#databaseQuery') !== 4 ||
+    occurrences(postgresAdapterSource, 'Reflect.apply(this.#databaseQuery') !== 2 ||
     occurrences(postgresAdapterSource, 'this.#execute(') !== 5 ||
     PROHIBITED_ADAPTER_DATABASE_CONTROL.test(postgresAdapterSource) ||
     /\b(?:for|while)\s*\(/u.test(databaseExecution)
@@ -1899,7 +1914,7 @@ function validateFinalitySidecarSnapshot(
     'recordedReviewDisposition: null,',
     'mayAuthorizeFinancialAction: false as const,',
     'ledgerSettlementAuthority: false as const,',
-    'dispatches at most one fixed SQL call and owns no retry, transaction helper,',
+    'Exactly one producer-backed persistence facet may then be bound. Cursor',
   ]) {
     if (!sidecarAdapterSource.includes(marker)) {
       errors.push(`authenticated finality sidecar lacks dormant database marker: ${marker}`);
@@ -1910,7 +1925,7 @@ function validateFinalitySidecarSnapshot(
     !sidecarPortSpecSource.includes(
       'keeps public mutation inputs capability-only and separates review CAS provenance',
     ) ||
-    countDeclaredTests(sidecarAdapterSpecSource) !== 13 ||
+    countDeclaredTests(sidecarAdapterSpecSource) !== 15 ||
     !sidecarAdapterSpecSource.includes(
       'double-reviews genuine admission evidence and dispatches one exact 24-value call',
     ) ||
@@ -2124,11 +2139,11 @@ function validateAtomicFinalityPrerequisiteSnapshot(
     occurrences(prerequisiteAdapterSource, 'this.#issue(') !== 2 ||
     occurrences(
       prerequisiteAdapterSource,
-      'read_mainnet_financial_action_reconciliation_prerequisite_v1',
+      'read_mainnet_financial_action_reconciliation_prerequisite_v2',
     ) !== 2 ||
     occurrences(
       prerequisiteAdapterSource,
-      'read_mainnet_financial_action_post_finality_prerequisite_v1',
+      'read_mainnet_financial_action_post_finality_prerequisite_v2',
     ) !== 2 ||
     PROHIBITED_ADAPTER_DATABASE_CONTROL.test(prerequisiteAdapterSource) ||
     PROHIBITED_ADAPTER_SQL_AUTHORITY.test(prerequisiteAdapterSource)
@@ -2199,8 +2214,8 @@ function validateAtomicFinalityPrerequisiteSnapshot(
     errors.push('0036 prerequisite migration grants, persists, signs, or broadcasts authority');
   }
   if (
-    countDeclaredTests(prerequisiteAdapterSpecSource) !== 16 ||
-    countDeclaredTests(walletReaderSpecSource) !== 15 ||
+    countDeclaredTests(prerequisiteAdapterSpecSource) !== 18 ||
+    countDeclaredTests(walletReaderSpecSource) !== 8 ||
     countDeclaredTests(prerequisiteMigrationSpecSource) !== 10 ||
     countDeclaredTests(prerequisiteMigrationIntegrationSpecSource) !== 5 ||
     !prerequisiteMigrationIntegrationSpecSource.includes(
@@ -2281,16 +2296,16 @@ function validateAtomicFinalityPrerequisiteSnapshot(
   }
   if (
     countDeclaredTests(atomicMigrationSpecSource) !== 13 ||
-    countDeclaredTests(atomicMigrationIntegrationSpecSource) !== 13 ||
+    countDeclaredTests(atomicMigrationIntegrationSpecSource) !== 15 ||
     !atomicMigrationIntegrationSpecSource.includes(
       "process.env.RUN_INFRASTRUCTURE_INTEGRATION === '1'",
     ) ||
-    !atomicMigrationIntegrationSpecSource.includes("({ id }) => id <= '0037'") ||
+    !atomicMigrationIntegrationSpecSource.includes("({ id }) => id <= '0038'") ||
     !atomicMigrationIntegrationSpecSource.includes(
       "!['localhost', '127.0.0.1', '[::1]', '::1'].includes(hostname)",
     ) ||
     !atomicMigrationIntegrationSpecSource.includes('without deadlock') ||
-    !atomicMigrationIntegrationSpecSource.includes('revoke-wins races') ||
+    !atomicMigrationIntegrationSpecSource.includes('post-bind revoke recovery races') ||
     !atomicMigrationIntegrationSpecSource.includes(
       'rolls back a newly recorded result that crosses its effective expiry',
     )
@@ -2309,6 +2324,123 @@ function hasUnreviewedDynamicLoading(path, source) {
   const expected = REVIEWED_RUNTIME_DYNAMIC_IMPORTS.get(normalizedPath(path)) ?? [];
   return tokenCount !== literalImports.length || !exactArray(literalImports, expected);
 }
+
+function validateRecoverySchedulerSnapshot(sources, lifecycleAdapter, migrationIndex) {
+  const errors = [];
+  const paths = Object.keys(RECOVERY_SCHEDULER_ARTIFACT_SHA256);
+  if (!(sources instanceof Map) || !exactArray([...sources.keys()].sort(), paths.slice().sort()))
+    return ['recovery and scheduler artifact inventory is incomplete or extended'];
+  for (const [path, expected] of Object.entries(RECOVERY_SCHEDULER_ARTIFACT_SHA256)) {
+    const source = sources.get(path);
+    if (
+      typeof source !== 'string' ||
+      createHash('sha256').update(source, 'utf8').digest('hex') !== expected
+    ) {
+      errors.push(`reviewed recovery or scheduler artifact drifted: ${path}`);
+      if (typeof source !== 'string') continue;
+    }
+    if (path.endsWith('.migration.ts')) {
+      const id = path.split('/').at(-1).slice(0, 4);
+      const predecessor = String(Number(id) - 1).padStart(4, '0');
+      if (
+        !source.includes(`id: '${id}'`) ||
+        !source.includes(`supersedesVerificationOf: ['${predecessor}']`) ||
+        /\bGRANT\s/u.test(source) ||
+        !source.includes('REVOKE ALL')
+      )
+        errors.push(
+          `recovery/scheduler migration widened owner authority or broke ordering: ${path}`,
+        );
+      if (id >= '0039' && migrationIndex.includes(path.split('/').at(-1).replace(/\.ts$/u, '')))
+        errors.push('0039-0042 must remain outside runtime migration registration');
+    }
+    if (
+      path.includes('/mainnet-actions/') &&
+      !path.endsWith('.spec.ts') &&
+      (PROHIBITED_DURABLE_REGISTRATION.test(source) ||
+        source.includes('@solana/web3.js') ||
+        /\b(?:mayAuthorizeFinancialAction|apiMaySign|apiMayBroadcast|mayResubmitTransaction|ledgerSettlementAuthority)\s*:\s*true\b/u.test(
+          source,
+        ))
+    )
+      errors.push(
+        `recovery/scheduler source gained runtime, network, or financial authority: ${path}`,
+      );
+    if (
+      path.endsWith('.integration-spec.ts') &&
+      (!source.includes("RUN_INFRASTRUCTURE_INTEGRATION === '1'") ||
+        (!source.includes("!['localhost', '127.0.0.1', '[::1]', '::1'].includes(hostname)") &&
+          !source.includes(
+            "hostname !== '127.0.0.1' && hostname !== 'localhost' && hostname !== '::1'",
+          )))
+    )
+      errors.push(`recovery/scheduler integration test lost its explicit local guard: ${path}`);
+  }
+  const scheduler =
+    sources.get(
+      'apps/api/src/mainnet-actions/application/dormant-mainnet-financial-action-two-queue.scheduler.ts',
+    ) ?? '';
+  const adapter =
+    sources.get(
+      'apps/api/src/mainnet-actions/infrastructure/postgres-dormant-mainnet-financial-action-two-queue-scheduler.adapter.ts',
+    ) ?? '';
+  const manifest =
+    sources.get(
+      'apps/api/src/mainnet-actions/infrastructure/mainnet-financial-action-write-manifest.ts',
+    ) ?? '';
+  const migration =
+    sources.get(
+      'apps/api/src/infrastructure/database/migrations/0042-create-mainnet-financial-action-durable-scheduler.migration.ts',
+    ) ?? '';
+  const verifiedBind = extractSection(
+    lifecycleAdapter,
+    '  async #executeVerifiedBind(',
+    '  #issueVerifiedBind(',
+  );
+  if (
+    verifiedBind === null ||
+    occurrences(verifiedBind, 'Reflect.apply(this.#databaseQuery') !== 1 ||
+    /\b(?:for|while)\s*\(/u.test(verifiedBind) ||
+    !verifiedBind.includes('databaseOutcomeUnknown(command)')
+  )
+    errors.push('verified submission binding lost its single-call unknown-outcome boundary');
+  if (
+    !manifest.includes(
+      'DORMANT_MAINNET_FINANCIAL_ACTION_WRITE_MANIFESTS: readonly MainnetFinancialActionWriteManifestV1[] =\n  Object.freeze([]);',
+    )
+  )
+    errors.push('production write manifests must remain empty');
+  if (
+    occurrences(adapter, 'Reflect.apply(this.#databaseQuery') !== 2 ||
+    !adapter.includes('this.#claims.delete(sourceClaimCapability);') ||
+    !adapter.includes('claim_mainnet_financial_action_scheduler_job_v1') ||
+    !adapter.includes('complete_mainnet_financial_action_scheduler_job_v1') ||
+    !scheduler.includes(
+      'const durableCompletion = sourceCompletion(reviewed, queue, issued, request);',
+    ) ||
+    !scheduler.includes('completedAt: durableCompletion.completedAt')
+  )
+    errors.push('scheduler completion must be one-shot and authenticated by the durable source');
+  for (const marker of [
+    'FOR UPDATE OF job SKIP LOCKED',
+    'ATTEMPT_LIMIT_REACHED',
+    'MANUAL_REVIEW',
+    'WHERE job.job_id = requested_job_id FOR UPDATE',
+    'requested_fencing_token',
+  ]) {
+    if (!migration.includes(marker))
+      errors.push(`durable scheduler lost concurrency or quarantine control: ${marker}`);
+  }
+  return errors;
+}
+
+const RECOVERY_SCHEDULER_RUNTIME_STEMS = Object.keys(RECOVERY_SCHEDULER_ARTIFACT_SHA256)
+  .filter(
+    (path) =>
+      (path.includes('/mainnet-actions/') || path.includes('/migrations/')) &&
+      !path.endsWith('.spec.ts'),
+  )
+  .map((path) => path.split('/').at(-1).replace(/\.ts$/u, ''));
 
 export function validateDormantMainnetActionBoundarySnapshot(snapshot) {
   if (
@@ -2356,6 +2488,13 @@ export function validateDormantMainnetActionBoundarySnapshot(snapshot) {
   }
 
   const errors = [];
+  errors.push(
+    ...validateRecoverySchedulerSnapshot(
+      snapshot.recoverySchedulerSources,
+      snapshot.postgresAdapterSource,
+      snapshot.migrationIndexSource,
+    ),
+  );
   const source = snapshot.boundarySource;
   const lifecycleSource = snapshot.lifecycleSource;
   const durablePortSource = snapshot.durablePortSource;
@@ -2713,6 +2852,11 @@ export function validateDormantMainnetActionBoundarySnapshot(snapshot) {
       errors.push('reviewed dormant action source was incorrectly included in runtime consumers');
     } else if (hasUnreviewedDynamicLoading(path, runtimeSource)) {
       errors.push(`runtime source contains unreviewed dynamic loading: ${path}`);
+    } else if (
+      normalizedPath(path) !== DATABASE_MIGRATION_INDEX_PATH &&
+      RECOVERY_SCHEDULER_RUNTIME_STEMS.some((stem) => runtimeSource.includes(stem))
+    ) {
+      errors.push(`dormant recovery/scheduler source is referenced by runtime source ${path}`);
     } else if (ACTION_LIFECYCLE_DATABASE_FUNCTION_REFERENCE.test(runtimeSource)) {
       errors.push(
         `migration-0033-0037 action SQL function is referenced outside the reviewed adapters by runtime source ${path}`,
@@ -2964,6 +3108,12 @@ function loadSnapshot(repositoryRoot, afterInitialRuntimeEnumeration) {
         ACTION_ATOMIC_FINALITY_MIGRATION_INTEGRATION_SPEC_PATH,
       ),
       migrationIndexSource: repositoryFile(repositoryRoot, DATABASE_MIGRATION_INDEX_PATH),
+      recoverySchedulerSources: new Map(
+        Object.keys(RECOVERY_SCHEDULER_ARTIFACT_SHA256).map((path) => [
+          path,
+          repositoryFile(repositoryRoot, path),
+        ]),
+      ),
       runtimeSources,
     };
     const finalInventory = runtimeSourceInventory(repositoryRoot);
@@ -3008,7 +3158,7 @@ if (import.meta.url === invokedPath) {
   const errors = validateDormantMainnetActionBoundaryFiles();
   if (errors.length === 0) {
     console.log(
-      'Dormant mainnet action boundary is valid: 10 candidates, 0 enabled, owner-only 0033-0037 persistence, unregistered authenticated-finality adapters',
+      'Dormant mainnet action boundary is valid: 10 candidates, 0 enabled, reviewed 0033-0042 persistence, 0039-0042 unregistered, 42 pinned recovery/scheduler artifacts',
     );
   } else {
     for (const error of errors) console.error(`- ${error}`);

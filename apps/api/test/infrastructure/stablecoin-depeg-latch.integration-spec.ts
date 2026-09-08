@@ -5,7 +5,6 @@ import { Pool } from 'pg';
 
 import { MigrationRunner } from '../../src/infrastructure/database/migration-runner.service';
 import { PRODUCTION_DATABASE_PRINCIPALS } from '../../src/infrastructure/database/migrations/0005-enforce-database-principal-boundaries.migration';
-import { createStablecoinDepegLatchTestSchemaMigrationV0019 } from '../../src/infrastructure/database/migrations/0019-create-stablecoin-depeg-latches.migration';
 import { suspendStablecoinIngestionAuthorityTestSchemaMigrationV0026 } from '../../src/infrastructure/database/migrations/0026-suspend-stablecoin-ingestion-authority.migration';
 import { DATABASE_TEST_SCHEMA_MIGRATION_LIST } from '../../src/infrastructure/database/migrations';
 import { PostgresService } from '../../src/infrastructure/database/postgres.service';
@@ -262,9 +261,8 @@ describeWithPostgres('stablecoin depeg latch PostgreSQL controls', () => {
 
   const schema = `stablecoin_latch_${randomBytes(8).toString('hex')}`;
   const genericRole = `stablecoin_latch_generic_${randomBytes(6).toString('hex')}`;
-  const migrations = DATABASE_TEST_SCHEMA_MIGRATION_LIST.some(({ id }) => id === '0019')
-    ? DATABASE_TEST_SCHEMA_MIGRATION_LIST
-    : [...DATABASE_TEST_SCHEMA_MIGRATION_LIST, createStablecoinDepegLatchTestSchemaMigrationV0019];
+  // Audit the 0026 suspension catalog before successor authority changes.
+  const migrations = DATABASE_TEST_SCHEMA_MIGRATION_LIST.filter(({ id }) => id <= '0026');
   const expectedMigrationIds = migrations.map(({ id }) => id);
   let adminPool: Pool;
   let operationPool: Pool;

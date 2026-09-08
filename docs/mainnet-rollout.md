@@ -279,27 +279,41 @@ verification time, binds the proof to the exact prepared revision and snapshot,
 and makes the legacy proof-free bind fail at commit. Exact lost-ack replay
 reuses the database-authored time; conflicts and cross-intent replay identities
 fail closed. The migration has no runtime grant and remains outside the
-coordinated migration index until its application binder and successor
-migrations are reviewed together.
+coordinated migration index. Its application binder now consumes the verified
+one-shot proof and persists it through the exact database wrapper. Registration
+remains a separately reviewed activation gate together with migrations
+`0040` through `0042`.
 
 Commit `924ae56` adds a direct-import-only two-queue scheduler contract.
 `PRE_BROADCAST` and `RECONCILIATION` claims use separate opaque, one-shot
 capabilities with server-owned leases, fencing tokens, timestamps, and bounded
 attempts. Signed or unknown-outcome work cannot return to pre-broadcast, and an
 attempt limit means durable quarantine and manual review rather than completion,
-deletion, or resubmission. This application boundary has no durable queue
-adapter, timer, worker registration, transport, or financial-action authority.
+deletion, or resubmission. Owner-only migration `0042` and the direct-import-only
+PostgreSQL adapter implement durable discovery, atomic claims, fencing, lease
+expiry, bounded attempts, quarantine, and authenticated completion. A guarded
+PostgreSQL integration test connects both real application queues to these
+functions, verifies concurrent claim exclusion and durable completion, rejects
+duplicate completion, and exercises reconciliation-only recovery. No timer,
+worker registration, transport, or financial-action authority is enabled.
+
+Migrations `0040` and `0041` preserve recovery through wallet identity-key
+rotation and revoked-wallet metadata-key retirement. The adapters retain
+historical signed-action access without restoring preparation, signing,
+broadcast, or wallet registration authority. The offline source audit pins
+the proof, recovery, and scheduler artifacts and tests their dormant boundary.
 
 This closes the local contract, schema, and adapter portions of durable replay,
 wallet-identity binding, authenticated-finality admission, append-only
 post-finality quarantine, static signed-command verification, proof persistence,
-and in-memory scheduling policy. It does not create API/worker composition, a
-runtime grant, controlled authority-row population, concrete prerequisite or
-chain sources, durable unresolved-work discovery/claim/lease processing, a
-scheduled reviewer/reconciler, downstream ledger remediation, a signer, a
-broadcaster, a mainnet provider binding, or write authority. Migrations `0033`
-through `0038` are registered solely in the cumulative migration index;
-migration `0039` is intentionally unregistered. Their functions remain
+and durable two-queue scheduling. Concrete database prerequisite and wallet
+readers are implemented locally. API/worker composition, runtime grants,
+controlled authority-row population, independently approved chain sources,
+scheduled execution, downstream ledger remediation, signing, broadcasting,
+mainnet provider bindings, and write authority remain activation gates.
+Migrations `0033` through `0038` are registered solely in the cumulative
+migration index; migrations `0039` through `0042` are intentionally
+unregistered. Their functions remain
 unavailable to application principals, the adapters, producer, verifier, and
 scheduler are unregistered, both `0035` authority tables and the production
 write-manifest registry are empty, and all policy limits and approvals remain
@@ -320,15 +334,15 @@ zero.
   exact deployment identities, then populate the empty `0035` authority tables
   through a separately controlled, audited owner workflow. An authority row is
   evidence admission only and must never grant write or settlement authority.
-- Implement and independently review the concrete prerequisite/source adapters.
-  Persist and cross-bind the existing exact transaction-payload and
-  wallet-signature verification to an authenticated lifecycle cursor before any
-  runtime registration or database grant. Separately review and compose the
-  address-bound `0034` preparation and `0035`-`0038` finality/recovery path.
-  Every source must cooperatively stop on abort/deadline.
-- Add durable unresolved-work discovery, claim/lease reconciliation, and a
-  post-finality review scheduler without automatic resubmission; never log HMAC
-  candidates or opaque attestations.
+- Approve and implement the two independently controlled chain-source adapters.
+  Independently review the existing prerequisite readers, exact signed-command
+  verifier, proof binder, and address-bound preparation/finality/recovery path
+  before runtime registration or database grants. Every source must
+  cooperatively stop on abort/deadline.
+- Review and operationalize the existing durable discovery, claim/lease,
+  reconciliation, and completion boundary; compose a post-finality review
+  scheduler without automatic resubmission. Never log HMAC candidates or opaque
+  attestations.
 - Define downstream handling for provisional, safe, finalized, inconclusive,
   authority-controlled, and deep-reorg states. Quarantine must not silently
   rewrite terminal history or reverse a ledger.

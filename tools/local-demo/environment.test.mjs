@@ -90,6 +90,16 @@ describe('local demo process configuration', () => {
       assert.equal(environments.api[forbidden], undefined);
     }
     assert.equal(environments.api.AWS_EC2_METADATA_DISABLED, 'true');
+    for (const environment of [environments.api, environments.worker]) {
+      assert.equal(
+        environment.SQS_BALANCE_QUEUE_URL,
+        'http://127.0.0.1:4566/000000000000/crypto-lending-balance-sync',
+      );
+      assert.equal(
+        environment.SQS_BALANCE_DEAD_LETTER_QUEUE_URL,
+        'http://127.0.0.1:4566/000000000000/crypto-lending-balance-sync-dlq',
+      );
+    }
     const apiDatabase = new URL(environments.api.DATABASE_RUNTIME_URL);
     const workerDatabase = new URL(environments.worker.DATABASE_RUNTIME_URL);
     const migrationDatabase = new URL(environments.migration.MIGRATION_DATABASE_URL);

@@ -162,7 +162,8 @@ describeWithPostgres('stablecoin price evidence PostgreSQL controls', () => {
 
   const schema = `price_evidence_${randomBytes(8).toString('hex')}`;
   const genericRole = `price_evidence_generic_${randomBytes(6).toString('hex')}`;
-  const migrations = [...DATABASE_TEST_SCHEMA_MIGRATION_LIST];
+  // Audit the 0026 suspension catalog before successor authority changes.
+  const migrations = DATABASE_TEST_SCHEMA_MIGRATION_LIST.filter(({ id }) => id <= '0026');
   if (!migrations.some(({ id }) => id === '0020')) {
     migrations.push(createBalanceSyncReadModelTestSchemaMigrationV0020);
   }

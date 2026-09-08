@@ -1,7 +1,6 @@
 import { isProxy } from 'node:util/types';
 
 import { isMainnetLaunchNetwork } from '../../blockchain/domain/mainnet-launch-network-policy';
-import { MAINNET_FINANCIAL_ACTIONS } from '../domain/dormant-mainnet-financial-action';
 import {
   DORMANT_MAINNET_FINANCIAL_ACTION_ATTEMPT_POLICY,
   DORMANT_MAINNET_FINANCIAL_ACTION_CLAIM_CAPABILITY_USE,
@@ -15,6 +14,7 @@ import {
   DORMANT_MAINNET_FINANCIAL_ACTION_RECONCILIATION_COMPLETION_USE,
   DORMANT_MAINNET_FINANCIAL_ACTION_SCHEDULER_VERSION,
   DORMANT_MAINNET_FINANCIAL_ACTION_SOURCE_CLAIM_USE,
+  DORMANT_MAINNET_FINANCIAL_ACTION_SOURCE_COMPLETION_USE,
   type ClaimDormantMainnetFinancialActionPreBroadcastRequestV1,
   type ClaimDormantMainnetFinancialActionReconciliationRequestV1,
   type ClaimDormantMainnetFinancialActionRequestV1,
@@ -29,12 +29,14 @@ import {
   type DormantMainnetFinancialActionReconciliationJobV1,
   type DormantMainnetFinancialActionScheduledJobV1,
   type DormantMainnetFinancialActionSchedulerClock,
+  type DormantMainnetFinancialActionSourceCompletionV1,
   type DormantMainnetFinancialActionTwoQueueClaimSourcePort,
   type DormantMainnetFinancialActionTwoQueueSchedulerPort,
 } from './ports/dormant-mainnet-financial-action-two-queue-scheduler.port';
 
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const SHA256 = /^[0-9a-f]{64}$/u;
+const ZERO_SHA256 = '0'.repeat(64);
 const POSITIVE_UINT64 = /^[1-9][0-9]{0,19}$/u;
 const EVM_TRANSACTION_ID = /^0x[0-9a-f]{64}$/u;
 const BASE58 = /^[1-9A-HJ-NP-Za-km-z]{64,88}$/u;
@@ -109,6 +111,27 @@ const COMPLETION_REQUEST_KEYS = Object.freeze([
   'signal',
   'disposition',
 ] as const);
+const SOURCE_COMPLETION_KEYS = Object.freeze([
+  'schedulerVersion',
+  'use',
+  'mayPersist',
+  ...AUTHORITY_KEYS,
+  'recordOutcome',
+  'queue',
+  'jobId',
+  'accountId',
+  'intentId',
+  'lifecycleRevision',
+  'lifecycleSnapshotSha256',
+  'attempt',
+  'maximumAttempts',
+  'leaseId',
+  'fencingToken',
+  'requestedDisposition',
+  'completionDisposition',
+  'resultingJobStatus',
+  'completedAt',
+] as const);
 
 export type DormantMainnetFinancialActionSchedulerFailureCode =
   | 'INVALID_CONFIGURATION'
@@ -138,6 +161,7 @@ interface Timestamp {
 
 interface IssuedClaim {
   readonly queue: 'PRE_BROADCAST' | 'RECONCILIATION';
+  readonly sourceCapability: object;
   readonly request: WeakRef<ClaimDormantMainnetFinancialActionRequestV1>;
   readonly signal: AbortSignal;
   readonly view: DormantMainnetFinancialActionClaimViewV1;
@@ -201,6 +225,9 @@ function nativePromiseResult(value: unknown): Promise<unknown> {
       (typeof value !== 'object' && typeof value !== 'function') ||
       value === null ||
       isProxy(value) ||
+      !(value instanceof Promise) ||
+      Object.getPrototypeOf(value) !== Promise.prototype ||
+      Object.getOwnPropertyDescriptor(value, 'then') !== undefined ||
       PROMISE_THEN === undefined
     )
       return fail('CLAIM_UNAVAILABLE');
@@ -310,7 +337,8 @@ function uuid(value: unknown, code: 'INVALID_REQUEST' | 'CLAIM_UNAVAILABLE'): st
 }
 
 function digest(value: unknown): string {
-  if (typeof value !== 'string' || !SHA256.test(value)) return fail('CLAIM_UNAVAILABLE');
+  if (typeof value !== 'string' || !SHA256.test(value) || value === ZERO_SHA256)
+    return fail('CLAIM_UNAVAILABLE');
   return value;
 }
 
@@ -374,11 +402,7 @@ function validateJobCommon(record: Record<string, unknown>): Readonly<{
   if (new Set([jobId, accountId, intentId]).size !== 3) return fail('CLAIM_UNAVAILABLE');
   if (typeof record.networkId !== 'string' || !isMainnetLaunchNetwork(record.networkId))
     return fail('CLAIM_UNAVAILABLE');
-  if (
-    typeof record.action !== 'string' ||
-    !MAINNET_FINANCIAL_ACTIONS.includes(record.action as never)
-  )
-    return fail('CLAIM_UNAVAILABLE');
+  if (record.action !== 'SUPPLY' && record.action !== 'WITHDRAW') return fail('CLAIM_UNAVAILABLE');
   return Object.freeze({
     jobId,
     accountId,
@@ -576,12 +600,79 @@ function completionDisposition(
   return Object.freeze({ completionDisposition: 'COMPLETED', nextQueue: null });
 }
 
+function sourceCompletion(
+  value: unknown,
+  queue: 'PRE_BROADCAST' | 'RECONCILIATION',
+  issued: IssuedClaim,
+  request: CompleteDormantMainnetFinancialActionRequestV1,
+): Readonly<{
+  completedAt: string;
+  completionDisposition: DormantMainnetFinancialActionCompletionResultV1['completionDisposition'];
+  nextQueue: DormantMainnetFinancialActionCompletionResultV1['nextQueue'];
+}> {
+  const record = exactFrozenRecord(value, SOURCE_COMPLETION_KEYS, 'CLAIM_UNAVAILABLE');
+  assertDeniedAuthority(record, 'CLAIM_UNAVAILABLE');
+  const job = issued.view.job;
+  if (
+    record.schedulerVersion !== DORMANT_MAINNET_FINANCIAL_ACTION_SCHEDULER_VERSION ||
+    record.use !== DORMANT_MAINNET_FINANCIAL_ACTION_SOURCE_COMPLETION_USE ||
+    (record.recordOutcome !== 'RECORDED' && record.recordOutcome !== 'REPLAYED') ||
+    record.queue !== queue ||
+    record.jobId !== job.jobId ||
+    record.accountId !== job.accountId ||
+    record.intentId !== job.intentId ||
+    record.lifecycleRevision !== job.lifecycleRevision ||
+    record.lifecycleSnapshotSha256 !== job.lifecycleSnapshotSha256 ||
+    record.attempt !== issued.view.attempt ||
+    record.maximumAttempts !== issued.view.maximumAttempts ||
+    record.leaseId !== issued.view.leaseId ||
+    record.fencingToken !== issued.view.fencingToken ||
+    record.requestedDisposition !== request.disposition
+  )
+    return fail('CLAIM_UNAVAILABLE');
+
+  const expected = completionDisposition(
+    queue,
+    request.disposition,
+    issued.view.attempt,
+    issued.view.maximumAttempts,
+  );
+  const expectedStatus =
+    expected.completionDisposition === 'COMPLETED'
+      ? 'COMPLETED'
+      : expected.completionDisposition === 'RELEASE_PRE_BROADCAST_ONLY' ||
+          expected.completionDisposition === 'RELEASE_RECONCILIATION_ONLY'
+        ? 'READY'
+        : 'MANUAL_REVIEW';
+  if (
+    record.completionDisposition !== expected.completionDisposition ||
+    record.resultingJobStatus !== expectedStatus
+  )
+    return fail('CLAIM_UNAVAILABLE');
+
+  const completedAt = timestamp(record.completedAt, 'CLAIM_UNAVAILABLE');
+  if (
+    completedAt.milliseconds < issued.claimedAtMilliseconds ||
+    completedAt.milliseconds >= issued.leaseExpiresAtMilliseconds
+  )
+    return fail('CLAIM_UNAVAILABLE');
+  return Object.freeze({
+    completedAt: completedAt.text,
+    completionDisposition: expected.completionDisposition,
+    nextQueue: expected.nextQueue,
+  });
+}
+
 export class DormantMainnetFinancialActionTwoQueueScheduler implements DormantMainnetFinancialActionTwoQueueSchedulerPort {
   readonly schedulerVersion = DORMANT_MAINNET_FINANCIAL_ACTION_SCHEDULER_VERSION;
   private readonly claimPreBroadcastMethod: CapturedMethod;
   private readonly claimReconciliationMethod: CapturedMethod;
   private readonly reviewPreBroadcastClaimMethod: CapturedMethod;
   private readonly reviewReconciliationClaimMethod: CapturedMethod;
+  private readonly completePreBroadcastMethod: CapturedMethod;
+  private readonly completeReconciliationMethod: CapturedMethod;
+  private readonly reviewPreBroadcastCompletionMethod: CapturedMethod;
+  private readonly reviewReconciliationCompletionMethod: CapturedMethod;
   private readonly clockNowMethod: CapturedMethod;
   private readonly claims = new WeakMap<object, IssuedClaim>();
   private readonly completions = new WeakMap<object, IssuedCompletion>();
@@ -594,6 +685,13 @@ export class DormantMainnetFinancialActionTwoQueueScheduler implements DormantMa
     this.claimReconciliationMethod = captureMethod(source, 'claimReconciliation');
     this.reviewPreBroadcastClaimMethod = captureMethod(source, 'reviewPreBroadcastClaim');
     this.reviewReconciliationClaimMethod = captureMethod(source, 'reviewReconciliationClaim');
+    this.completePreBroadcastMethod = captureMethod(source, 'completePreBroadcast');
+    this.completeReconciliationMethod = captureMethod(source, 'completeReconciliation');
+    this.reviewPreBroadcastCompletionMethod = captureMethod(source, 'reviewPreBroadcastCompletion');
+    this.reviewReconciliationCompletionMethod = captureMethod(
+      source,
+      'reviewReconciliationCompletion',
+    );
     this.clockNowMethod = captureMethod(clock, 'now');
     if (
       stableMember(source, 'schedulerVersion') !==
@@ -640,6 +738,9 @@ export class DormantMainnetFinancialActionTwoQueueScheduler implements DormantMa
       return fail('CLAIM_UNAVAILABLE');
     }
     if (aborted(signal)) return fail('INVALID_REQUEST');
+    if (sourceCapability === null) return null;
+    if (typeof sourceCapability !== 'object' || isProxy(sourceCapability))
+      return fail('CLAIM_UNAVAILABLE');
     let reviewed: unknown;
     try {
       reviewed = Reflect.apply(reviewMethod.method, reviewMethod.receiver, [
@@ -664,6 +765,7 @@ export class DormantMainnetFinancialActionTwoQueueScheduler implements DormantMa
     });
     this.claims.set(capability, {
       queue,
+      sourceCapability,
       request: new WeakRef(request),
       signal,
       view,
@@ -738,22 +840,57 @@ export class DormantMainnetFinancialActionTwoQueueScheduler implements DormantMa
     if (issued.queue !== queue) return fail('CROSS_QUEUE_CLAIM');
     if (issued.request.deref() !== request.claimRequest || issued.signal !== signal)
       return fail('CLAIM_UNAVAILABLE');
-    const completedAt = this.now();
-    if (completedAt.milliseconds < issued.claimedAtMilliseconds) {
+    const completionStartedAt = this.now();
+    if (completionStartedAt.milliseconds < issued.claimedAtMilliseconds) {
       this.claims.delete(request.claimCapability);
       return fail('INVALID_CONFIGURATION');
     }
-    if (completedAt.milliseconds >= issued.leaseExpiresAtMilliseconds) {
+    if (completionStartedAt.milliseconds >= issued.leaseExpiresAtMilliseconds) {
       this.claims.delete(request.claimCapability);
       return fail('CLAIM_EXPIRED');
     }
     this.claims.delete(request.claimCapability);
-    const disposition = completionDisposition(
-      queue,
-      request.disposition,
-      issued.view.attempt,
-      issued.view.maximumAttempts,
-    );
+
+    const completeMethod =
+      queue === 'PRE_BROADCAST'
+        ? this.completePreBroadcastMethod
+        : this.completeReconciliationMethod;
+    const reviewMethod =
+      queue === 'PRE_BROADCAST'
+        ? this.reviewPreBroadcastCompletionMethod
+        : this.reviewReconciliationCompletionMethod;
+    let sourceCapability: unknown;
+    try {
+      sourceCapability = await nativePromiseResult(
+        Reflect.apply(completeMethod.method, completeMethod.receiver, [
+          issued.sourceCapability,
+          request.claimRequest,
+          request,
+        ]),
+      );
+    } catch {
+      return fail('CLAIM_UNAVAILABLE');
+    }
+    if (
+      typeof sourceCapability !== 'object' ||
+      sourceCapability === null ||
+      isProxy(sourceCapability)
+    )
+      return fail('CLAIM_UNAVAILABLE');
+    if (aborted(signal)) return fail('CLAIM_UNAVAILABLE');
+    let reviewed: DormantMainnetFinancialActionSourceCompletionV1 | null;
+    try {
+      reviewed = Reflect.apply(reviewMethod.method, reviewMethod.receiver, [
+        sourceCapability,
+        issued.sourceCapability,
+        request.claimRequest,
+        request,
+      ]) as DormantMainnetFinancialActionSourceCompletionV1 | null;
+    } catch {
+      return fail('CLAIM_UNAVAILABLE');
+    }
+    if (reviewed === null) return fail('CLAIM_UNAVAILABLE');
+    const durableCompletion = sourceCompletion(reviewed, queue, issued, request);
     const job = issued.view.job;
     const result: DormantMainnetFinancialActionCompletionResultV1 = Object.freeze({
       schedulerVersion: DORMANT_MAINNET_FINANCIAL_ACTION_SCHEDULER_VERSION,
@@ -784,9 +921,10 @@ export class DormantMainnetFinancialActionTwoQueueScheduler implements DormantMa
       fencingToken: issued.view.fencingToken,
       claimedAt: issued.view.claimedAt,
       leaseExpiresAt: issued.view.leaseExpiresAt,
-      completedAt: completedAt.text,
+      completedAt: durableCompletion.completedAt,
       requestedDisposition: request.disposition,
-      ...disposition,
+      completionDisposition: durableCompletion.completionDisposition,
+      nextQueue: durableCompletion.nextQueue,
     });
     const capability: DormantMainnetFinancialActionCompletionCapabilityV1 = Object.freeze({
       schedulerVersion: DORMANT_MAINNET_FINANCIAL_ACTION_SCHEDULER_VERSION,

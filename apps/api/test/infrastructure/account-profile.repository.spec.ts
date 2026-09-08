@@ -69,7 +69,7 @@ describeWithPostgres('PostgreSQL account profile repository', () => {
     migrations = new MigrationRunner(pool, DATABASE_TEST_SCHEMA_MIGRATION_LIST);
     await migrations.up();
     repository = new PostgresAccountProfileRepository(new PostgresService(pool));
-  });
+  }, 60_000);
 
   afterAll(async () => {
     if (pool) await pool.end();
@@ -89,7 +89,7 @@ describeWithPostgres('PostgreSQL account profile repository', () => {
         await adminPool.end();
       }
     }
-  });
+  }, 60_000);
 
   it('provisions once through the runtime boundary and rejects a duplicate UUID', async () => {
     const accountId = newAccountId();

@@ -9,6 +9,15 @@ import { createMainnetFinancialActionWalletIdentityRotationRecoveryTestSchemaMig
 import { createRevokedWalletMetadataKeyRetirementTestSchemaMigrationV0041 } from '../../src/infrastructure/database/migrations/0041-preserve-revoked-wallet-metadata-key-retirement.migration';
 import { createMainnetFinancialActionDurableSchedulerTestSchemaMigrationV0042 } from '../../src/infrastructure/database/migrations/0042-create-mainnet-financial-action-durable-scheduler.migration';
 import type { DatabaseMigration } from '../../src/infrastructure/database/migrations/migration';
+import { PostgresService } from '../../src/infrastructure/database/postgres.service';
+import { DormantMainnetFinancialActionTwoQueueScheduler } from '../../src/mainnet-actions/application/dormant-mainnet-financial-action-two-queue.scheduler';
+import {
+  DORMANT_MAINNET_FINANCIAL_ACTION_PRE_BROADCAST_CLAIM_USE,
+  DORMANT_MAINNET_FINANCIAL_ACTION_PRE_BROADCAST_COMPLETION_USE,
+  DORMANT_MAINNET_FINANCIAL_ACTION_RECONCILIATION_CLAIM_USE,
+  DORMANT_MAINNET_FINANCIAL_ACTION_RECONCILIATION_COMPLETION_USE,
+} from '../../src/mainnet-actions/application/ports/dormant-mainnet-financial-action-two-queue-scheduler.port';
+import { PostgresDormantMainnetFinancialActionTwoQueueSchedulerAdapter } from '../../src/mainnet-actions/infrastructure/postgres-dormant-mainnet-financial-action-two-queue-scheduler.adapter';
 
 const testDatabaseUrl = process.env.TEST_DATABASE_URL;
 const runInfrastructureIntegration = process.env.RUN_INFRASTRUCTURE_INTEGRATION === '1';
@@ -839,6 +848,127 @@ describeWithPostgres('migration 0042 durable scheduler (guarded PostgreSQL 16)',
       await adminPool.query(`DROP SCHEMA IF EXISTS ${quoteIdentifier(schema)} CASCADE`);
     }
   });
+
+  it('connects both application queues to real PostgreSQL claims and durable completion', async () => {
+    const schema = `scheduler_adapter_${suffix}`;
+    await adminPool.query(`CREATE SCHEMA ${quoteIdentifier(schema)}`);
+    const pool = new Pool({
+      connectionString: testDatabaseUrl as string,
+      max: 3,
+      options: `-c search_path=${schema} -c statement_timeout=45000 -c lock_timeout=4000`,
+    });
+    const authority = {
+      schedulerVersion: 1 as const,
+      mayPersist: false as const,
+      mayAuthorizeFinancialAction: false as const,
+      mayConstructTransaction: false as const,
+      apiMaySign: false as const,
+      apiMayBroadcast: false as const,
+      mayResubmitTransaction: false as const,
+      ledgerSettlementAuthority: false as const,
+    };
+    try {
+      await installMinimalLifecycleSchema(pool);
+      await pool.query(
+        sql(createMainnetFinancialActionDurableSchedulerTestSchemaMigrationV0042.upSql),
+      );
+      const postgres = new PostgresService(pool);
+      const adapter = new PostgresDormantMainnetFinancialActionTwoQueueSchedulerAdapter(
+        postgres,
+        10_000,
+      );
+      const scheduler = new DormantMainnetFinancialActionTwoQueueScheduler(adapter, {
+        now: () => new Date(),
+      });
+      const intent = await insertIntent(pool);
+      await insertEvent(pool, intent, 1, 'PREPARED');
+      const signal = new AbortController().signal;
+      const claimRequest = Object.freeze({
+        ...authority,
+        use: DORMANT_MAINNET_FINANCIAL_ACTION_PRE_BROADCAST_CLAIM_USE,
+        signal,
+      });
+      const secondRequest = Object.freeze({ ...claimRequest });
+      const claims = await Promise.all([
+        scheduler.claimPreBroadcast(claimRequest),
+        scheduler.claimPreBroadcast(secondRequest),
+      ]);
+      expect(claims.filter((capability) => capability !== null)).toHaveLength(1);
+      const winner = claims[0] !== null ? 0 : 1;
+      const selectedRequest = winner === 0 ? claimRequest : secondRequest;
+      const claimCapability = claims[winner];
+      expect(scheduler.reviewPreBroadcastClaim(claimCapability, selectedRequest)).toMatchObject({
+        job: { intentId: intent.intentId },
+        attempt: 1,
+        maximumAttempts: 3,
+      });
+      const completionRequest = Object.freeze({
+        ...authority,
+        use: DORMANT_MAINNET_FINANCIAL_ACTION_PRE_BROADCAST_COMPLETION_USE,
+        signal,
+        claimRequest: selectedRequest,
+        claimCapability,
+        disposition: 'PRE_BROADCAST_REVIEW_COMPLETED' as const,
+      });
+      const completed = await scheduler.completePreBroadcast(completionRequest);
+      expect(scheduler.reviewCompletion(completed, completionRequest)).toMatchObject({
+        completionDisposition: 'COMPLETED',
+        mayAuthorizeFinancialAction: false,
+      });
+      await expect(scheduler.completePreBroadcast(completionRequest)).rejects.toThrow();
+      expect(
+        await requiredRow<{ job_status: string }>(
+          pool,
+          `SELECT job_status FROM mainnet_financial_action_scheduler_jobs WHERE intent_id = $1`,
+          [intent.intentId],
+        ),
+      ).toEqual({ job_status: 'COMPLETED' });
+
+      await insertEvent(pool, intent, 2, 'WALLET_SIGNED_SUBMISSION_BOUND');
+      await insertEvent(pool, intent, 3, 'RECONCILIATION_AMBIGUOUS', 'UNKNOWN');
+      await expect(
+        scheduler.claimPreBroadcast(Object.freeze({ ...claimRequest })),
+      ).resolves.toBeNull();
+      const reconciliationRequest = Object.freeze({
+        ...authority,
+        use: DORMANT_MAINNET_FINANCIAL_ACTION_RECONCILIATION_CLAIM_USE,
+        signal,
+      });
+      const reconciliationClaim = await scheduler.claimReconciliation(reconciliationRequest);
+      expect(
+        scheduler.reviewReconciliationClaim(reconciliationClaim, reconciliationRequest),
+      ).toMatchObject({
+        queue: 'RECONCILIATION',
+        job: { lifecycleStage: 'RECONCILIATION_AMBIGUOUS', reconciliationOutcome: 'UNKNOWN' },
+      });
+      const quarantineRequest = Object.freeze({
+        ...authority,
+        use: DORMANT_MAINNET_FINANCIAL_ACTION_RECONCILIATION_COMPLETION_USE,
+        signal,
+        claimRequest: reconciliationRequest,
+        claimCapability: reconciliationClaim,
+        disposition: 'MANUAL_REVIEW_REQUIRED' as const,
+      });
+      const quarantined = await scheduler.completeReconciliation(quarantineRequest);
+      expect(scheduler.reviewCompletion(quarantined, quarantineRequest)).toMatchObject({
+        completionDisposition: 'MANUAL_REVIEW_REQUIRED',
+        nextQueue: null,
+      });
+      expect(
+        await requiredRow<{ job_status: string }>(
+          pool,
+          `SELECT job_status FROM mainnet_financial_action_scheduler_jobs WHERE intent_id = $1 AND lifecycle_revision = 3`,
+          [intent.intentId],
+        ),
+      ).toEqual({ job_status: 'MANUAL_REVIEW' });
+      await expect(
+        scheduler.claimReconciliation(Object.freeze({ ...reconciliationRequest })),
+      ).resolves.toBeNull();
+    } finally {
+      await pool.end();
+      await adminPool.query(`DROP SCHEMA IF EXISTS ${quoteIdentifier(schema)} CASCADE`);
+    }
+  }, 30_000);
 
   it('rejects invalid leases and proves the fence upper bound in PostgreSQL', async () => {
     await expect(functionalPool.query(CLAIM_SQL, ['PRE_BROADCAST', 999])).rejects.toMatchObject({

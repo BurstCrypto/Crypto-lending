@@ -3330,8 +3330,8 @@ test('provider-position read inspection rejects dormant durable evidence and mig
     ],
     [
       'providerPositionMigrationIndexSource',
-      '  suspendGenericWorkerBalanceAuthorityMigrationV0028,\n  createProviderPositionChainAnchorEvidenceMigrationV0029,\n  enforceProviderPositionChainAnchorRecordDeadlineMigrationV0030,\n  createProviderPositionChainAnchorRecordIntentMigrationV0031,\n  createMainnetBalanceAgreementEvidenceV2MigrationV0032,\n  createMainnetFinancialActionLifecycleMigrationV0033,\n  createMainnetFinancialActionWalletIdentityBindingMigrationV0034,\n  createMainnetFinancialActionAuthenticatedFinalityMigrationV0035,\n]);',
-      '  suspendGenericWorkerBalanceAuthorityMigrationV0028,\n  createProviderPositionChainAnchorEvidenceTestSchemaMigrationV0029,\n  enforceProviderPositionChainAnchorRecordDeadlineMigrationV0030,\n  createProviderPositionChainAnchorRecordIntentMigrationV0031,\n  createMainnetBalanceAgreementEvidenceV2MigrationV0032,\n  createMainnetFinancialActionLifecycleMigrationV0033,\n  createMainnetFinancialActionWalletIdentityBindingMigrationV0034,\n  createMainnetFinancialActionAuthenticatedFinalityMigrationV0035,\n]);',
+      '  suspendGenericWorkerBalanceAuthorityMigrationV0028,\n  createProviderPositionChainAnchorEvidenceMigrationV0029,\n  enforceProviderPositionChainAnchorRecordDeadlineMigrationV0030,\n  createProviderPositionChainAnchorRecordIntentMigrationV0031,\n  createMainnetBalanceAgreementEvidenceV2MigrationV0032,\n  createMainnetFinancialActionLifecycleMigrationV0033,\n  createMainnetFinancialActionWalletIdentityBindingMigrationV0034,\n  createMainnetFinancialActionAuthenticatedFinalityMigrationV0035,\n  createMainnetFinancialActionFinalityPrerequisiteReadMigrationV0036,\n  createMainnetFinancialActionAtomicFinalityPersistenceMigrationV0037,\n  createMainnetFinancialActionRevocationRecoveryMigrationV0038,\n]);',
+      '  suspendGenericWorkerBalanceAuthorityMigrationV0028,\n  createProviderPositionChainAnchorEvidenceTestSchemaMigrationV0029,\n  enforceProviderPositionChainAnchorRecordDeadlineMigrationV0030,\n  createProviderPositionChainAnchorRecordIntentMigrationV0031,\n  createMainnetBalanceAgreementEvidenceV2MigrationV0032,\n  createMainnetFinancialActionLifecycleMigrationV0033,\n  createMainnetFinancialActionWalletIdentityBindingMigrationV0034,\n  createMainnetFinancialActionAuthenticatedFinalityMigrationV0035,\n  createMainnetFinancialActionFinalityPrerequisiteReadMigrationV0036,\n  createMainnetFinancialActionAtomicFinalityPersistenceMigrationV0037,\n  createMainnetFinancialActionRevocationRecoveryMigrationV0038,\n]);',
     ],
     [
       'providerPositionMigrationIndexSource',
@@ -6014,13 +6014,13 @@ test('balance-consumer inspection pins immutable V1 input and one-way owner-only
     ],
     [
       'migrationIndexSource',
-      '  createProviderPositionChainAnchorRecordIntentMigrationV0031,\n  createMainnetBalanceAgreementEvidenceV2MigrationV0032,\n  createMainnetFinancialActionLifecycleMigrationV0033,\n  createMainnetFinancialActionWalletIdentityBindingMigrationV0034,\n  createMainnetFinancialActionAuthenticatedFinalityMigrationV0035,\n]);',
-      '  createProviderPositionChainAnchorRecordIntentMigrationV0031,\n  createMainnetBalanceAgreementEvidenceV2TestSchemaMigrationV0032,\n  createMainnetFinancialActionLifecycleMigrationV0033,\n  createMainnetFinancialActionWalletIdentityBindingMigrationV0034,\n  createMainnetFinancialActionAuthenticatedFinalityMigrationV0035,\n]);',
+      '  createProviderPositionChainAnchorRecordIntentMigrationV0031,\n  createMainnetBalanceAgreementEvidenceV2MigrationV0032,\n  createMainnetFinancialActionLifecycleMigrationV0033,\n  createMainnetFinancialActionWalletIdentityBindingMigrationV0034,\n  createMainnetFinancialActionAuthenticatedFinalityMigrationV0035,\n  createMainnetFinancialActionFinalityPrerequisiteReadMigrationV0036,\n  createMainnetFinancialActionAtomicFinalityPersistenceMigrationV0037,\n  createMainnetFinancialActionRevocationRecoveryMigrationV0038,\n]);',
+      '  createProviderPositionChainAnchorRecordIntentMigrationV0031,\n  createMainnetBalanceAgreementEvidenceV2TestSchemaMigrationV0032,\n  createMainnetFinancialActionLifecycleMigrationV0033,\n  createMainnetFinancialActionWalletIdentityBindingMigrationV0034,\n  createMainnetFinancialActionAuthenticatedFinalityMigrationV0035,\n  createMainnetFinancialActionFinalityPrerequisiteReadMigrationV0036,\n  createMainnetFinancialActionAtomicFinalityPersistenceMigrationV0037,\n  createMainnetFinancialActionRevocationRecoveryMigrationV0038,\n]);',
     ],
     [
       'migrationIndexSource',
-      '  createProviderPositionChainAnchorRecordIntentTestSchemaMigrationV0031,\n  createMainnetBalanceAgreementEvidenceV2TestSchemaMigrationV0032,\n  createMainnetFinancialActionLifecycleTestSchemaMigrationV0033,\n  createMainnetFinancialActionWalletIdentityBindingTestSchemaMigrationV0034,\n  createMainnetFinancialActionAuthenticatedFinalityTestSchemaMigrationV0035,\n]);',
-      '  createProviderPositionChainAnchorRecordIntentTestSchemaMigrationV0031,\n  createMainnetBalanceAgreementEvidenceV2MigrationV0032,\n  createMainnetFinancialActionLifecycleTestSchemaMigrationV0033,\n  createMainnetFinancialActionWalletIdentityBindingTestSchemaMigrationV0034,\n  createMainnetFinancialActionAuthenticatedFinalityTestSchemaMigrationV0035,\n]);',
+      '  createProviderPositionChainAnchorRecordIntentTestSchemaMigrationV0031,\n  createMainnetBalanceAgreementEvidenceV2TestSchemaMigrationV0032,\n  createMainnetFinancialActionLifecycleTestSchemaMigrationV0033,\n  createMainnetFinancialActionWalletIdentityBindingTestSchemaMigrationV0034,\n  createMainnetFinancialActionAuthenticatedFinalityTestSchemaMigrationV0035,\n  createMainnetFinancialActionFinalityPrerequisiteReadTestSchemaMigrationV0036,\n  createMainnetFinancialActionAtomicFinalityPersistenceTestSchemaMigrationV0037,\n  createMainnetFinancialActionRevocationRecoveryTestSchemaMigrationV0038,\n]);',
+      '  createProviderPositionChainAnchorRecordIntentTestSchemaMigrationV0031,\n  createMainnetBalanceAgreementEvidenceV2MigrationV0032,\n  createMainnetFinancialActionLifecycleTestSchemaMigrationV0033,\n  createMainnetFinancialActionWalletIdentityBindingTestSchemaMigrationV0034,\n  createMainnetFinancialActionAuthenticatedFinalityTestSchemaMigrationV0035,\n  createMainnetFinancialActionFinalityPrerequisiteReadTestSchemaMigrationV0036,\n  createMainnetFinancialActionAtomicFinalityPersistenceTestSchemaMigrationV0037,\n  createMainnetFinancialActionRevocationRecoveryTestSchemaMigrationV0038,\n]);',
     ],
   ];
 
@@ -6844,14 +6844,14 @@ test('repository loader brands the bounded full API runtime absence attestation'
   assert.equal(Object.isFrozen(attestation), true);
   assert.deepEqual(attestation, {
     inspected: true,
-    sourceFileCount: 403,
-    sourceBytes: 6_704_387,
+    sourceFileCount: 424,
+    sourceBytes: 7448497,
     repositorySnapshotSha256: attestation?.repositorySnapshotSha256,
     concreteDeploymentIdentityRegistration: 'ABSENT',
   });
   assert.equal(
     attestation?.repositorySnapshotSha256,
-    'd1854a4f4e55ed4321e06a7bf6684bdf164f82819b8a4e751c0c94b8747621e5',
+    '251c92bbcda6bbf18494e6f59e38b927fee85de20cc40adfb5006c139ea5a92d',
   );
 });
 

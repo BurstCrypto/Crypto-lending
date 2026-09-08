@@ -424,7 +424,7 @@ test('keeps authenticated finality dormant, authority-empty, and ledger-nonrever
   const reorganization = record.threats.find(({ id }) => id === 'THR-LEDGER-004');
   const availability = record.threats.find(({ id }) => id === 'THR-AVAILABILITY-003');
 
-  assert.equal(record.modelVersion, '2026-09-07-authenticated-finality-v1');
+  assert.equal(record.modelVersion, '2026-09-08-durable-recovery-v1');
   assert.match(stateBoundary.source, /no application grant/u);
   assert(
     stateBoundary.evidence.includes(
@@ -474,8 +474,14 @@ test('keeps authenticated finality dormant, authority-empty, and ledger-nonrever
         mitigation.includes('never authorize or reverse ledger settlement'),
     ),
   );
-  assert.match(reorganization.residualRisk, /authority tables are empty/u);
-  assert.match(reorganization.residualRisk, /no concrete prerequisite adapter, source adapter/u);
+  assert.match(reorganization.residualRisk, /authority tables and write manifests are empty/u);
+  assert.match(reorganization.residualRisk, /no live source adapter, scheduled runtime execution/u);
+  assert.match(reconciliation.residualRisk, /Migrations 0039-0042 remain unregistered/u);
+  assert(
+    reconciliation.mitigations.some((mitigation) =>
+      mitigation.includes('authenticated durable completion'),
+    ),
+  );
   assert.match(reorganization.residualRisk, /cannot be physically cancelled/u);
   assert.match(reorganization.residualRisk, /downstream ledger-remediation policy/u);
   assert(availability.boundaryIds.includes('TB-10'));

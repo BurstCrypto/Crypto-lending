@@ -785,6 +785,15 @@ describeWithPostgres('wallet ownership registration persistence', () => {
         digest(14),
       ],
     );
+    await pool.query(
+      `INSERT INTO wallet_ownership_challenge_identity_digests (
+         challenge_id, account_id, chain_namespace, chain_reference,
+         address_digest_version, address_digest
+       ) SELECT challenge_id, account_id, chain_namespace, chain_reference,
+                address_digest_version, address_digest
+         FROM wallet_ownership_challenges WHERE challenge_id = $1`,
+      [expiredChallenge],
+    );
     const expired = await pool.query<{ prepare_outcome: string }>(
       'SELECT prepare_outcome FROM prepare_wallet_ownership_challenge($1, $2, $3)',
       [expiredChallenge, accountA, randomUUID()],
@@ -919,6 +928,15 @@ describeWithPostgres('wallet ownership registration persistence', () => {
       ],
     );
 
+    await pool.query(
+      `INSERT INTO wallet_ownership_challenge_identity_digests (
+         challenge_id, account_id, chain_namespace, chain_reference,
+         address_digest_version, address_digest
+       ) SELECT challenge_id, account_id, chain_namespace, chain_reference,
+                address_digest_version, address_digest
+         FROM wallet_ownership_challenges WHERE challenge_id = $1`,
+      [challengeId],
+    );
     const lockClient = await pool.connect();
     const completionClient = await pool.connect();
     let completionPromise:
@@ -1048,6 +1066,15 @@ describeWithPostgres('wallet ownership registration persistence', () => {
       ],
     );
 
+    await pool.query(
+      `INSERT INTO wallet_ownership_challenge_identity_digests (
+         challenge_id, account_id, chain_namespace, chain_reference,
+         address_digest_version, address_digest
+       ) SELECT challenge_id, account_id, chain_namespace, chain_reference,
+                address_digest_version, address_digest
+         FROM wallet_ownership_challenges WHERE challenge_id = $1`,
+      [challengeId],
+    );
     const lockClient = await pool.connect();
     const completionClient = await pool.connect();
     let completionPromise:
@@ -1213,9 +1240,11 @@ describeWithPostgres('wallet ownership registration persistence', () => {
   });
 
   it('fails closed when revocation triggers, indexes, or constraints drift', async () => {
-    const migration = DATABASE_TEST_SCHEMA_MIGRATION_LIST.find(({ id }) => id === '0016');
+    // Successor recovery migrations retain these controls and replace the
+    // historical 0016 function definitions in the cumulative verifier.
+    const migration = DATABASE_TEST_SCHEMA_MIGRATION_LIST.at(-1);
     if (!migration?.verifySql || typeof migration.verifySql !== 'string') {
-      throw new Error('Migration 0016 must expose one verification statement');
+      throw new Error('The current cumulative migration must expose one verification statement');
     }
 
     await expect(pool.query<{ valid: boolean }>(migration.verifySql)).resolves.toMatchObject({
@@ -1224,13 +1253,13 @@ describeWithPostgres('wallet ownership registration persistence', () => {
 
     const stateCandidate = await pool.query<{
       challenge_id: string;
-      original_created_at: Date;
-      revoked_at: Date;
+      original_created_at: string;
+      revoked_at: string;
     }>(
       `SELECT
          active_wallet.registered_by_challenge_id AS challenge_id,
-         registration_challenge.created_at AS original_created_at,
-         tombstone.revoked_at
+         registration_challenge.created_at::text AS original_created_at,
+         tombstone.revoked_at::text
        FROM registered_wallets AS active_wallet
        INNER JOIN wallet_ownership_challenges AS registration_challenge
          ON registration_challenge.challenge_id = active_wallet.registered_by_challenge_id

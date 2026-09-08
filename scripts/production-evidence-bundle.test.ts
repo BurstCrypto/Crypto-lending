@@ -2460,7 +2460,10 @@ test('bounded file loading rejects unstable, empty, linked, and oversized inputs
       'PRODUCTION_PREFLIGHT_EVIDENCE_BUNDLE_INVALID',
     );
   } finally {
-    if (junctionCreated) rmdirSync(junctionPath);
+    if (junctionCreated) {
+      if (process.platform === 'win32') rmdirSync(junctionPath);
+      else unlinkSync(junctionPath);
+    }
     if (directLinkCreated) unlinkSync(directLinkPath);
     if (hardlinkCreated) unlinkSync(hardlinkPath);
     unlinkSync(validPath);

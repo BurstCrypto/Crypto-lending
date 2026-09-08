@@ -188,7 +188,7 @@ function git(root, args) {
 }
 
 function initializeRepository(root) {
-  write(root, '.gitignore', '.local-validation/\n');
+  write(root, '.gitignore', '.local-validation\n');
   git(root, ['init', '--quiet']);
   git(root, ['config', 'user.name', 'Release Test']);
   git(root, ['config', 'user.email', 'release-test@example.invalid']);

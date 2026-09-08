@@ -4,6 +4,9 @@ This repository contains the production-shaped application foundation for the
 Crypto Lending platform. It is an npm workspace with a Next.js web application,
 a versioned NestJS API, and shared PostgreSQL, Redis, and SQS infrastructure.
 
+The [zero-cost repository audit](docs/zero-cost-repository-audit-2026-09-08.md)
+records the current local verification checkpoint and remaining external gates.
+
 ## Prerequisites
 
 - Node.js 22.13 or newer on the Node 22 line, or Node.js 24+
