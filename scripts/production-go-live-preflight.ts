@@ -773,7 +773,7 @@ const REVIEWED_PROVIDER_POSITION_READ_ARTIFACT_SHA256 = Object.freeze({
   providerPositionChainAnchorRecordIntentReconciliationLifecycleSource:
     '4b0bd742fe5508c2c18b07c10ae7feb4c5a2d888c1498fde8ee01a784fc040dc',
   providerPositionMigrationIndexSource:
-    'd62add472520e4101623d0e0fcefe600ec0bd028e3c5dc8b5e28c9feb64c66fb',
+    'a70554e3ccbd6af9f2e37beeef2c6db9e3351bf8a350f94ea6f8b85f6cfc47a8',
   providerPositionAdmissionCoordinatorSource:
     'bcd6324695359cd3ef43ac6620da2b756c379c75fe5c0e99897791996b3312eb',
   providerPositionDeadlineRunnerSource:
@@ -1001,7 +1001,7 @@ const REVIEWED_BALANCE_CONSUMER_ARTIFACT_SHA256 = Object.freeze({
     '9ff329c1ce601cc2b830036239b2f16f34ebe6163aca57e033714d2e8718010f',
   mainnetBalanceAgreementEvidenceV2MigrationSource:
     'c9afef59a9101d568597eb37845d6d2a997edf63f1496d3d04296075fcc61fff',
-  migrationIndexSource: 'd62add472520e4101623d0e0fcefe600ec0bd028e3c5dc8b5e28c9feb64c66fb',
+  migrationIndexSource: 'a70554e3ccbd6af9f2e37beeef2c6db9e3351bf8a350f94ea6f8b85f6cfc47a8',
   releaseManifestSource: 'a06a41af34ec8f52a8001572aef68a2e3ea38520318152a4953b575f877745d6',
   productionContainerValidatorSource:
     'a9fbc9e638f4a33266e823ff8c07a9b53703e1bc8f1f4f46eab30c7b50a9b0b0',
@@ -9647,7 +9647,7 @@ const API_RUNTIME_PINNED_INPUT_PATHS = Object.freeze([
   'tsconfig.json',
 ]);
 const REVIEWED_API_RUNTIME_REPOSITORY_SNAPSHOT_SHA256 =
-  '15858ec81b7be55d312fe13e6cb969b3a34e8fcea25c3c735eac52888b7e875a';
+  'd1854a4f4e55ed4321e06a7bf6684bdf164f82819b8a4e751c0c94b8747621e5';
 const API_RUNTIME_OWNED_DEPLOYMENT_IDENTITY_PATHS = new Set([
   'blockchain-sync/infrastructure/rpc/ethereum-mainnet-balance-deployment-identity.verifier.ts',
   'blockchain-sync/infrastructure/rpc/ethereum-mainnet-balance-deployment.manifest.ts',
