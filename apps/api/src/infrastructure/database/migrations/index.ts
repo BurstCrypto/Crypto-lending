@@ -128,6 +128,10 @@ import {
   createMainnetFinancialActionAtomicFinalityPersistenceMigrationV0037,
   createMainnetFinancialActionAtomicFinalityPersistenceTestSchemaMigrationV0037,
 } from './0037-atomically-persist-mainnet-financial-action-finality.migration';
+import {
+  createMainnetFinancialActionRevocationRecoveryMigrationV0038,
+  createMainnetFinancialActionRevocationRecoveryTestSchemaMigrationV0038,
+} from './0038-preserve-mainnet-financial-action-recovery-after-wallet-revocation.migration';
 import type { DatabaseMigration } from './migration';
 
 /**
@@ -173,6 +177,7 @@ export const DATABASE_TEST_SCHEMA_MIGRATION_LIST: readonly DatabaseMigration[] =
   createMainnetFinancialActionAuthenticatedFinalityTestSchemaMigrationV0035,
   createMainnetFinancialActionFinalityPrerequisiteReadTestSchemaMigrationV0036,
   createMainnetFinancialActionAtomicFinalityPersistenceTestSchemaMigrationV0037,
+  createMainnetFinancialActionRevocationRecoveryTestSchemaMigrationV0038,
 ]);
 
 export const DATABASE_MIGRATION_LIST: readonly DatabaseMigration[] = Object.freeze([
@@ -213,6 +218,7 @@ export const DATABASE_MIGRATION_LIST: readonly DatabaseMigration[] = Object.free
   createMainnetFinancialActionAuthenticatedFinalityMigrationV0035,
   createMainnetFinancialActionFinalityPrerequisiteReadMigrationV0036,
   createMainnetFinancialActionAtomicFinalityPersistenceMigrationV0037,
+  createMainnetFinancialActionRevocationRecoveryMigrationV0038,
 ]);
 
 export type { DatabaseMigration } from './migration';
@@ -379,3 +385,8 @@ export {
   createMainnetFinancialActionAtomicFinalityPersistenceMigrationV0037,
   createMainnetFinancialActionAtomicFinalityPersistenceTestSchemaMigrationV0037,
 } from './0037-atomically-persist-mainnet-financial-action-finality.migration';
+export {
+  createMainnetFinancialActionRevocationRecoveryMigration,
+  createMainnetFinancialActionRevocationRecoveryMigrationV0038,
+  createMainnetFinancialActionRevocationRecoveryTestSchemaMigrationV0038,
+} from './0038-preserve-mainnet-financial-action-recovery-after-wallet-revocation.migration';

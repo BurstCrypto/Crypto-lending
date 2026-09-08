@@ -34,17 +34,16 @@ describe('migration 0037 atomic authenticated-finality persistence', () => {
     'DO $set_atomic_finality_persistence_paths$',
   );
 
-  it('supersedes 0036 and registers both variants last', () => {
+  it('supersedes 0036 and retains both immutable variants immediately before 0038', () => {
     expect(migration).toMatchObject({ id: '0037', supersedesVerificationOf: ['0036'] });
     expect(migration.transactional).not.toBe(false);
-    expect(DATABASE_MIGRATION_LIST.at(-1)).toBe(
+    expect(DATABASE_MIGRATION_LIST.at(-2)).toBe(
       createMainnetFinancialActionAtomicFinalityPersistenceMigrationV0037,
     );
-    expect(DATABASE_TEST_SCHEMA_MIGRATION_LIST.at(-1)).toBe(
+    expect(DATABASE_TEST_SCHEMA_MIGRATION_LIST.at(-2)).toBe(
       createMainnetFinancialActionAtomicFinalityPersistenceTestSchemaMigrationV0037,
     );
     expect(DATABASE_MIGRATION_LIST.map(({ id }) => id).slice(-9)).toEqual([
-      '0029',
       '0030',
       '0031',
       '0032',
@@ -53,6 +52,7 @@ describe('migration 0037 atomic authenticated-finality persistence', () => {
       '0035',
       '0036',
       '0037',
+      '0038',
     ]);
   });
 

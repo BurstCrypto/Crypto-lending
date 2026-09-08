@@ -14,8 +14,10 @@ import {
   type CompleteWalletRegistrationRequest,
   type CompleteWalletRegistrationResult,
   type ListActiveWalletRegistrationsRequest,
+  type MainnetFinancialActionRecoveryWalletRecord,
   type PrepareWalletOwnershipChallengeRequest,
   type PrepareWalletOwnershipChallengeResult,
+  type ReadMainnetFinancialActionRecoveryWalletRequest,
   type RejectWalletOwnershipChallengeRequest,
   type RejectWalletOwnershipChallengeResult,
   type RevokeWalletRegistrationRequest,
@@ -102,6 +104,34 @@ interface ActiveWalletRow extends QueryResultRow {
   active_registered_at: Date;
 }
 
+interface MainnetFinancialActionRecoveryWalletRow extends QueryResultRow {
+  account_id: string;
+  intent_id: string;
+  wallet_registration_id: string;
+  registered_by_challenge_id: string;
+  network_id: string;
+  lifecycle_revision: string;
+  lifecycle_snapshot_sha256: string;
+  lifecycle_stage: string;
+  wallet_chain_namespace: string;
+  wallet_chain_reference: string;
+  registry_environment: string;
+  registry_version: number;
+  registry_fingerprint_sha256: string;
+  wallet_identity_digest_version: number;
+  wallet_identity_digest: Buffer;
+  verification_identity_digest_version: number;
+  verification_identity_digest: Buffer;
+  address_key_version: number;
+  address_ciphertext: Buffer;
+  address_iv: Buffer;
+  address_auth_tag: Buffer;
+  registered_at: Date;
+  wallet_status: string;
+  revoked_at: Date | null;
+  verified_at: Date;
+}
+
 export class WalletRegistrationPersistenceError extends Error {
   readonly code = 'WALLET_REGISTRATION_PERSISTENCE_ERROR' as const;
 
@@ -127,6 +157,22 @@ function finiteDate(value: unknown): Date {
 
 function uuid(value: unknown): string {
   if (!isCanonicalUuidV4(value)) throw new WalletRegistrationPersistenceError();
+  return value;
+}
+
+function positiveBigintText(value: unknown): string {
+  if (typeof value !== 'string' || !/^[1-9][0-9]{0,18}$/u.test(value)) {
+    throw new WalletRegistrationPersistenceError();
+  }
+  const parsed = BigInt(value);
+  if (parsed > 9_223_372_036_854_775_807n) throw new WalletRegistrationPersistenceError();
+  return value;
+}
+
+function lowerDigest(value: unknown): string {
+  if (typeof value !== 'string' || !LOWER_HEX_DIGEST.test(value) || /^0{64}$/u.test(value)) {
+    throw new WalletRegistrationPersistenceError();
+  }
   return value;
 }
 
@@ -321,11 +367,7 @@ export class PostgresWalletRegistrationRepository implements WalletRegistrationR
       const result =
         signal === undefined
           ? await this.postgres.query<ActiveWalletRow>(query, values)
-          : await this.postgres.queryWithCancellation<ActiveWalletRow>(
-              query,
-              values,
-              signal,
-            );
+          : await this.postgres.queryWithCancellation<ActiveWalletRow>(query, values, signal);
       if (
         !Array.isArray(result.rows) ||
         result.rows.length > MAX_ACTIVE_WALLET_REGISTRATIONS_PER_ACCOUNT
@@ -378,6 +420,121 @@ export class PostgresWalletRegistrationRepository implements WalletRegistrationR
           });
         }),
       );
+    } catch {
+      throw new WalletRegistrationPersistenceError();
+    }
+  }
+
+  async readMainnetFinancialActionRecoveryWallet(
+    request: ReadMainnetFinancialActionRecoveryWalletRequest,
+  ): Promise<MainnetFinancialActionRecoveryWalletRecord | null> {
+    try {
+      const accountId = parseAccountId(request.accountId);
+      const intentId = uuid(request.intentId);
+      const lifecycleRevision = positiveBigintText(request.lifecycleRevision);
+      const lifecycleSnapshotSha256 = lowerDigest(request.lifecycleSnapshotSha256);
+      if (
+        request.purpose !== 'RECONCILIATION_ADMISSION' &&
+        request.purpose !== 'POST_FINALITY_REVIEW'
+      ) {
+        throw new WalletRegistrationPersistenceError();
+      }
+      const deadlineAt = finiteDate(request.deadlineAt);
+      const result =
+        await this.postgres.queryWithCancellation<MainnetFinancialActionRecoveryWalletRow>(
+          `SELECT recovery.*
+         FROM read_mainnet_financial_action_recovery_wallet_v1(
+           $1::uuid, $2::uuid, $3::bigint, $4::text, $5::text, $6::timestamptz
+         ) AS recovery
+         LIMIT 2`,
+          [
+            accountId,
+            intentId,
+            lifecycleRevision,
+            lifecycleSnapshotSha256,
+            request.purpose,
+            deadlineAt,
+          ],
+          request.signal,
+        );
+      if (!Array.isArray(result.rows) || result.rows.length > 1) {
+        throw new WalletRegistrationPersistenceError();
+      }
+      const row = result.rows[0];
+      if (row === undefined) return null;
+
+      const returnedAccountId = parseAccountId(row.account_id);
+      const returnedIntentId = uuid(row.intent_id);
+      const returnedRevision = positiveBigintText(row.lifecycle_revision);
+      const returnedSnapshot = lowerDigest(row.lifecycle_snapshot_sha256);
+      const stage = row.lifecycle_stage;
+      const permittedStage =
+        request.purpose === 'RECONCILIATION_ADMISSION'
+          ? stage === 'WALLET_SIGNED_SUBMISSION_BOUND' ||
+            stage === 'BROADCAST_OUTCOME_AMBIGUOUS' ||
+            stage === 'RECONCILIATION_AMBIGUOUS'
+          : stage === 'FINALIZED_SUCCESS' || stage === 'FINALIZED_FAILURE';
+      const status = row.wallet_status;
+      const revokedAt = row.revoked_at === null ? null : finiteDate(row.revoked_at);
+      const verifiedAt = finiteDate(row.verified_at);
+      const registeredAt = finiteDate(row.registered_at);
+      const chainId = parseWalletChainId(
+        `${row.wallet_chain_namespace}:${row.wallet_chain_reference}`,
+      );
+      if (
+        returnedAccountId !== accountId ||
+        returnedIntentId !== intentId ||
+        returnedRevision !== lifecycleRevision ||
+        returnedSnapshot !== lifecycleSnapshotSha256 ||
+        row.network_id !== chainId ||
+        !permittedStage ||
+        (status !== 'ACTIVE' && status !== 'REVOKED') ||
+        (status === 'ACTIVE') !== (revokedAt === null) ||
+        verifiedAt.getTime() >= deadlineAt.getTime() ||
+        registeredAt.getTime() > verifiedAt.getTime() ||
+        (revokedAt !== null &&
+          (revokedAt.getTime() < registeredAt.getTime() ||
+            revokedAt.getTime() > verifiedAt.getTime()))
+      ) {
+        throw new WalletRegistrationPersistenceError();
+      }
+
+      const registry = registryBinding(
+        row.registry_environment,
+        row.registry_version,
+        row.registry_fingerprint_sha256,
+      );
+      if (registry.environment !== 'MAINNET') throw new WalletRegistrationPersistenceError();
+      return Object.freeze({
+        accountId: returnedAccountId,
+        intentId: returnedIntentId,
+        walletId: uuid(row.wallet_registration_id),
+        registeredByChallengeId: parseWalletChallengeId(row.registered_by_challenge_id),
+        chainId,
+        lifecycleRevision: returnedRevision,
+        lifecycleSnapshotSha256: returnedSnapshot,
+        lifecycleStage: stage as MainnetFinancialActionRecoveryWalletRecord['lifecycleStage'],
+        registry: Object.freeze({ ...registry, environment: 'MAINNET' as const }),
+        addressDigest: digestReference<'address'>(
+          row.wallet_identity_digest_version,
+          row.wallet_identity_digest,
+        ),
+        verificationAddressDigest: digestReference<'address'>(
+          row.verification_identity_digest_version,
+          row.verification_identity_digest,
+        ),
+        encryptedAddress: sealedValue(
+          row.address_key_version,
+          row.address_ciphertext,
+          row.address_iv,
+          row.address_auth_tag,
+          512,
+        ),
+        registeredAt,
+        status,
+        revokedAt,
+        verifiedAt,
+      });
     } catch {
       throw new WalletRegistrationPersistenceError();
     }

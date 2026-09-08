@@ -23,12 +23,16 @@ import {
   parseWalletAddress,
   parseWalletChainId,
   walletNamespaceOf,
+  type WalletAddress,
+  type WalletOwnershipChainId,
 } from '../domain/wallet-identity';
 import { isWalletRegistrationLaunchChain } from '../domain/wallet-registration-launch-policy';
 import {
   MAX_ACTIVE_WALLET_REGISTRATIONS_PER_ACCOUNT,
   WALLET_REGISTRATION_REPOSITORY,
+  type MainnetFinancialActionRecoveryWalletPurpose,
   type PrepareWalletOwnershipChallengeResult,
+  type ReadMainnetFinancialActionRecoveryWalletRequest,
   type WalletChallengeRejectionReason,
   type WalletProofScheme,
   type WalletRegistrationRepositoryPort,
@@ -118,6 +122,37 @@ export interface ActiveWalletRoster {
 export interface ListActiveWalletsOptions {
   /** Exact caller cancellation propagated to the durable roster read. */
   readonly signal: AbortSignal;
+}
+
+export interface ReadMainnetFinancialActionRecoveryWalletInput {
+  readonly accountId: AccountId;
+  readonly intentId: string;
+  readonly lifecycleRevision: string;
+  readonly lifecycleSnapshotSha256: string;
+  readonly purpose: MainnetFinancialActionRecoveryWalletPurpose;
+  readonly deadlineAt: Date;
+  readonly signal: AbortSignal;
+}
+
+export interface MainnetFinancialActionRecoveryWallet {
+  readonly mayAuthorizeFinancialAction: false;
+  readonly mayPersist: false;
+  readonly accountId: AccountId;
+  readonly intentId: string;
+  readonly walletId: string;
+  readonly chainId: WalletOwnershipChainId;
+  readonly address: WalletAddress;
+  readonly lifecycleRevision: string;
+  readonly lifecycleSnapshotSha256: string;
+  readonly lifecycleStage:
+    | 'WALLET_SIGNED_SUBMISSION_BOUND'
+    | 'BROADCAST_OUTCOME_AMBIGUOUS'
+    | 'RECONCILIATION_AMBIGUOUS'
+    | 'FINALIZED_SUCCESS'
+    | 'FINALIZED_FAILURE';
+  readonly walletStatus: 'ACTIVE' | 'REVOKED';
+  readonly revokedAt: string | null;
+  readonly verifiedAt: string;
 }
 
 export const WALLET_REGISTRATION_CLOCK = Symbol('WALLET_REGISTRATION_CLOCK');
@@ -275,6 +310,151 @@ export class WalletRegistrationService {
       return Object.freeze({
         version: ACTIVE_WALLET_ROSTER_VERSION,
         wallets: Object.freeze(wallets),
+      });
+    } catch {
+      throw new WalletRegistrationUnavailableError();
+    }
+  }
+
+  /**
+   * Resolves one immutable wallet only for an already signed-bound mainnet
+   * financial-action recovery cursor. It deliberately cannot enumerate
+   * revoked wallets and cannot prepare, sign, broadcast, resend, or persist.
+   */
+  async readMainnetFinancialActionRecoveryWallet(
+    input: ReadMainnetFinancialActionRecoveryWalletInput,
+  ): Promise<MainnetFinancialActionRecoveryWallet> {
+    try {
+      const config = this.enabledConfig();
+      if (config.registryEnvironment !== 'MAINNET') throw new Error('mainnet required');
+      const accountId = parseAccountId(input.accountId);
+      if (
+        !isCanonicalUuidV4(input.intentId) ||
+        !/^[1-9][0-9]{0,18}$/u.test(input.lifecycleRevision) ||
+        BigInt(input.lifecycleRevision) > 9_223_372_036_854_775_807n ||
+        !/^[0-9a-f]{64}$/u.test(input.lifecycleSnapshotSha256) ||
+        /^0{64}$/u.test(input.lifecycleSnapshotSha256) ||
+        (input.purpose !== 'RECONCILIATION_ADMISSION' &&
+          input.purpose !== 'POST_FINALITY_REVIEW') ||
+        !(input.deadlineAt instanceof Date) ||
+        !Number.isFinite(input.deadlineAt.getTime()) ||
+        input.deadlineAt.getTime() !== Math.trunc(input.deadlineAt.getTime()) ||
+        input.signal.aborted
+      ) {
+        throw new Error('invalid recovery request');
+      }
+      const startedAt = this.clock.now();
+      if (
+        !(startedAt instanceof Date) ||
+        !Number.isFinite(startedAt.getTime()) ||
+        startedAt.getTime() >= input.deadlineAt.getTime() ||
+        input.deadlineAt.getTime() - startedAt.getTime() > 30_000
+      ) {
+        throw new Error('stale recovery request');
+      }
+
+      const repositoryRequest: ReadMainnetFinancialActionRecoveryWalletRequest = {
+        accountId,
+        intentId: input.intentId,
+        lifecycleRevision: input.lifecycleRevision,
+        lifecycleSnapshotSha256: input.lifecycleSnapshotSha256,
+        purpose: input.purpose,
+        deadlineAt: input.deadlineAt,
+        signal: input.signal,
+      };
+      const record =
+        await this.repository.readMainnetFinancialActionRecoveryWallet(repositoryRequest);
+      const completedAt = this.clock.now();
+      const latest = supportedAssetRegistryForEnvironment('MAINNET').latest;
+      const permittedStage =
+        input.purpose === 'RECONCILIATION_ADMISSION'
+          ? record?.lifecycleStage === 'WALLET_SIGNED_SUBMISSION_BOUND' ||
+            record?.lifecycleStage === 'BROADCAST_OUTCOME_AMBIGUOUS' ||
+            record?.lifecycleStage === 'RECONCILIATION_AMBIGUOUS'
+          : record?.lifecycleStage === 'FINALIZED_SUCCESS' ||
+            record?.lifecycleStage === 'FINALIZED_FAILURE';
+      if (
+        record === null ||
+        input.signal.aborted ||
+        !(completedAt instanceof Date) ||
+        !Number.isFinite(completedAt.getTime()) ||
+        completedAt.getTime() < startedAt.getTime() ||
+        completedAt.getTime() >= input.deadlineAt.getTime() ||
+        record.accountId !== accountId ||
+        record.intentId !== input.intentId ||
+        !isCanonicalUuidV4(record.walletId) ||
+        !isCanonicalUuidV4(record.registeredByChallengeId) ||
+        (record.chainId !== 'eip155:1' &&
+          record.chainId !== 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp') ||
+        record.lifecycleRevision !== input.lifecycleRevision ||
+        record.lifecycleSnapshotSha256 !== input.lifecycleSnapshotSha256 ||
+        !permittedStage ||
+        record.registry.environment !== 'MAINNET' ||
+        record.registry.version !== latest.version ||
+        record.registry.fingerprintSha256 !== latest.fingerprintSha256 ||
+        record.verificationAddressDigest.version !== config.identityHmacKeys.activeWriteVersion ||
+        !(record.registeredAt instanceof Date) ||
+        !Number.isFinite(record.registeredAt.getTime()) ||
+        !(record.verifiedAt instanceof Date) ||
+        !Number.isFinite(record.verifiedAt.getTime()) ||
+        record.verifiedAt.getTime() < startedAt.getTime() ||
+        record.verifiedAt.getTime() >= input.deadlineAt.getTime() ||
+        record.registeredAt.getTime() > record.verifiedAt.getTime() ||
+        (record.status !== 'ACTIVE' && record.status !== 'REVOKED') ||
+        (record.status === 'ACTIVE') !== (record.revokedAt === null) ||
+        (record.revokedAt !== null &&
+          (!(record.revokedAt instanceof Date) ||
+            !Number.isFinite(record.revokedAt.getTime()) ||
+            record.revokedAt.getTime() < record.registeredAt.getTime() ||
+            record.revokedAt.getTime() > record.verifiedAt.getTime()))
+      ) {
+        throw new Error('recovery wallet unavailable');
+      }
+
+      const sealBinding: WalletRegistrationSealBinding = {
+        field: 'address',
+        walletId: record.walletId,
+        challengeId: record.registeredByChallengeId,
+        accountId,
+        networkId: record.chainId,
+        addressDigest: record.addressDigest,
+      };
+      const address = parseWalletAddress(
+        record.chainId,
+        openWalletRegistrationValue(
+          walletRegistrationKeyForVersion(
+            config.metadataSealKeys,
+            record.encryptedAddress.keyVersion,
+          ),
+          sealBinding,
+          record.encryptedAddress,
+        ),
+      );
+      const verifiedDigest = digestWalletIdentity(
+        walletRegistrationKeyForVersion(
+          config.identityHmacKeys,
+          record.verificationAddressDigest.version,
+        ),
+        record.chainId,
+        address,
+      );
+      if (!walletRegistrationDigestEquals(record.verificationAddressDigest, verifiedDigest)) {
+        throw new Error('recovery wallet digest mismatch');
+      }
+      return Object.freeze({
+        mayAuthorizeFinancialAction: false,
+        mayPersist: false,
+        accountId,
+        intentId: record.intentId,
+        walletId: record.walletId,
+        chainId: record.chainId,
+        address,
+        lifecycleRevision: record.lifecycleRevision,
+        lifecycleSnapshotSha256: record.lifecycleSnapshotSha256,
+        lifecycleStage: record.lifecycleStage,
+        walletStatus: record.status,
+        revokedAt: record.revokedAt?.toISOString() ?? null,
+        verifiedAt: record.verifiedAt.toISOString(),
       });
     } catch {
       throw new WalletRegistrationUnavailableError();

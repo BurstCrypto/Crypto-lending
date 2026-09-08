@@ -31,6 +31,9 @@ const WALLET_ID = randomUUID();
 const CORRELATION_ID = randomUUID();
 const ADDRESS = '0xde709f2102306220921060314715629080e2fb77';
 const NETWORK = 'eip155:11155111' as const;
+const MAINNET_NETWORK = 'eip155:1' as const;
+const MAINNET_REGISTRY_FINGERPRINT =
+  '5058b141479f114c1e5f87ed8798fbb7a7ffcce7b502aa7e0794dc53ca1f767d';
 
 function result<Row>(rows: readonly Row[]): QueryResult<Row & Record<string, unknown>> {
   return {
@@ -120,6 +123,133 @@ function repositoryWith(
 }
 
 describe('PostgresWalletRegistrationRepository', () => {
+  it('reads one exact cancellation-aware mainnet recovery wallet including historical and verification aliases', async () => {
+    const intentId = randomUUID();
+    const signal = new AbortController().signal;
+    const deadlineAt = new Date(NOW.getTime() + 5_000);
+    const identityKey = createWalletRegistrationKey(
+      'identity-hmac',
+      1,
+      randomBytes(32).toString('base64url'),
+    );
+    const sealKey = createWalletRegistrationKey(
+      'metadata-seal',
+      1,
+      randomBytes(32).toString('base64url'),
+    );
+    const addressDigest = digestWalletIdentity(identityKey, MAINNET_NETWORK, ADDRESS);
+    const encryptedAddress = sealWalletRegistrationValue(
+      sealKey,
+      {
+        field: 'address',
+        walletId: WALLET_ID,
+        challengeId: CHALLENGE_ID,
+        accountId: ACCOUNT_ID,
+        networkId: MAINNET_NETWORK,
+        addressDigest,
+      },
+      ADDRESS,
+    );
+    const row = {
+      account_id: ACCOUNT_ID,
+      intent_id: intentId,
+      wallet_registration_id: WALLET_ID,
+      registered_by_challenge_id: CHALLENGE_ID,
+      network_id: MAINNET_NETWORK,
+      lifecycle_revision: '2',
+      lifecycle_snapshot_sha256: 'a'.repeat(64),
+      lifecycle_stage: 'WALLET_SIGNED_SUBMISSION_BOUND',
+      wallet_chain_namespace: 'eip155',
+      wallet_chain_reference: '1',
+      registry_environment: 'MAINNET',
+      registry_version: 1,
+      registry_fingerprint_sha256: MAINNET_REGISTRY_FINGERPRINT,
+      wallet_identity_digest_version: 1,
+      wallet_identity_digest: Buffer.from(addressDigest.value, 'hex'),
+      verification_identity_digest_version: 1,
+      verification_identity_digest: Buffer.from(addressDigest.value, 'hex'),
+      address_key_version: encryptedAddress.keyVersion,
+      address_ciphertext: Buffer.from(encryptedAddress.ciphertext, 'base64url'),
+      address_iv: Buffer.from(encryptedAddress.iv, 'base64url'),
+      address_auth_tag: Buffer.from(encryptedAddress.authTag, 'base64url'),
+      registered_at: new Date(NOW.getTime() - 60_000),
+      wallet_status: 'REVOKED',
+      revoked_at: NOW,
+      verified_at: NOW,
+    };
+    const query = jest.fn();
+    const queryWithCancellation = jest.fn().mockResolvedValue(result([row]));
+
+    await expect(
+      repositoryWith(query, queryWithCancellation).readMainnetFinancialActionRecoveryWallet({
+        accountId: ACCOUNT_ID,
+        intentId,
+        lifecycleRevision: '2',
+        lifecycleSnapshotSha256: 'a'.repeat(64),
+        purpose: 'RECONCILIATION_ADMISSION',
+        deadlineAt,
+        signal,
+      }),
+    ).resolves.toEqual({
+      accountId: ACCOUNT_ID,
+      intentId,
+      walletId: WALLET_ID,
+      registeredByChallengeId: CHALLENGE_ID,
+      chainId: MAINNET_NETWORK,
+      lifecycleRevision: '2',
+      lifecycleSnapshotSha256: 'a'.repeat(64),
+      lifecycleStage: 'WALLET_SIGNED_SUBMISSION_BOUND',
+      registry: {
+        environment: 'MAINNET',
+        version: 1,
+        fingerprintSha256: MAINNET_REGISTRY_FINGERPRINT,
+      },
+      addressDigest,
+      verificationAddressDigest: addressDigest,
+      encryptedAddress,
+      registeredAt: row.registered_at,
+      status: 'REVOKED',
+      revokedAt: NOW,
+      verifiedAt: NOW,
+    });
+    expect(query).not.toHaveBeenCalled();
+    expect(queryWithCancellation).toHaveBeenCalledWith(
+      expect.stringMatching(
+        /read_mainnet_financial_action_recovery_wallet_v1[\s\S]+\$6::timestamptz[\s\S]+LIMIT 2/u,
+      ),
+      [ACCOUNT_ID, intentId, '2', 'a'.repeat(64), 'RECONCILIATION_ADMISSION', deadlineAt],
+      signal,
+    );
+
+    queryWithCancellation.mockResolvedValueOnce(result([]));
+    await expect(
+      repositoryWith(query, queryWithCancellation).readMainnetFinancialActionRecoveryWallet({
+        accountId: ACCOUNT_ID,
+        intentId,
+        lifecycleRevision: '2',
+        lifecycleSnapshotSha256: 'a'.repeat(64),
+        purpose: 'RECONCILIATION_ADMISSION',
+        deadlineAt,
+        signal,
+      }),
+    ).resolves.toBeNull();
+
+    queryWithCancellation.mockResolvedValueOnce(
+      result([{ ...row, lifecycle_stage: 'FINALIZED_SUCCESS' }]),
+    );
+    await expect(
+      repositoryWith(query, queryWithCancellation).readMainnetFinancialActionRecoveryWallet({
+        accountId: ACCOUNT_ID,
+        intentId,
+        lifecycleRevision: '2',
+        lifecycleSnapshotSha256: 'a'.repeat(64),
+        purpose: 'RECONCILIATION_ADMISSION',
+        deadlineAt,
+        signal,
+      }),
+    ).rejects.toBeInstanceOf(WalletRegistrationPersistenceError);
+  });
+
   it('lists only bounded encrypted active-wallet rows for the requested account', async () => {
     const request = beginRequest();
     const encryptedAddress = sealWalletRegistrationValue(

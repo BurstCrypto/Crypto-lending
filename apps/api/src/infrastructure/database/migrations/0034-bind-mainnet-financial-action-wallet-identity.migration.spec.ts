@@ -22,14 +22,13 @@ describe('migration 0034 mainnet financial action wallet identity binding', () =
   it('supersedes 0033 and registers both variants immediately before 0035', () => {
     expect(migration).toMatchObject({ id: '0034', supersedesVerificationOf: ['0033'] });
     expect(migration.transactional).not.toBe(false);
-    expect(DATABASE_MIGRATION_LIST.at(-4)).toBe(
+    expect(DATABASE_MIGRATION_LIST.at(-5)).toBe(
       createMainnetFinancialActionWalletIdentityBindingMigrationV0034,
     );
-    expect(DATABASE_TEST_SCHEMA_MIGRATION_LIST.at(-4)).toBe(
+    expect(DATABASE_TEST_SCHEMA_MIGRATION_LIST.at(-5)).toBe(
       createMainnetFinancialActionWalletIdentityBindingTestSchemaMigrationV0034,
     );
     expect(DATABASE_MIGRATION_LIST.map(({ id }) => id).slice(-9)).toEqual([
-      '0029',
       '0030',
       '0031',
       '0032',
@@ -38,6 +37,7 @@ describe('migration 0034 mainnet financial action wallet identity binding', () =
       '0035',
       '0036',
       '0037',
+      '0038',
     ]);
   });
 

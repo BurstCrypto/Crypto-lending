@@ -25,12 +25,15 @@ const SOLANA = 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp' as const;
 const PROVIDER_SOURCE_REGISTRY_FINGERPRINT =
   '5058b141479f114c1e5f87ed8798fbb7a7ffcce7b502aa7e0794dc53ca1f767d';
 const BASE58_ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
-const MIGRATIONS_THROUGH_0037 = DATABASE_TEST_SCHEMA_MIGRATION_LIST.filter(
-  ({ id }) => id <= '0037',
+const MIGRATIONS_THROUGH_0038 = DATABASE_TEST_SCHEMA_MIGRATION_LIST.filter(
+  ({ id }) => id <= '0038',
 );
 const FUNCTIONS = Object.freeze([
-  'record_authenticated_mainnet_financial_action_reconciliation_v2(uuid,uuid,bigint,text,uuid,text,text,numeric,text,numeric,text,text,uuid,text,uuid,text,text,text,text,text,text,timestamp with time zone,timestamp with time zone,uuid)',
-  'record_mainnet_financial_action_post_finality_review_v2(uuid,uuid,bigint,text,bigint,text,uuid,text,text,text,numeric,text,numeric,text,text,uuid,text,uuid,text,text,text,text,timestamp with time zone,timestamp with time zone,uuid)',
+  'read_mainnet_financial_action_reconciliation_prerequisite_v2(uuid,uuid,bigint,text,text,timestamp with time zone)',
+  'read_mainnet_financial_action_post_finality_prerequisite_v2(uuid,uuid,bigint,text,text,text,text,bigint,text,text,timestamp with time zone)',
+  'record_authenticated_mainnet_financial_action_reconciliation_v3(uuid,uuid,bigint,text,uuid,text,text,numeric,text,numeric,text,text,uuid,text,uuid,text,text,text,text,text,text,timestamp with time zone,timestamp with time zone,uuid)',
+  'record_mainnet_financial_action_post_finality_review_v3(uuid,uuid,bigint,text,bigint,text,uuid,text,text,text,numeric,text,numeric,text,text,uuid,text,uuid,text,text,text,text,timestamp with time zone,timestamp with time zone,uuid)',
+  'read_mainnet_financial_action_recovery_wallet_v1(uuid,uuid,bigint,text,text,timestamp with time zone)',
 ]);
 const PREPARE_LIFECYCLE_SQL = `SELECT *
   FROM prepare_mainnet_financial_action_lifecycle_v2(
@@ -74,19 +77,23 @@ const PREPARE_EVIDENCE_SQL = `SELECT *
     ${EVIDENCE_ARGUMENT_SQL}, $24::timestamptz
   )`;
 const RECORD_ADMISSION_SQL = `SELECT *
-  FROM record_authenticated_mainnet_financial_action_reconciliation_v2(
+  FROM record_authenticated_mainnet_financial_action_reconciliation_v3(
     $1::uuid, $2::uuid, $3::bigint, $4::text, $5::uuid, $6::text, $7::text,
     $8::numeric, $9::text, $10::numeric, $11::text, $12::text, $13::uuid,
     $14::text, $15::uuid, $16::text, $17::text, $18::text, $19::text,
     $20::text, $21::text, $22::timestamptz, $23::timestamptz, $24::uuid
   )`;
 const RECORD_REVIEW_SQL = `SELECT *
-  FROM record_mainnet_financial_action_post_finality_review_v2(
+  FROM record_mainnet_financial_action_post_finality_review_v3(
     $1::uuid, $2::uuid, $3::bigint, $4::text, $5::bigint, $6::text,
     $7::uuid, $8::text, $9::text, $10::text, $11::numeric, $12::text,
     $13::numeric, $14::text, $15::text, $16::uuid, $17::text, $18::uuid,
     $19::text, $20::text, $21::text, $22::text, $23::timestamptz,
     $24::timestamptz, $25::uuid
+  )`;
+const READ_RECOVERY_WALLET_SQL = `SELECT *
+  FROM read_mainnet_financial_action_recovery_wallet_v1(
+    $1::uuid, $2::uuid, $3::bigint, $4::text, $5::text, $6::timestamptz
   )`;
 
 type Queryable = Pick<PoolClient, 'query'>;
@@ -175,6 +182,21 @@ interface ReviewRow extends QueryResultRow {
   review_fingerprint_sha256: string;
   review_revision: string;
   effective_safety_state: string;
+}
+
+interface RecoveryWalletRow extends QueryResultRow {
+  account_id: string;
+  intent_id: string;
+  wallet_registration_id: string;
+  network_id: string;
+  lifecycle_revision: string;
+  lifecycle_snapshot_sha256: string;
+  lifecycle_stage: string;
+  wallet_identity_digest_version: number;
+  verification_identity_digest_version: number;
+  verification_identity_digest: Buffer;
+  wallet_status: string;
+  revoked_at: Date | null;
 }
 
 interface AtomicAdmissionFixture {
@@ -361,6 +383,69 @@ async function registerWallet(
   return walletId;
 }
 
+async function addWalletIdentityAlias(
+  queryable: Queryable,
+  walletId: string,
+  version: number,
+  digest: Buffer,
+): Promise<void> {
+  await queryable.query(
+    `INSERT INTO registered_wallet_identity_digests (
+       wallet_id, account_id, chain_namespace, chain_reference,
+       address_digest_version, address_digest, status, registered_at, revoked_at
+     )
+     SELECT wallet_id, account_id, chain_namespace, chain_reference,
+       $2::smallint, $3::bytea, status, registered_at, revoked_at
+     FROM registered_wallets WHERE wallet_id = $1::uuid`,
+    [walletId, version, digest],
+  );
+}
+
+async function setWalletIdentityPolicy(
+  queryable: Queryable,
+  activeVersion: number,
+  acceptedVersions: readonly number[],
+): Promise<void> {
+  await queryable.query(
+    'ALTER TABLE wallet_identity_key_policy DISABLE TRIGGER wallet_identity_key_policy_immutable_row',
+  );
+  try {
+    await queryable.query(
+      `UPDATE wallet_identity_key_policy
+       SET active_write_version = $1::smallint,
+           accepted_read_versions = $2::smallint[],
+           updated_at = pg_catalog.clock_timestamp()
+       WHERE policy_name = 'wallet-registration-identity-hmac'`,
+      [activeVersion, [...acceptedVersions]],
+    );
+  } finally {
+    await queryable.query(
+      'ALTER TABLE wallet_identity_key_policy ENABLE ALWAYS TRIGGER wallet_identity_key_policy_immutable_row',
+    );
+  }
+}
+
+async function removeWalletIdentityAliasForTest(
+  queryable: Queryable,
+  walletId: string,
+  version: number,
+): Promise<void> {
+  await queryable.query(
+    'ALTER TABLE registered_wallet_identity_digests DISABLE TRIGGER registered_wallet_identity_digests_lifecycle_row',
+  );
+  try {
+    await queryable.query(
+      `DELETE FROM registered_wallet_identity_digests
+       WHERE wallet_id = $1::uuid AND address_digest_version = $2::smallint`,
+      [walletId, version],
+    );
+  } finally {
+    await queryable.query(
+      'ALTER TABLE registered_wallet_identity_digests ENABLE ALWAYS TRIGGER registered_wallet_identity_digests_lifecycle_row',
+    );
+  }
+}
+
 async function withForcedDeferredConstraints<Row>(
   pool: Pool,
   callback: (client: PoolClient) => Promise<Row>,
@@ -518,6 +603,7 @@ async function provisionSubmittedYieldFixture(
 async function prepareAndBindLifecycle(
   pool: Pool,
   network: NetworkFixture,
+  beforeBind?: (fixture: YieldFixture) => Promise<void>,
 ): Promise<LifecycleFixture> {
   const uniqueNetwork: NetworkFixture = {
     ...network,
@@ -564,6 +650,7 @@ async function prepareAndBindLifecycle(
     [addressDigest.version],
     [addressDigest.value],
   ]);
+  await beforeBind?.(fixture);
   const signedAt = await databaseNow(pool);
   const bound = await requiredRow<BoundLifecycleRow>(
     pool,
@@ -1053,11 +1140,11 @@ function requirePostgres16(serverVersionNum: number | undefined): void {
   }
 }
 
-describeWithPostgres('migration 0037 atomic finality persistence (guarded PostgreSQL 16)', () => {
+describeWithPostgres('migration 0038 revocation recovery (guarded PostgreSQL 16)', () => {
   jest.setTimeout(180_000);
 
   const schema = `test_action_atomic_finality_${randomUUID().replaceAll('-', '')}`;
-  const expectedMigrationIds = MIGRATIONS_THROUGH_0037.map(({ id }) => id);
+  const expectedMigrationIds = MIGRATIONS_THROUGH_0038.map(({ id }) => id);
   let adminPool: Pool | undefined;
   let operationPool: Pool | undefined;
   let runner: MigrationRunner | undefined;
@@ -1093,7 +1180,7 @@ describeWithPostgres('migration 0037 atomic finality persistence (guarded Postgr
       max: 8,
       options: `-c search_path=${schema} -c statement_timeout=5000 -c lock_timeout=4000`,
     });
-    runner = new MigrationRunner(operationPool, MIGRATIONS_THROUGH_0037);
+    runner = new MigrationRunner(operationPool, MIGRATIONS_THROUGH_0038);
   });
 
   afterAll(async () => {
@@ -1109,11 +1196,11 @@ describeWithPostgres('migration 0037 atomic finality persistence (guarded Postgr
     }
   });
 
-  it('applies and verifies the exact owner-only v2 catalog', async () => {
+  it('applies and verifies the exact owner-only 0038 corrective catalog', async () => {
     await expect(requireRunner().up()).resolves.toEqual(expectedMigrationIds);
     await expect(requireRunner().assertUpToDate()).resolves.toBeUndefined();
     await expect(
-      requireOperationPool().query<{ valid: boolean }>(migration('0037').verifySql ?? ''),
+      requireOperationPool().query<{ valid: boolean }>(migration('0038').verifySql ?? ''),
     ).resolves.toMatchObject({ rows: [{ valid: true }] });
 
     const catalog = await requireOperationPool().query<{
@@ -1143,9 +1230,9 @@ describeWithPostgres('migration 0037 atomic finality persistence (guarded Postgr
     );
     expect(catalog.rows).toEqual([
       {
-        function_count: '2',
-        input_count: '49',
-        output_count: '24',
+        function_count: '5',
+        input_count: '72',
+        output_count: '155',
         nonowner_acl_count: '0',
       },
     ]);
@@ -1155,7 +1242,158 @@ describeWithPostgres('migration 0037 atomic finality persistence (guarded Postgr
     ['Ethereum', ETHEREUM_FIXTURE],
     ['Solana', SOLANA_FIXTURE],
   ] as const)(
-    'records new %s admission and post-finality paths through v2',
+    'returns the exact historical %s wallet after signed-bound then revoke',
+    async (_name, network) => {
+      const pool = requireOperationPool();
+      const lifecycle = await prepareAndBindLifecycle(pool, network);
+      await pool.query('SELECT * FROM revoke_wallet_registration($1::uuid, $2::uuid, $3::uuid)', [
+        lifecycle.accountId,
+        lifecycle.walletId,
+        randomUUID(),
+      ]);
+      const recovered = await requiredRow<RecoveryWalletRow>(pool, READ_RECOVERY_WALLET_SQL, [
+        lifecycle.accountId,
+        lifecycle.intentId,
+        lifecycle.boundRevision,
+        lifecycle.boundSnapshot,
+        'RECONCILIATION_ADMISSION',
+        deadlineFrom(await databaseNow(pool)),
+      ]);
+      expect(recovered).toMatchObject({
+        account_id: lifecycle.accountId,
+        intent_id: lifecycle.intentId,
+        wallet_registration_id: lifecycle.walletId,
+        network_id: network.networkId,
+        lifecycle_revision: lifecycle.boundRevision,
+        lifecycle_snapshot_sha256: lifecycle.boundSnapshot,
+        lifecycle_stage: 'WALLET_SIGNED_SUBMISSION_BOUND',
+        wallet_status: 'REVOKED',
+      });
+      expect(recovered.revoked_at).toBeInstanceOf(Date);
+    },
+  );
+
+  it.each([
+    ['Ethereum', ETHEREUM_FIXTURE],
+    ['Solana', SOLANA_FIXTURE],
+  ] as const)('rejects %s revocation that wins before signed binding', async (_name, network) => {
+    const pool = requireOperationPool();
+    await expect(
+      prepareAndBindLifecycle(pool, network, async (fixture) => {
+        await pool.query('SELECT * FROM revoke_wallet_registration($1::uuid, $2::uuid, $3::uuid)', [
+          fixture.accountId,
+          fixture.walletId,
+          randomUUID(),
+        ]);
+      }),
+    ).rejects.toMatchObject({ code: '40001' });
+  });
+
+  it('recovers ambiguous and admitted terminal cursors after revocation without mutation authority', async () => {
+    const pool = requireOperationPool();
+    const ambiguousFixture = await prepareAtomicAdmissionFixture(pool, ETHEREUM_FIXTURE);
+    await pool.query('SELECT * FROM revoke_wallet_registration($1::uuid, $2::uuid, $3::uuid)', [
+      ambiguousFixture.lifecycle.accountId,
+      ambiguousFixture.lifecycle.walletId,
+      randomUUID(),
+    ]);
+    await expect(
+      pool.query<RecoveryWalletRow>(READ_RECOVERY_WALLET_SQL, [
+        ambiguousFixture.lifecycle.accountId,
+        ambiguousFixture.lifecycle.intentId,
+        ambiguousFixture.ambiguous.lifecycle_revision,
+        ambiguousFixture.ambiguous.current_snapshot_sha256,
+        'RECONCILIATION_ADMISSION',
+        deadlineFrom(await databaseNow(pool)),
+      ]),
+    ).resolves.toMatchObject({
+      rows: [
+        expect.objectContaining({
+          lifecycle_stage: 'BROADCAST_OUTCOME_AMBIGUOUS',
+          wallet_status: 'REVOKED',
+        }),
+      ],
+    });
+
+    const terminalFixture = await prepareAtomicAdmissionFixture(pool, SOLANA_FIXTURE);
+    const terminal = await requiredRow<AdmissionRow>(
+      pool,
+      RECORD_ADMISSION_SQL,
+      terminalFixture.values,
+    );
+    await pool.query('SELECT * FROM revoke_wallet_registration($1::uuid, $2::uuid, $3::uuid)', [
+      terminalFixture.lifecycle.accountId,
+      terminalFixture.lifecycle.walletId,
+      randomUUID(),
+    ]);
+    await expect(
+      pool.query<RecoveryWalletRow>(READ_RECOVERY_WALLET_SQL, [
+        terminalFixture.lifecycle.accountId,
+        terminalFixture.lifecycle.intentId,
+        terminal.admitted_event_revision,
+        terminal.current_snapshot_sha256,
+        'POST_FINALITY_REVIEW',
+        deadlineFrom(await databaseNow(pool)),
+      ]),
+    ).resolves.toMatchObject({
+      rows: [
+        expect.objectContaining({
+          lifecycle_stage: 'FINALIZED_SUCCESS',
+          wallet_status: 'REVOKED',
+        }),
+      ],
+    });
+  });
+
+  it('returns the active HMAC alias after rotation and fails closed when it is missing', async () => {
+    const pool = requireOperationPool();
+    const lifecycle = await prepareAndBindLifecycle(pool, ETHEREUM_FIXTURE);
+    const rotatedDigest = randomBytes(32);
+    await addWalletIdentityAlias(pool, lifecycle.walletId, 2, rotatedDigest);
+    await setWalletIdentityPolicy(pool, 2, [1, 2]);
+    try {
+      await pool.query('SELECT * FROM revoke_wallet_registration($1::uuid, $2::uuid, $3::uuid)', [
+        lifecycle.accountId,
+        lifecycle.walletId,
+        randomUUID(),
+      ]);
+      const values = [
+        lifecycle.accountId,
+        lifecycle.intentId,
+        lifecycle.boundRevision,
+        lifecycle.boundSnapshot,
+        'RECONCILIATION_ADMISSION',
+        deadlineFrom(await databaseNow(pool)),
+      ];
+      await expect(
+        pool.query<RecoveryWalletRow>(READ_RECOVERY_WALLET_SQL, values),
+      ).resolves.toMatchObject({
+        rows: [
+          expect.objectContaining({
+            wallet_identity_digest_version: 1,
+            verification_identity_digest_version: 2,
+            verification_identity_digest: rotatedDigest,
+          }),
+        ],
+      });
+
+      await removeWalletIdentityAliasForTest(pool, lifecycle.walletId, 2);
+      values[5] = deadlineFrom(await databaseNow(pool));
+      await expect(
+        pool.query<RecoveryWalletRow>(READ_RECOVERY_WALLET_SQL, values),
+      ).resolves.toMatchObject({
+        rows: [],
+      });
+    } finally {
+      await setWalletIdentityPolicy(pool, 1, [1]);
+    }
+  });
+
+  it.each([
+    ['Ethereum', ETHEREUM_FIXTURE],
+    ['Solana', SOLANA_FIXTURE],
+  ] as const)(
+    'records new %s admission and post-finality paths through v3',
     async (_name, network) => {
       const pool = requireOperationPool();
       const { lifecycle, evidence, authority, ambiguous, values } =
@@ -1180,7 +1418,7 @@ describeWithPostgres('migration 0037 atomic finality persistence (guarded Postgr
     },
   );
 
-  it('refuses REPEATABLE READ without persistence and fails closed on a revoked wallet', async () => {
+  it('refuses REPEATABLE READ but admits a signed-bound wallet revoked before recovery', async () => {
     const pool = requireOperationPool();
     const isolated = await prepareAtomicAdmissionFixture(pool, ETHEREUM_FIXTURE);
     const client = await pool.connect();
@@ -1208,8 +1446,8 @@ describeWithPostgres('migration 0037 atomic finality persistence (guarded Postgr
       revoked.lifecycle.walletId,
       randomUUID(),
     ]);
-    await expect(pool.query(RECORD_ADMISSION_SQL, revoked.values)).rejects.toMatchObject({
-      code: '55000',
+    await expect(pool.query(RECORD_ADMISSION_SQL, revoked.values)).resolves.toMatchObject({
+      rows: [{ admission_outcome: 'RECORDED', ledger_settlement_authority: false }],
     });
     await expect(
       pool.query(
@@ -1218,7 +1456,7 @@ describeWithPostgres('migration 0037 atomic finality persistence (guarded Postgr
          WHERE observation_id = $1::uuid`,
         [revoked.values[4]],
       ),
-    ).resolves.toMatchObject({ rows: [{ count: '0' }] });
+    ).resolves.toMatchObject({ rows: [{ count: '1' }] });
   });
 
   it('preserves lost-ACK admission replay after revocation, control, and expiry', async () => {
@@ -1266,7 +1504,7 @@ describeWithPostgres('migration 0037 atomic finality persistence (guarded Postgr
     ).resolves.toMatchObject({ rows: [{ count: '1' }] });
   });
 
-  it('rejects a new post-finality write after its immutable wallet is revoked', async () => {
+  it('records a new post-finality review after its immutable wallet is revoked', async () => {
     const pool = requireOperationPool();
     const initial = await prepareAtomicAdmissionFixture(pool, ETHEREUM_FIXTURE);
     const admission = await requiredRow<AdmissionRow>(pool, RECORD_ADMISSION_SQL, initial.values);
@@ -1284,8 +1522,8 @@ describeWithPostgres('migration 0037 atomic finality persistence (guarded Postgr
       initial.lifecycle.walletId,
       randomUUID(),
     ]);
-    await expect(pool.query(RECORD_REVIEW_SQL, values)).rejects.toMatchObject({
-      code: '55000',
+    await expect(pool.query(RECORD_REVIEW_SQL, values)).resolves.toMatchObject({
+      rows: [{ record_outcome: 'RECORDED', ledger_settlement_authority: false }],
     });
     await expect(
       pool.query(
@@ -1294,7 +1532,7 @@ describeWithPostgres('migration 0037 atomic finality persistence (guarded Postgr
          WHERE review_id = $1::uuid`,
         [values[6]],
       ),
-    ).resolves.toMatchObject({ rows: [{ count: '0' }] });
+    ).resolves.toMatchObject({ rows: [{ count: '1' }] });
   });
 
   it('blocks controls on requested, original, latest, and prior-reaffirmation dependencies', async () => {
@@ -1638,7 +1876,7 @@ describeWithPostgres('migration 0037 atomic finality persistence (guarded Postgr
     ]);
   });
 
-  it('deterministically honors control-wins, v2-wins, and revoke-wins races', async () => {
+  it('deterministically honors control-wins, v3-wins, and post-bind revoke recovery races', async () => {
     const pool = requireOperationPool();
 
     const controlWins = await prepareAtomicAdmissionFixture(pool, ETHEREUM_FIXTURE);
@@ -1660,18 +1898,18 @@ describeWithPostgres('migration 0037 atomic finality persistence (guarded Postgr
       controlClient.release();
     }
 
-    const v2Wins = await prepareAtomicAdmissionFixture(pool, SOLANA_FIXTURE);
+    const v3Wins = await prepareAtomicAdmissionFixture(pool, SOLANA_FIXTURE);
     const writeClient = await pool.connect();
     try {
       await writeClient.query('BEGIN');
-      await expect(writeClient.query(RECORD_ADMISSION_SQL, v2Wins.values)).resolves.toMatchObject({
+      await expect(writeClient.query(RECORD_ADMISSION_SQL, v3Wins.values)).resolves.toMatchObject({
         rows: [{ admission_outcome: 'RECORDED' }],
       });
       const blockedControl = pool.query(
         `SELECT * FROM invalidate_provider_position_chain_anchor_evidence(
            $1::uuid, $2::text, 'QUARANTINED'::text, 'V2_WINS'::text
          )`,
-        [randomUUID(), v2Wins.evidence.evidenceFingerprint],
+        [randomUUID(), v3Wins.evidence.evidenceFingerprint],
       );
       await expectStillPending(blockedControl);
       await writeClient.query('COMMIT');
@@ -1694,7 +1932,9 @@ describeWithPostgres('migration 0037 atomic finality persistence (guarded Postgr
       const blockedWrite = pool.query(RECORD_ADMISSION_SQL, revokeWins.values);
       await expectStillPending(blockedWrite);
       await revokeClient.query('COMMIT');
-      await expect(blockedWrite).rejects.toMatchObject({ code: '55000' });
+      await expect(blockedWrite).resolves.toMatchObject({
+        rows: [{ admission_outcome: 'RECORDED', ledger_settlement_authority: false }],
+      });
     } finally {
       await revokeClient.query('ROLLBACK').catch(() => undefined);
       revokeClient.release();
@@ -1841,8 +2081,8 @@ describeWithPostgres('migration 0037 atomic finality persistence (guarded Postgr
     }
   });
 
-  it('rolls back only 0037 and restores the exact 0036 verifier', async () => {
-    await expect(requireRunner().down()).resolves.toEqual(['0037']);
+  it('rolls back only 0038 and restores the exact 0037 verifier', async () => {
+    await expect(requireRunner().down()).resolves.toEqual(['0038']);
     for (const identity of FUNCTIONS) {
       await expect(
         requireOperationPool().query<{ function_oid: string | null }>(
@@ -1852,7 +2092,7 @@ describeWithPostgres('migration 0037 atomic finality persistence (guarded Postgr
       ).resolves.toMatchObject({ rows: [{ function_oid: null }] });
     }
     await expect(
-      requireOperationPool().query<{ valid: boolean }>(migration('0036').verifySql ?? ''),
+      requireOperationPool().query<{ valid: boolean }>(migration('0037').verifySql ?? ''),
     ).resolves.toMatchObject({ rows: [{ valid: true }] });
   });
 });

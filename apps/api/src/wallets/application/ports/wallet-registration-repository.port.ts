@@ -106,6 +106,50 @@ export interface ListActiveWalletRegistrationsRequest {
   readonly signal?: AbortSignal;
 }
 
+export type MainnetFinancialActionRecoveryWalletPurpose =
+  'RECONCILIATION_ADMISSION' | 'POST_FINALITY_REVIEW';
+
+/**
+ * Exact recovery-only lookup. Persistence returns no row unless the intent is
+ * already signed-bound (or is an admitted terminal event); this is not a
+ * general revoked-wallet roster and grants no new signing/broadcast authority.
+ */
+export interface ReadMainnetFinancialActionRecoveryWalletRequest {
+  readonly accountId: AccountId;
+  readonly intentId: string;
+  readonly lifecycleRevision: string;
+  readonly lifecycleSnapshotSha256: string;
+  readonly purpose: MainnetFinancialActionRecoveryWalletPurpose;
+  readonly deadlineAt: Date;
+  readonly signal: AbortSignal;
+}
+
+export interface MainnetFinancialActionRecoveryWalletRecord {
+  readonly accountId: AccountId;
+  readonly intentId: string;
+  readonly walletId: string;
+  readonly registeredByChallengeId: WalletChallengeId;
+  readonly chainId: WalletOwnershipChainId;
+  readonly lifecycleRevision: string;
+  readonly lifecycleSnapshotSha256: string;
+  readonly lifecycleStage:
+    | 'WALLET_SIGNED_SUBMISSION_BOUND'
+    | 'BROADCAST_OUTCOME_AMBIGUOUS'
+    | 'RECONCILIATION_AMBIGUOUS'
+    | 'FINALIZED_SUCCESS'
+    | 'FINALIZED_FAILURE';
+  readonly registry: WalletRegistryBinding & { readonly environment: 'MAINNET' };
+  /** Immutable registration-era digest captured by the signed intent. */
+  readonly addressDigest: WalletRegistrationDigestReference<'address'>;
+  /** Current policy alias used to verify decrypted plaintext after rotation. */
+  readonly verificationAddressDigest: WalletRegistrationDigestReference<'address'>;
+  readonly encryptedAddress: SealedWalletRegistrationValue;
+  readonly registeredAt: Date;
+  readonly status: 'ACTIVE' | 'REVOKED';
+  readonly revokedAt: Date | null;
+  readonly verifiedAt: Date;
+}
+
 export interface RevokeWalletRegistrationRequest {
   readonly accountId: AccountId;
   readonly walletId: string;
@@ -152,6 +196,9 @@ export interface WalletRegistrationRepositoryPort {
   listActiveWallets(
     request: ListActiveWalletRegistrationsRequest,
   ): Promise<readonly ActiveWalletRegistrationRecord[]>;
+  readMainnetFinancialActionRecoveryWallet(
+    request: ReadMainnetFinancialActionRecoveryWalletRequest,
+  ): Promise<MainnetFinancialActionRecoveryWalletRecord | null>;
   revokeWallet(request: RevokeWalletRegistrationRequest): Promise<RevokeWalletRegistrationResult>;
   beginChallenge(
     request: BeginWalletOwnershipChallengeRequest,

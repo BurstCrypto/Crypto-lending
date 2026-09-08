@@ -8,7 +8,9 @@ import type {
   ActiveWalletRegistrationRecord,
   BeginWalletOwnershipChallengeRequest,
   CompleteWalletRegistrationRequest,
+  MainnetFinancialActionRecoveryWalletRecord,
   PrepareWalletOwnershipChallengeResult,
+  ReadMainnetFinancialActionRecoveryWalletRequest,
   WalletRegistrationRepositoryPort,
 } from './ports/wallet-registration-repository.port';
 import {
@@ -60,7 +62,9 @@ function config(
   return loaded;
 }
 
-function rotatedConfig(): EnabledWalletRegistrationConfig {
+function rotatedConfig(
+  registryEnvironment: 'MAINNET' | 'TESTNET' = 'TESTNET',
+): EnabledWalletRegistrationConfig {
   const keyRing = (purpose: 'challenge-hmac' | 'identity-hmac' | 'metadata-seal'): string =>
     JSON.stringify({
       activeWriteVersion: 2,
@@ -76,7 +80,7 @@ function rotatedConfig(): EnabledWalletRegistrationConfig {
     AUTH_MODE: 'oidc',
     AUTH_PUBLIC_ORIGIN: 'http://127.0.0.1:3000',
     WALLET_REGISTRATION_MODE: 'enabled',
-    WALLET_REGISTRATION_REGISTRY_ENVIRONMENT: 'TESTNET',
+    WALLET_REGISTRATION_REGISTRY_ENVIRONMENT: registryEnvironment,
     WALLET_REGISTRATION_CHALLENGE_TTL_SECONDS: '300',
     WALLET_IDENTITY_HMAC_KEY_RING_JSON: keyRing('identity-hmac'),
     WALLET_CHALLENGE_HMAC_KEY_RING_JSON: keyRing('challenge-hmac'),
@@ -115,6 +119,9 @@ interface RepositoryFixture {
   readonly repository: WalletRegistrationRepositoryPort;
   readonly complete: jest.MockedFunction<WalletRegistrationRepositoryPort['completeRegistration']>;
   readonly list: jest.MockedFunction<WalletRegistrationRepositoryPort['listActiveWallets']>;
+  readonly recovery: jest.MockedFunction<
+    WalletRegistrationRepositoryPort['readMainnetFinancialActionRecoveryWallet']
+  >;
   readonly revoke: jest.MockedFunction<WalletRegistrationRepositoryPort['revokeWallet']>;
 }
 
@@ -136,8 +143,13 @@ function repositoryFixture(): RepositoryFixture {
     ReturnType<WalletRegistrationRepositoryPort['revokeWallet']>,
     Parameters<WalletRegistrationRepositoryPort['revokeWallet']>
   >(async () => ({ status: 'revoked' }));
+  const recovery = jest.fn<
+    ReturnType<WalletRegistrationRepositoryPort['readMainnetFinancialActionRecoveryWallet']>,
+    [ReadMainnetFinancialActionRecoveryWalletRequest]
+  >(async () => null);
   const repository: WalletRegistrationRepositoryPort = {
     listActiveWallets: list,
+    readMainnetFinancialActionRecoveryWallet: recovery,
     revokeWallet: revoke,
     beginChallenge: jest.fn(async (request) => {
       begun = request;
@@ -164,7 +176,7 @@ function repositoryFixture(): RepositoryFixture {
     rejectChallenge: jest.fn(async () => ({ status: 'rejected' as const })),
     completeRegistration: complete,
   };
-  return { repository, complete, list, revoke };
+  return { repository, complete, list, recovery, revoke };
 }
 
 function serviceFixture(
@@ -181,12 +193,229 @@ function serviceFixture(
   return { config: walletConfig, service, ...fixture };
 }
 
+const RECOVERY_INTENT_ID = randomUUID();
+const RECOVERY_REVISION = '2';
+const RECOVERY_SNAPSHOT = 'a'.repeat(64);
+
+function recoveryRecord(
+  walletConfig: EnabledWalletRegistrationConfig,
+  overrides: Partial<MainnetFinancialActionRecoveryWalletRecord> = {},
+): MainnetFinancialActionRecoveryWalletRecord {
+  const walletId = randomUUID();
+  const registeredByChallengeId = parseWalletChallengeId(randomUUID());
+  const chainId = 'eip155:1' as const;
+  const address = '0xde709f2102306220921060314715629080e2fb77';
+  const addressDigest = digestWalletIdentity(
+    activeWalletRegistrationKey(walletConfig.identityHmacKeys),
+    chainId,
+    address,
+  );
+  const registry = supportedAssetRegistryForEnvironment('MAINNET').latest;
+  return {
+    accountId: ACCOUNT_ID,
+    intentId: RECOVERY_INTENT_ID,
+    walletId,
+    registeredByChallengeId,
+    chainId,
+    lifecycleRevision: RECOVERY_REVISION,
+    lifecycleSnapshotSha256: RECOVERY_SNAPSHOT,
+    lifecycleStage: 'WALLET_SIGNED_SUBMISSION_BOUND',
+    registry: {
+      environment: 'MAINNET',
+      version: registry.version,
+      fingerprintSha256: registry.fingerprintSha256,
+    },
+    addressDigest,
+    verificationAddressDigest: addressDigest,
+    encryptedAddress: sealWalletRegistrationValue(
+      activeWalletRegistrationKey(walletConfig.metadataSealKeys),
+      {
+        field: 'address',
+        walletId,
+        challengeId: registeredByChallengeId,
+        accountId: ACCOUNT_ID,
+        networkId: chainId,
+        addressDigest,
+      },
+      address,
+    ),
+    registeredAt: new Date(NOW.getTime() - 60_000),
+    status: 'ACTIVE',
+    revokedAt: null,
+    verifiedAt: NOW,
+    ...overrides,
+  };
+}
+
 describe('WalletRegistrationService', () => {
   it('pins the exact production and test launch allowlists', () => {
     expect(WALLET_REGISTRATION_LAUNCH_CHAIN_IDS).toEqual({
       MAINNET: ['eip155:1', 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp'],
       TESTNET: ['eip155:11155111', 'eip155:84532', 'solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1'],
     });
+  });
+
+  it.each([
+    ['eip155:1', '0xde709f2102306220921060314715629080e2fb77'],
+    ['solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp', base58(randomBytes(32))],
+  ] as const)(
+    'opens an exact revoked %s recovery wallet without returning action or persistence authority',
+    async (chainId, address) => {
+      const fixture = serviceFixture('MAINNET');
+      const base = recoveryRecord(fixture.config);
+      const addressDigest = digestWalletIdentity(
+        activeWalletRegistrationKey(fixture.config.identityHmacKeys),
+        chainId,
+        address,
+      );
+      const record: MainnetFinancialActionRecoveryWalletRecord = {
+        ...base,
+        chainId,
+        addressDigest,
+        verificationAddressDigest: addressDigest,
+        encryptedAddress: sealWalletRegistrationValue(
+          activeWalletRegistrationKey(fixture.config.metadataSealKeys),
+          {
+            field: 'address',
+            walletId: base.walletId,
+            challengeId: base.registeredByChallengeId,
+            accountId: ACCOUNT_ID,
+            networkId: chainId,
+            addressDigest,
+          },
+          address,
+        ),
+        status: 'REVOKED',
+        revokedAt: NOW,
+      };
+      fixture.recovery.mockResolvedValue(record);
+      const signal = new AbortController().signal;
+      const deadlineAt = new Date(NOW.getTime() + 5_000);
+
+      await expect(
+        fixture.service.readMainnetFinancialActionRecoveryWallet({
+          accountId: ACCOUNT_ID,
+          intentId: RECOVERY_INTENT_ID,
+          lifecycleRevision: RECOVERY_REVISION,
+          lifecycleSnapshotSha256: RECOVERY_SNAPSHOT,
+          purpose: 'RECONCILIATION_ADMISSION',
+          deadlineAt,
+          signal,
+        }),
+      ).resolves.toEqual({
+        mayAuthorizeFinancialAction: false,
+        mayPersist: false,
+        accountId: ACCOUNT_ID,
+        intentId: RECOVERY_INTENT_ID,
+        walletId: record.walletId,
+        chainId,
+        address,
+        lifecycleRevision: RECOVERY_REVISION,
+        lifecycleSnapshotSha256: RECOVERY_SNAPSHOT,
+        lifecycleStage: 'WALLET_SIGNED_SUBMISSION_BOUND',
+        walletStatus: 'REVOKED',
+        revokedAt: NOW.toISOString(),
+        verifiedAt: NOW.toISOString(),
+      });
+      expect(fixture.recovery).toHaveBeenCalledWith({
+        accountId: ACCOUNT_ID,
+        intentId: RECOVERY_INTENT_ID,
+        lifecycleRevision: RECOVERY_REVISION,
+        lifecycleSnapshotSha256: RECOVERY_SNAPSHOT,
+        purpose: 'RECONCILIATION_ADMISSION',
+        deadlineAt,
+        signal,
+      });
+    },
+  );
+
+  it('opens historical ciphertext and verifies plaintext with the active rotated HMAC alias', async () => {
+    const fixture = repositoryFixture();
+    const walletConfig = rotatedConfig('MAINNET');
+    const service = new WalletRegistrationService(fixture.repository, walletConfig, {
+      now: () => new Date(NOW),
+    });
+    const walletId = randomUUID();
+    const challengeId = parseWalletChallengeId(randomUUID());
+    const chainId = 'eip155:1' as const;
+    const address = '0xde709f2102306220921060314715629080e2fb77';
+    const historicalDigest = digestWalletIdentity(
+      walletRegistrationKeyForVersion(walletConfig.identityHmacKeys, 1),
+      chainId,
+      address,
+    );
+    const verificationDigest = digestWalletIdentity(
+      activeWalletRegistrationKey(walletConfig.identityHmacKeys),
+      chainId,
+      address,
+    );
+    fixture.recovery.mockResolvedValue({
+      ...recoveryRecord(walletConfig),
+      walletId,
+      registeredByChallengeId: challengeId,
+      chainId,
+      addressDigest: historicalDigest,
+      verificationAddressDigest: verificationDigest,
+      encryptedAddress: sealWalletRegistrationValue(
+        walletRegistrationKeyForVersion(walletConfig.metadataSealKeys, 1),
+        {
+          field: 'address',
+          walletId,
+          challengeId,
+          accountId: ACCOUNT_ID,
+          networkId: chainId,
+          addressDigest: historicalDigest,
+        },
+        address,
+      ),
+      lifecycleStage: 'FINALIZED_SUCCESS',
+    });
+
+    await expect(
+      service.readMainnetFinancialActionRecoveryWallet({
+        accountId: ACCOUNT_ID,
+        intentId: RECOVERY_INTENT_ID,
+        lifecycleRevision: RECOVERY_REVISION,
+        lifecycleSnapshotSha256: RECOVERY_SNAPSHOT,
+        purpose: 'POST_FINALITY_REVIEW',
+        deadlineAt: new Date(NOW.getTime() + 5_000),
+        signal: new AbortController().signal,
+      }),
+    ).resolves.toEqual(expect.objectContaining({ address, lifecycleStage: 'FINALIZED_SUCCESS' }));
+  });
+
+  it.each([
+    ['wrong purpose stage', { lifecycleStage: 'FINALIZED_SUCCESS' }],
+    ['wrong intent', { intentId: randomUUID() }],
+    ['testnet chain', { chainId: 'eip155:11155111' }],
+    ['wrong status time', { status: 'REVOKED', revokedAt: null }],
+    ['unknown runtime status', { status: 'COMPROMISED', revokedAt: NOW }],
+    [
+      'verification digest mismatch',
+      { verificationAddressDigest: { purpose: 'address', version: 1, value: 'b'.repeat(64) } },
+    ],
+    ['future verification', { verifiedAt: new Date(NOW.getTime() + 6_000) }],
+    ['malformed wallet', { walletId: 'not-a-wallet-id' }],
+  ] as const)('fails closed on a malformed recovery record: %s', async (_case, overrides) => {
+    const fixture = serviceFixture('MAINNET');
+    fixture.recovery.mockResolvedValue(
+      recoveryRecord(
+        fixture.config,
+        overrides as Partial<MainnetFinancialActionRecoveryWalletRecord>,
+      ),
+    );
+
+    await expect(
+      fixture.service.readMainnetFinancialActionRecoveryWallet({
+        accountId: ACCOUNT_ID,
+        intentId: RECOVERY_INTENT_ID,
+        lifecycleRevision: RECOVERY_REVISION,
+        lifecycleSnapshotSha256: RECOVERY_SNAPSHOT,
+        purpose: 'RECONCILIATION_ADMISSION',
+        deadlineAt: new Date(NOW.getTime() + 5_000),
+        signal: new AbortController().signal,
+      }),
+    ).rejects.toBeInstanceOf(WalletRegistrationUnavailableError);
   });
 
   it('decrypts only account-bound active wallets with current registry and digest bindings', async () => {

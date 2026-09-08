@@ -19,14 +19,13 @@ describe('migration 0035 authenticated mainnet action finality', () => {
   it('supersedes 0034 and registers production and test variants before 0036', () => {
     expect(migration).toMatchObject({ id: '0035', supersedesVerificationOf: ['0034'] });
     expect(migration.transactional).not.toBe(false);
-    expect(DATABASE_MIGRATION_LIST.at(-3)).toBe(
+    expect(DATABASE_MIGRATION_LIST.at(-4)).toBe(
       createMainnetFinancialActionAuthenticatedFinalityMigrationV0035,
     );
-    expect(DATABASE_TEST_SCHEMA_MIGRATION_LIST.at(-3)).toBe(
+    expect(DATABASE_TEST_SCHEMA_MIGRATION_LIST.at(-4)).toBe(
       createMainnetFinancialActionAuthenticatedFinalityTestSchemaMigrationV0035,
     );
     expect(DATABASE_MIGRATION_LIST.map(({ id }) => id).slice(-9)).toEqual([
-      '0029',
       '0030',
       '0031',
       '0032',
@@ -35,6 +34,7 @@ describe('migration 0035 authenticated mainnet action finality', () => {
       '0035',
       '0036',
       '0037',
+      '0038',
     ]);
   });
 
