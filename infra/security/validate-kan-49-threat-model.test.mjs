@@ -413,6 +413,80 @@ test('limits the locally mitigated wallet proof boundary to registration', () =>
   assert.equal(record.independentApproval.status, 'PENDING');
 });
 
+test('keeps authenticated finality dormant, authority-empty, and ledger-nonreversing', () => {
+  const record = canonicalRecord();
+  const stateBoundary = record.trustBoundaries.find(({ id }) => id === 'TB-03');
+  const chainBoundary = record.trustBoundaries.find(({ id }) => id === 'TB-10');
+  const auditAsset = record.dataAssets.find(({ id }) => id === 'DATA-008');
+  const evidenceAsset = record.dataAssets.find(({ id }) => id === 'DATA-018');
+  const ledgerMutation = record.threats.find(({ id }) => id === 'THR-LEDGER-001');
+  const reconciliation = record.threats.find(({ id }) => id === 'THR-LEDGER-002');
+  const reorganization = record.threats.find(({ id }) => id === 'THR-LEDGER-004');
+  const availability = record.threats.find(({ id }) => id === 'THR-AVAILABILITY-003');
+
+  assert.equal(record.modelVersion, '2026-09-07-authenticated-finality-v1');
+  assert.match(stateBoundary.source, /no application grant/u);
+  assert(
+    stateBoundary.evidence.includes(
+      'apps/api/src/infrastructure/database/migrations/0035-create-mainnet-financial-action-authenticated-finality.migration.ts',
+    ),
+  );
+  assert.match(chainBoundary.source, /no concrete authenticated-finality source adapter exists/u);
+  assert.match(
+    chainBoundary.destination,
+    /owner-only unregistered authenticated-finality sidecar/u,
+  );
+  assert(
+    auditAsset.stores.some((store) =>
+      store.includes('authority tables start empty and every function remains owner-only'),
+    ),
+  );
+  assert.match(
+    evidenceAsset.retention,
+    /AUTHENTICATED_FINALITY_HISTORY_APPEND_ONLY_RETENTION_POLICY_PENDING/u,
+  );
+  assert.match(evidenceAsset.logging, /RAW_SIGNED_PAYLOAD_SIGNATURE_OR_ATTESTATION/u);
+  assert(
+    ledgerMutation.mitigations.some((mitigation) =>
+      mitigation.includes('never authorizes or reverses ledger settlement'),
+    ),
+  );
+  assert(
+    reconciliation.mitigations.some(
+      (mitigation) =>
+        mitigation.includes('deferred constraint trigger') &&
+        mitigation.includes('exact authenticated admission'),
+    ),
+  );
+  assert.equal(reorganization.status, 'OPEN_FOLLOW_UP');
+  assert(
+    reorganization.mitigations.some(
+      (mitigation) =>
+        mitigation.includes('exactly two distinct independently captured') &&
+        mitigation.includes('SUPPLY and WITHDRAW') &&
+        mitigation.includes('ledger authority false'),
+    ),
+  );
+  assert(
+    reorganization.mitigations.some(
+      (mitigation) =>
+        mitigation.includes('sticky deep-reorganization quarantine') &&
+        mitigation.includes('never authorize or reverse ledger settlement'),
+    ),
+  );
+  assert.match(reorganization.residualRisk, /authority tables are empty/u);
+  assert.match(reorganization.residualRisk, /no concrete prerequisite adapter, source adapter/u);
+  assert.match(reorganization.residualRisk, /cannot be physically cancelled/u);
+  assert.match(reorganization.residualRisk, /downstream ledger-remediation policy/u);
+  assert(availability.boundaryIds.includes('TB-10'));
+  assert.match(
+    availability.residualRisk,
+    /No concrete authenticated-finality source adapter exists/u,
+  );
+  assert.match(availability.residualRisk, /cannot be physically cancelled/u);
+  assert.equal(record.independentApproval.status, 'PENDING');
+});
+
 test('enforces exact classification ranks and handling text', () => {
   const record = canonicalRecord();
   const publicLevel = record.classificationLevels.find(({ name }) => name === 'PUBLIC');

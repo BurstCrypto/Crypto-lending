@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "ticket": "KAN-49",
-  "modelVersion": "2026-09-07",
+  "modelVersion": "2026-09-07-authenticated-finality-v1",
   "localStatus": "READY_FOR_INDEPENDENT_REVIEW",
   "scope": "Crypto Lending repository application, wallet-validation, smart-lending external evidence, data-plane, operator, and supply-chain boundaries",
   "independentApproval": {
@@ -64,20 +64,23 @@
     {
       "id": "TB-03",
       "name": "API to state stores",
-      "source": "API runtime principal",
-      "destination": "PostgreSQL, including the dormant finalized-checkpoint store, and the health-only Redis boundary",
+      "source": "API runtime principal; the authenticated-finality stores remain owner-only and have no application grant",
+      "destination": "PostgreSQL, including dormant finalized-checkpoint, financial-action lifecycle, authenticated-finality authority, admission, and post-finality review stores, plus the health-only Redis boundary",
       "data": [
         "profiles",
         "authentication state",
         "encrypted wallet registrations and challenge digests",
         "audit events",
-        "financial commands",
-        "source-scoped finalized checkpoint and quarantine events"
+        "financial commands and append-only lifecycle events",
+        "source-scoped finalized checkpoint and quarantine events",
+        "authenticated reconciliation admissions, authority controls, and post-finality safety reviews"
       ],
       "evidence": [
         "apps/api/src/infrastructure/database/migrations/0005-enforce-database-principal-boundaries.migration.ts",
         "apps/api/src/infrastructure/database/migrations/0011-create-wallet-ownership-registration.migration.ts",
         "apps/api/src/infrastructure/database/migrations/0017-create-aave-finalized-checkpoints.migration.ts",
+        "apps/api/src/infrastructure/database/migrations/0035-create-mainnet-financial-action-authenticated-finality.migration.ts",
+        "apps/api/src/mainnet-actions/infrastructure/postgres-dormant-mainnet-financial-action-finality-sidecar.adapter.ts",
         "docs/KAN-233.md"
       ]
     },
@@ -142,14 +145,16 @@
     {
       "id": "TB-10",
       "name": "Chain observation to application indexing",
-      "source": "Future approved chain connectors with immutable network configuration; the Aave Ethereum transcript and two-source comparison executors remain unregistered and their runtime sources remain unavailable",
-      "destination": "Supported-asset normalization, read-only smart-lending deployment evidence, and a dormant source-scoped finalized-checkpoint store",
+      "source": "Future approved chain connectors and independently controlled authenticated-finality sources with immutable network configuration; the local producers remain unregistered, no concrete authenticated-finality source adapter exists, and runtime sources remain unavailable",
+      "destination": "Supported-asset normalization, read-only smart-lending deployment evidence, dormant source-scoped finalized checkpoints, and an owner-only unregistered authenticated-finality sidecar",
       "data": [
         "network identity",
         "contract or mint",
         "block and transaction observations",
         "contract runtime code and read-only call observations",
-        "append-only checkpoint decisions and sticky quarantine state"
+        "append-only checkpoint decisions and sticky quarantine state",
+        "exact two-source Ethereum or Solana attestations bound to action, wallet, provider, protocol, market, asset, amount, deployment authority, and source authority",
+        "authenticated reconciliation admissions and append-only post-finality review dispositions"
       ],
       "evidence": [
         "docs/KAN-61.md",
@@ -158,7 +163,12 @@
         "apps/api/src/smart-lending/infrastructure/aave/aave-v3-ethereum-finalized-rpc.plan.ts",
         "apps/api/src/smart-lending/infrastructure/aave/aave-v3-ethereum-json-rpc.source.ts",
         "apps/api/src/smart-lending/infrastructure/aave/aave-v3-ethereum-two-source-agreement.reader.ts",
-        "apps/api/src/infrastructure/database/migrations/0017-create-aave-finalized-checkpoints.migration.ts"
+        "apps/api/src/infrastructure/database/migrations/0017-create-aave-finalized-checkpoints.migration.ts",
+        "apps/api/src/mainnet-actions/application/dormant-mainnet-financial-action-finality-evidence.producer.ts",
+        "apps/api/src/mainnet-actions/application/ports/mainnet-financial-action-finality-evidence-source.port.ts",
+        "apps/api/src/mainnet-actions/application/ports/dormant-mainnet-financial-action-finality-sidecar-durable.port.ts",
+        "apps/api/src/mainnet-actions/infrastructure/postgres-dormant-mainnet-financial-action-finality-sidecar.adapter.ts",
+        "apps/api/src/infrastructure/database/migrations/0035-create-mainnet-financial-action-authenticated-finality.migration.ts"
       ]
     },
     {
@@ -321,10 +331,13 @@
     },
     {
       "id": "DATA-008",
-      "name": "Account, authentication, and financial audit records",
+      "name": "Account, authentication, financial audit, and financial-action safety records",
       "classification": "RESTRICTED",
       "cia": { "confidentiality": "HIGH", "integrity": "HIGH", "availability": "HIGH" },
-      "stores": ["Append-only PostgreSQL audit and ledger tables"],
+      "stores": [
+        "Append-only PostgreSQL audit and ledger tables",
+        "Append-only PostgreSQL authenticated reconciliation admissions, authority-control events, and post-finality reviews after migration 0035; authority tables start empty and every function remains owner-only"
+      ],
       "retention": "LEGAL_FINANCIAL_RETENTION_POLICY_PENDING",
       "logging": "REFERENCES_ONLY_UNDER_EVENT_ALLOWLIST",
       "owner": "Security, Privacy, Finance, and Records",
@@ -332,7 +345,9 @@
         "apps/api/src/infrastructure/database/migrations/0004-create-accounts-and-profiles.migration.ts",
         "apps/api/src/infrastructure/database/migrations/0007-create-immutable-ledger.migration.ts",
         "apps/api/src/infrastructure/database/migrations/0008-create-ledger-lifecycle.migration.ts",
-        "apps/api/src/infrastructure/database/migrations/0010-create-authentication-sessions.migration.ts"
+        "apps/api/src/infrastructure/database/migrations/0010-create-authentication-sessions.migration.ts",
+        "apps/api/src/infrastructure/database/migrations/0035-create-mainnet-financial-action-authenticated-finality.migration.ts",
+        "apps/api/src/mainnet-actions/infrastructure/postgres-dormant-mainnet-financial-action-finality-sidecar.adapter.ts"
       ]
     },
     {
@@ -451,16 +466,17 @@
     },
     {
       "id": "DATA-018",
-      "name": "Smart-lending market corroboration, provider-position coverage, finalized checkpoints, route quote requests, and quote responses",
+      "name": "Smart-lending market corroboration, provider-position coverage, finalized checkpoints, authenticated reconciliation and post-finality evidence, route quote requests, and quote responses",
       "classification": "RESTRICTED",
       "cia": { "confidentiality": "HIGH", "integrity": "HIGH", "availability": "HIGH" },
       "stores": [
         "API process memory only in the current dormant adapters",
         "Append-only PostgreSQL Aave finalized-checkpoint events plus a guarded current-head pointer after migration 0017; the writer remains unregistered",
+        "Append-only PostgreSQL authenticated reconciliation admissions, authority controls, and post-finality reviews after migration 0035; authority tables start empty, all functions remain owner-only, and no application grant exists",
         "Third-party vendor systems only if a separately approved non-production exercise activates egress"
       ],
-      "retention": "REQUEST_SCOPED_MEMORY; CHECKPOINT_HISTORY_APPEND_ONLY_RETENTION_POLICY_PENDING; THIRD_PARTY_RETENTION_POLICY_PENDING",
-      "logging": "NO_WALLET_ADDRESS_EXACT_AMOUNT_RAW_QUERY_OR_RAW_PROVIDER_PAYLOAD",
+      "retention": "REQUEST_SCOPED_MEMORY; CHECKPOINT_HISTORY_APPEND_ONLY_RETENTION_POLICY_PENDING; AUTHENTICATED_FINALITY_HISTORY_APPEND_ONLY_RETENTION_POLICY_PENDING; THIRD_PARTY_RETENTION_POLICY_PENDING",
+      "logging": "NO_WALLET_ADDRESS_EXACT_AMOUNT_RAW_QUERY_RAW_PROVIDER_PAYLOAD_RAW_SIGNED_PAYLOAD_SIGNATURE_OR_ATTESTATION; STORED_DIGESTS_AND_PUBLIC_CHAIN_IDENTITIES_ONLY",
       "owner": "Blockchain, Privacy, and Risk",
       "evidence": [
         "apps/api/src/smart-lending/application/composed-fee-aware-allocation-input.reader.ts",
@@ -469,6 +485,11 @@
         "apps/api/src/smart-lending/infrastructure/external-feeds/smart-lending-external-feed.client.ts",
         "apps/api/src/smart-lending/infrastructure/aave/aave-v3-ethereum-two-source-agreement.reader.ts",
         "apps/api/src/infrastructure/database/migrations/0017-create-aave-finalized-checkpoints.migration.ts",
+        "apps/api/src/mainnet-actions/application/dormant-mainnet-financial-action-finality-evidence.producer.ts",
+        "apps/api/src/mainnet-actions/application/ports/mainnet-financial-action-finality-evidence-source.port.ts",
+        "apps/api/src/mainnet-actions/application/ports/dormant-mainnet-financial-action-finality-sidecar-durable.port.ts",
+        "apps/api/src/mainnet-actions/infrastructure/postgres-dormant-mainnet-financial-action-finality-sidecar.adapter.ts",
+        "apps/api/src/infrastructure/database/migrations/0035-create-mainnet-financial-action-authenticated-finality.migration.ts",
         "docs/smart-lending-allocation-policy.md"
       ]
     },
@@ -951,11 +972,17 @@
       "mitigations": [
         "Purpose-bound one-use capability digests authorize sealed plans",
         "Owner-only append-only tables and fixed SECURITY DEFINER functions",
-        "API receives exact EXECUTE grants and worker receives no ledger table access"
+        "API receives exact EXECUTE grants and worker receives no ledger table access",
+        "Migration 0035 adds owner-only append-only authenticated-finality authority, admission, and review tables with ALWAYS append-only triggers and no application grants; its safety overlay never mutates terminal lifecycle history and never authorizes or reverses ledger settlement"
       ],
       "owner": "Ledger, Database, and Security",
       "status": "MITIGATED_LOCAL",
-      "evidence": ["docs/KAN-41.md", "docs/adr/0003-immutable-ledger-accounting-model.md"],
+      "evidence": [
+        "docs/KAN-41.md",
+        "docs/adr/0003-immutable-ledger-accounting-model.md",
+        "apps/api/src/infrastructure/database/migrations/0035-create-mainnet-financial-action-authenticated-finality.migration.ts",
+        "apps/api/src/mainnet-actions/infrastructure/postgres-dormant-mainnet-financial-action-finality-sidecar.adapter.ts"
+      ],
       "residualRisk": "Database-owner and break-glass access can bypass application controls and has no deployed independent evidence.",
       "followUp": "KAN-235 privilege and mutation review"
     },
@@ -974,7 +1001,9 @@
         "Outbox rows use immutable job IDs; any future side-effecting consumer must persist deduplication before enablement",
         "The dormant reviewed-job dispatcher requires the complete three-contract handler registry and rejects malformed, legacy, unknown, or non-launch-network jobs before selecting a handler",
         "Owner-only migrations 0033 and 0034 atomically prepare an append-only Ethereum/Solana action lifecycle, preserve exact replay and compare-and-swap identities, and refuse unbound history or lossy rollback",
-        "The direct-import-only durable adapter derives the canonical wallet-address HMAC candidates internally, calls only address-bound V2 once, never automatically retries an uncertain database outcome, and exposes no signing, broadcast, or settlement authority"
+        "The direct-import-only durable adapter derives the canonical wallet-address HMAC candidates internally, calls only address-bound V2 once, never automatically retries an uncertain database outcome, and exposes no signing, broadcast, or settlement authority",
+        "Migration 0035 uses a deferred constraint trigger to require every migration-0033 reconciliation terminal event to receive its exact authenticated admission in the same transaction, while immutable identities make exact replay idempotent and conflicting replay fail closed",
+        "The direct-import-only authenticated-finality sidecar accepts only producer-issued capabilities and frozen exact-data requests, consumes an adapter-issued same-instance one-shot database cursor, executes one fixed database call without retry, and returns read-only recovery after an ambiguous database outcome"
       ],
       "owner": "Ledger and Backend",
       "status": "MITIGATED_LOCAL",
@@ -986,10 +1015,13 @@
         "docs/outbox/reviewed-job-consumer-dispatch.md",
         "apps/api/src/infrastructure/database/migrations/0033-create-mainnet-financial-action-lifecycle.migration.ts",
         "apps/api/src/infrastructure/database/migrations/0034-bind-mainnet-financial-action-wallet-identity.migration.ts",
-        "apps/api/src/mainnet-actions/infrastructure/postgres-dormant-mainnet-financial-action-lifecycle-durable.adapter.ts"
+        "apps/api/src/mainnet-actions/infrastructure/postgres-dormant-mainnet-financial-action-lifecycle-durable.adapter.ts",
+        "apps/api/src/mainnet-actions/application/dormant-mainnet-financial-action-finality-evidence.producer.ts",
+        "apps/api/src/mainnet-actions/infrastructure/postgres-dormant-mainnet-financial-action-finality-sidecar.adapter.ts",
+        "apps/api/src/infrastructure/database/migrations/0035-create-mainnet-financial-action-authenticated-finality.migration.ts"
       ],
-      "residualRisk": "The local database and direct-import-only adapter now preserve restart-safe intent, replay, submission, ambiguous-broadcast, and reconciliation state, but no runtime is authorized to submit or discover and claim unresolved work. Provider-side idempotency, exact signed-payload verification, authenticated chain evidence, and live recovery behavior remain unproved.",
-      "followUp": "Approve exact transaction manifests and provider adapters; add payload/signature verification plus durable unresolved-work claim/lease processing; then independently review and exercise submission and reconciliation before granting or registering V2"
+      "residualRisk": "The local database, authenticated evidence contract, and direct-import-only adapters preserve restart-safe intent, replay, submission, ambiguous-broadcast, authenticated reconciliation, and post-finality safety state, but no runtime is authorized to submit, discover, or claim unresolved work. Concrete prerequisite and source adapters, authority rows, provider-side idempotency, exact signed-payload verification, and live recovery behavior remain absent or unproved.",
+      "followUp": "Approve exact transaction manifests, prerequisite and independently controlled source adapters, and authority records; add payload/signature verification plus durable unresolved-work claim/lease processing; then independently review and exercise authenticated submission and reconciliation before granting or registering a runtime"
     },
     {
       "id": "THR-LEDGER-003",
@@ -1030,7 +1062,7 @@
       "scenario": "A chain reorganization, provider outage, ambiguous submission, or delayed observation is represented as final or resubmitted unsafely.",
       "risk": "HIGH",
       "boundaryIds": ["TB-04", "TB-10"],
-      "assetIds": ["DATA-006", "DATA-010", "DATA-011", "DATA-014"],
+      "assetIds": ["DATA-006", "DATA-010", "DATA-011", "DATA-014", "DATA-018"],
       "response": "MITIGATE",
       "mitigations": [
         "No production provider submission or indexing path is enabled yet",
@@ -1038,7 +1070,10 @@
         "Continuity backfill and quarantine recovery require two distinct agreeing sources across every contiguous block, are bounded to 64 blocks, and cannot roll back or skip history",
         "Single-use recovery authorization is bound to operation, sources, chain, deployment, current state, target, approver, nonce, issuance time, and an exclusive expiry before the locked database mutation",
         "The dormant Ethereum/Solana financial-action lifecycle records prepared, wallet-signed, broadcast-observed, and reconciled states append-only; the adapter never resends or retries an uncertain post-dispatch database result and permits read-only recovery",
-        "Address-bound V2 validates the current ACTIVE/nonrevoked registered-wallet identity before any lifecycle row can exist, including after key rotation, and wallet revocation makes replay fail closed"
+        "Address-bound V2 validates the current ACTIVE/nonrevoked registered-wallet identity before any lifecycle row can exist, including after key rotation, and wallet revocation makes replay fail closed",
+        "The dormant producer admits only SUPPLY and WITHDRAW on exact Ethereum or Solana mainnet identities, requires exactly two distinct independently captured primary and corroborating source bindings plus exact source and deployment authority fingerprints, binds wallet, provider, protocol, market, asset, action, amount, transaction, and finality facts, and leaves all signing, broadcast, resend, settlement, and ledger authority false",
+        "The producer uses the earliest caller deadline or evidence/authority expiry with a 30-second maximum and requires source implementations to honor cancellation and settle; the sidecar then uses a producer-issued capability, frozen exact request, same-instance one-shot compare-and-swap cursor, one fixed database call, no automatic retry, and read-only recovery after ambiguity",
+        "Migration 0035 records authenticated reconciliation admissions, authority-control events, and post-finality reviews append-only; authority, unauthenticated-terminal, reorganization, and sticky deep-reorganization quarantine are safety overlays that never rewrite migration-0033 terminal history and never authorize or reverse ledger settlement"
       ],
       "owner": "Blockchain, Ledger, and SRE",
       "status": "OPEN_FOLLOW_UP",
@@ -1050,10 +1085,15 @@
         "apps/api/src/infrastructure/database/migrations/0017-create-aave-finalized-checkpoints.migration.ts",
         "apps/api/src/infrastructure/database/migrations/0033-create-mainnet-financial-action-lifecycle.migration.ts",
         "apps/api/src/infrastructure/database/migrations/0034-bind-mainnet-financial-action-wallet-identity.migration.ts",
-        "apps/api/src/mainnet-actions/infrastructure/postgres-dormant-mainnet-financial-action-lifecycle-durable.adapter.ts"
+        "apps/api/src/mainnet-actions/infrastructure/postgres-dormant-mainnet-financial-action-lifecycle-durable.adapter.ts",
+        "apps/api/src/mainnet-actions/application/dormant-mainnet-financial-action-finality-evidence.producer.ts",
+        "apps/api/src/mainnet-actions/application/ports/mainnet-financial-action-finality-evidence-source.port.ts",
+        "apps/api/src/mainnet-actions/application/ports/dormant-mainnet-financial-action-finality-sidecar-durable.port.ts",
+        "apps/api/src/mainnet-actions/infrastructure/postgres-dormant-mainnet-financial-action-finality-sidecar.adapter.ts",
+        "apps/api/src/infrastructure/database/migrations/0035-create-mainnet-financial-action-authenticated-finality.migration.ts"
       ],
-      "residualRisk": "Durable local transaction unknown-outcome state now exists, but no runtime discovers or claims unresolved work and no approved independent Ethereum/Solana source authenticates observations. Post-finality reorg recording, exact payload/signature verification, live finality exercises, Solana indexing, provider credentials, and deployment authority remain absent.",
-      "followUp": "Approve and implement independent read sources, source-pair identity, payload/signature verification, durable unresolved-work claim/lease reconciliation, and append-only post-finality reorg handling; complete live recovery/finality drills before enabling chain processing"
+      "residualRisk": "The authenticated-finality producer, sidecar, and owner-only schema remain local, dormant, and unregistered. Source and deployment authority tables are empty; no concrete prerequisite adapter, source adapter, runtime reconciliation or review scheduler, provider credential, or signing and settlement path exists. A source that violates its port contract cannot be physically cancelled after the producer stops awaiting it. Exact signed-payload verification, live finality and reorganization drills, and a downstream ledger-remediation policy for quarantined actions remain absent.",
+      "followUp": "Independently approve and implement the exact prerequisite and two-source adapters, controlled authority population, payload/signature verification, durable unresolved-work claim/lease reconciliation, and runtime post-finality review scheduler; define ledger-remediation policy that does not rewrite history, then complete live recovery, finality, and reorganization drills before enabling chain processing"
     },
     {
       "id": "THR-ADMIN-001",
@@ -1408,6 +1448,7 @@
         "The closed READ_ONLY outer schema-v3 technical-evidence bundle and v3 signing domain cover one schema-v2 live-read index with the exact ordered six-Ethereum/four-Solana provider scope and one nested schema-v1 provider record per fixed provider/protocol/network tuple; each record binds deployment/runtime/market identities, asset/oracle/pause-and-cap/code digests, distinct source/operator identities, finality/freshness, fail-closed read-only adapter behavior, a sanitized-capture digest, risk and independent decisions, kill-switch exercises, monitoring, spend, and runbook evidence",
         "The live-read index must match the outer source revision and active platform-directory digest, provider identities and retained captures cannot be reused across records, observations expire with the bundle, mainnet-write evidence remains null, and the intentionally empty production signer registry prevents repository-local activation",
         "Aave and DefiLlama observations are corroboration only and cannot establish recommendation eligibility or authorize a financial action",
+        "The dormant authenticated-finality producer requires exactly two distinct independently captured primary and corroborating sources with exact source and deployment authority fingerprints and complete action, wallet, provider, protocol, market, asset, amount, transaction, and chain bindings; it exposes no recommendation, signing, broadcast, resend, settlement, or ledger authority",
         "Production feed activation is rejected, no HTTP recommendation route exists, and required production input adapters remain unavailable"
       ],
       "owner": "Blockchain, Risk, and Security",
@@ -1423,6 +1464,8 @@
         "apps/api/src/smart-lending/domain/aave-v3-ethereum-finalized-checkpoint-recovery.ts",
         "apps/api/src/smart-lending/infrastructure/postgres/postgres-aave-v3-ethereum-finalized-checkpoint.repository.ts",
         "apps/api/src/infrastructure/database/migrations/0017-create-aave-finalized-checkpoints.migration.ts",
+        "apps/api/src/mainnet-actions/application/dormant-mainnet-financial-action-finality-evidence.producer.ts",
+        "apps/api/src/mainnet-actions/application/ports/mainnet-financial-action-finality-evidence-source.port.ts",
         "apps/api/src/mainnet-platforms/domain/mainnet-provider-position-coverage.ts",
         "apps/api/src/portfolio/domain/mainnet-provider-portfolio-composition.ts",
         "scripts/production-evidence-bundle.ts",
@@ -1460,9 +1503,9 @@
       "id": "THR-AVAILABILITY-003",
       "domain": "AVAILABILITY",
       "stride": ["DENIAL_OF_SERVICE"],
-      "scenario": "Slow, unavailable, or rate-limited market and bridge vendors, or excessive candidate fan-out, exhaust API capacity, vendor quotas, or approved spend.",
+      "scenario": "Slow, unavailable, rate-limited, or non-cooperative market, bridge, RPC, indexing, or authenticated-finality sources, or excessive candidate fan-out, exhaust API capacity, vendor quotas, or approved spend.",
       "risk": "HIGH",
-      "boundaryIds": ["TB-12"],
+      "boundaryIds": ["TB-10", "TB-12"],
       "assetIds": ["DATA-012", "DATA-018"],
       "response": "MITIGATE",
       "mitigations": [
@@ -1470,6 +1513,7 @@
         "The transport enforces per-request timeouts, response-size bounds, fixed destinations, and independent kill switches",
         "A dormant fail-closed admission layer enforces per-process global, destination, and LI.FI account concurrency and sliding-window workload budgets, destination circuits, and safe shared-read single-flight",
         "Logical timeout or caller cancellation never releases physical admission capacity until the upstream promise actually settles, including when a vendor ignores AbortSignal",
+        "The dormant authenticated-finality producer stops awaiting at the earliest authenticated deadline or expiry, capped at 30 seconds, and its source port requires AbortSignal and deadline handling plus eventual settlement; this local contract does not physically cancel a non-cooperative implementation",
         "No public route exists, production activation is rejected, and unavailable defaults prevent current recommendation traffic"
       ],
       "owner": "Backend, Finance, and SRE",
@@ -1479,10 +1523,12 @@
         "apps/api/src/smart-lending/infrastructure/external-feeds/smart-lending-external-feed.client.ts",
         "apps/api/src/smart-lending/infrastructure/external-feeds/smart-lending-upstream-read-admission.ts",
         "apps/api/src/smart-lending/infrastructure/external-feeds/smart-lending-upstream-read-admission.spec.ts",
+        "apps/api/src/mainnet-actions/application/dormant-mainnet-financial-action-finality-evidence.producer.ts",
+        "apps/api/src/mainnet-actions/application/ports/mainnet-financial-action-finality-evidence-source.port.ts",
         "docs/smart-lending-allocation-policy.md"
       ],
-      "residualRisk": "The admission layer remains intentionally unwired and per-process. Fleet-wide distributed limits, provider-billing spend controls, approved operator configuration, vendor-rate contracts, integration with every outbound client, and deployed alert evidence are absent.",
-      "followUp": "Add durable fleet-wide quota and cost controls, independently approve the exact policy, wire every outbound client through the admission boundary, and capture deployed alert evidence before route exposure"
+      "residualRisk": "The admission layer and authenticated-finality producer remain intentionally unwired and per-process. No concrete authenticated-finality source adapter exists, and an implementation that ignores its AbortSignal contract cannot be physically cancelled. Fleet-wide distributed limits, provider-billing spend controls, approved operator configuration, vendor-rate contracts, integration with every outbound client, and deployed alert evidence are absent.",
+      "followUp": "Add durable fleet-wide quota and cost controls, independently approve the exact policy and finality sources, contain non-cooperative reads, wire every outbound client through the admission boundary, and capture deployed alert evidence before route exposure"
     },
     {
       "id": "THR-SUPPLY-003",
