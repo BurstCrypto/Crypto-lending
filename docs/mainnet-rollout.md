@@ -229,16 +229,19 @@ producer and source contract. For `SUPPLY` and `WITHDRAW` only, the producer
 binds two distinct source identities and independently authenticated source and
 deployment prerequisites to the exact wallet, provider, protocol, market,
 asset, action, amount, transaction, and Ethereum or Solana finality facts. It
-rechecks those bindings before and after source I/O, applies chain-specific
-finality and deep-reorg rules, and fails closed on abort, expiry, stale evidence,
-unsupported actions, or a changed prerequisite. A concrete source must honor
-the supplied abort signal and deadline; none is implemented or registered yet.
+authenticates the prerequisite before source I/O, verifies the exact returned
+attestation bindings, rechecks signal and expiry afterward, applies
+chain-specific finality and deep-reorg rules, and fails closed on abort, expiry,
+stale evidence, unsupported actions, or mismatched source attestations. A
+concrete source must honor the supplied abort signal and deadline; none is
+implemented or registered yet.
 
 Commit `e7e27b7` adds a direct-import-only PostgreSQL finality sidecar. Its
 one-shot, exact-data cursors bind lifecycle revision, snapshot, transition,
-transaction, position, block, and review state. It issues one fixed database
-call, never retries an ambiguous result, and permits only a fresh read for
-recovery. Commit `4f0a79f` adds owner-only migration `0035`: empty source and
+transaction, position, block, and review state. Each public operation issues at
+most one operation-specific fixed database call, never retries an ambiguous
+result, and permits only a fresh read for recovery. Commit `4f0a79f` adds
+owner-only migration `0035`: empty source and
 deployment authority tables, append-only authenticated admissions, authority
 control events, and a post-finality review chain. A deferred trigger rejects a
 terminal reconciliation without its matching admission; deep-reorg and
@@ -273,10 +276,11 @@ authority tables are empty, and all policy limits and approvals remain zero.
   exact deployment identities, then populate the empty `0035` authority tables
   through a separately controlled, audited owner workflow. An authority row is
   evidence admission only and must never grant write or settlement authority.
-- Implement and independently review the concrete prerequisite/source adapters,
-  exact transaction-payload and wallet-signature verification, address-bound
-  `0034` preparation, and the `0035` sidecar before any runtime registration or
-  database grant. Every source must cooperatively stop on abort/deadline.
+- Implement and independently review the concrete prerequisite/source adapters
+  and exact transaction-payload and wallet-signature verification. Separately
+  review and compose the existing address-bound `0034` preparation and `0035`
+  sidecar before any runtime registration or database grant. Every source must
+  cooperatively stop on abort/deadline.
 - Add durable unresolved-work discovery, claim/lease reconciliation, and a
   post-finality review scheduler without automatic resubmission; never log HMAC
   candidates or opaque attestations.

@@ -897,10 +897,11 @@ Ethereum/Solana and `SUPPLY`/`WITHDRAW` scope, two distinct sources, earliest
 deadline/authority/evidence expiry, cooperative abort, legacy terminal-write
 exclusion, frozen one-shot cursor provenance, the 24/25/2-argument SQL
 allowlists, empty authority tables, deferred authenticated admission, and sticky
-post-finality quarantine with every signing, broadcast, resend, persistence,
-settlement, and ledger capability false. The runtime scan now includes `.tsx`
-and rejects add/remove/rename races by comparing a bounded, metadata-bound tree
-inventory before and after secure reads. All 30 focused mutation cases pass.
+post-finality quarantine with every returned financial-action, signing,
+broadcast, resend, settlement, and ledger capability false. The runtime scan
+now includes `.tsx` and rejects add/remove/rename races by comparing a bounded,
+metadata-bound tree inventory before and after secure reads. All 30 focused
+cases pass.
 
 The adapter accepts only the registry's active USDC, USDT, and PYUSD identities
 on Ethereum and Solana mainnet and an exact static allowlist of six Ethereum and
@@ -1198,7 +1199,7 @@ the impacted 9-suite/88-case migration-order set, and 6 guarded loopback
 PostgreSQL 16 cases spanning Ethereum and Solana admission, direct legacy-bypass
 rejection, concurrent exact replay, authority controls, historical replay with
 current review state, sticky deep-reorg quarantine, owner-only ACLs, and catalog
-tampering. Boundary validation passes 30/30 focused mutation cases. The five
+tampering. Boundary validation passes 30/30 focused cases. The five
 directly impacted preflight cases and preflight typecheck pass; the offline CLI
 still exits `1` with 10 planned, 0 live-read, and 0 transaction providers and
 reports zero network, DNS, cloud, provider, secret, configuration-environment,

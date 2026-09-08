@@ -660,8 +660,9 @@ throw, abort, or malformed row after dispatch becomes
 Commits `bae3116` and `3e3ce75` add a direct-import-only finality producer that
 accepts only exact Ethereum/Solana `SUPPLY` and `WITHDRAW` evidence from two
 distinct, prerequisite-authenticated sources. Commit `e7e27b7` adds an
-unregistered PostgreSQL sidecar with one-shot exact-data cursors, one fixed
-database dispatch, and read-only recovery after ambiguity. Commit `4f0a79f`
+unregistered PostgreSQL sidecar with one-shot exact-data cursors, at most one
+operation-specific fixed database dispatch per public operation, and read-only
+recovery after ambiguity. Commit `4f0a79f`
 adds migration `0035`: empty owner-controlled source/deployment authority
 tables, append-only authenticated reconciliation admissions and authority
 controls, a chained post-finality review overlay, and a deferred guard that
@@ -922,6 +923,9 @@ Use the same hold, quiesce, migrate, verify, switch, and drain pattern required
 for `0016` and `0017`. Before the migration starts, take the approved backup and
 record the exact release, database target, and migration checksums. Hold the new
 API out of its target group and keep every old and new worker from polling.
+Before applying `0034`, prove the target contains no mainnet-action intent,
+event, or evidence-claim history; the wallet-binding upgrade deliberately
+refuses to reinterpret existing lifecycle history.
 Before applying `0035`, prove the target contains no preexisting mainnet-action
 reconciliation event; the migration deliberately refuses to legitimize legacy
 terminal history after the fact. Quiesce old API writes and apply all eighteen
@@ -989,6 +993,9 @@ only the separate V2 relation and functions.
 Migration `0033` refuses rollback after any retained financial-action intent,
 event, or evidence claim exists; only a completely unused lifecycle can be
 removed.
+Migration `0034` also refuses rollback after any intent, event, or evidence
+claim exists; an unused rollback removes only its address-bound V2 preparation
+function.
 Migration `0035` refuses rollback after any source authority, deployment
 authority, authority-control, authenticated-admission, or post-finality-review
 row exists. An unused rollback removes only the `0035` guard, functions, and
