@@ -58,7 +58,10 @@ import {
   type DormantMainnetFinancialActionVerifiedSubmissionBinderPort,
   type DormantMainnetVerifiedSubmissionBindCapabilityV1,
 } from '../application/ports/dormant-mainnet-financial-action-verified-submission-binder.port';
-import { sha256Framed } from '../domain/mainnet-financial-action-signed-verification-digest';
+import {
+  sha256ClmaFp1,
+  sha256Framed,
+} from '../domain/mainnet-financial-action-signed-verification-digest';
 import { fingerprintDormantMainnetSignedVerificationIntent } from './mainnet-financial-action-write-manifest';
 
 const ETHEREUM_MAINNET = 'eip155:1' as const;
@@ -233,6 +236,53 @@ const SIGNED_VERIFICATION_RESULT_KEYS = Object.freeze([
   'ethereumNonce',
   'solanaRecentBlockhash',
   'staticCommandVerification',
+] as const);
+const PERSISTED_INTENT_FINGERPRINT_FIELD_NAMES = Object.freeze([
+  'fingerprintEncodingVersion',
+  'intentId',
+  'accountId',
+  'yieldOperationId',
+  'yieldSubmissionId',
+  'ledgerTransactionId',
+  'ledgerBookId',
+  'walletId',
+  'walletChainNamespace',
+  'walletChainReference',
+  'walletIdentityDigestVersion',
+  'walletIdentityDigestHex',
+  'networkId',
+  'providerId',
+  'protocolId',
+  'marketId',
+  'assetRegistryVersion',
+  'assetRegistryFingerprintSha256',
+  'assetSymbol',
+  'assetIdentity',
+  'assetDecimals',
+  'actionType',
+  'amountAtomic',
+  'requestedValueUsdMicros',
+  'maximumNetworkFeeAtomic',
+  'maximumNetworkFeeBasisPoints',
+  'minimumPostActionNativeBalanceAtomic',
+  'allowanceMode',
+  'allowanceAmountAtomic',
+  'idempotencyKeyDigestSha256',
+  'replayProtectionId',
+  'issuedAtEpochMilliseconds',
+  'expiresAtEpochMilliseconds',
+  'signingResponsibility',
+  'broadcastResponsibility',
+  'mayAuthorizeFinancialAction',
+  'apiMaySign',
+  'apiMayBroadcast',
+  'crossChainExecutionAllowed',
+  'automaticResendAllowed',
+  'automaticFeeEscalationAllowed',
+  'volatileIntentDurableReplayProtectionVerified',
+  'databaseReplayProtectionEnforced',
+  'ledgerSettlementAuthority',
+  'volatileIntentCommitmentSha256',
 ] as const);
 const BROADCAST_KEYS = Object.freeze([
   ...REQUEST_COMMON_KEYS,
@@ -1100,13 +1150,77 @@ function reviewVerifiedIntentBinding(
       fingerprintDormantMainnetSignedVerificationIntent(
         reviewedCursor.cursor.intentRecordFingerprintSha256,
         intent,
-      ).length !== 64
+      ).length !== 64 ||
+      persistedIntentFingerprint(reviewedCursor, intent, code) !==
+        reviewedCursor.cursor.intentRecordFingerprintSha256
     ) {
       return invalid(code);
     }
   } catch {
     return invalid(code);
   }
+}
+
+/** Recomputes migration 0033's authoritative row fingerprint, including issued_at. */
+function persistedIntentFingerprint(
+  reviewedCursor: ReviewedCursor,
+  intent: DormantMainnetFinancialActionIntentV1,
+  code: DormantMainnetFinancialActionLifecycleDatabaseCodecErrorCode,
+): string {
+  const anchor = reviewedCursor.metadata.authoritativeIntentAnchor;
+  const issuedAt = timestamp(intent.issuedAt, code);
+  const expiresAt = timestamp(anchor.expiresAt, code);
+  return sha256ClmaFp1(
+    'CRYPTO_LENDING:MAINNET_ACTION:PERSISTED_INTENT:FRAMED:v1',
+    PERSISTED_INTENT_FINGERPRINT_FIELD_NAMES,
+    [
+      '1',
+      reviewedCursor.cursor.intentId,
+      reviewedCursor.cursor.accountId,
+      anchor.yieldOperationId,
+      anchor.yieldSubmissionId,
+      anchor.ledgerTransactionId,
+      anchor.ledgerBookId,
+      anchor.walletId,
+      anchor.walletChainNamespace,
+      anchor.walletChainReference,
+      String(anchor.walletIdentityDigestVersion),
+      anchor.walletIdentityDigestHex,
+      reviewedCursor.cursor.networkId,
+      anchor.providerId,
+      anchor.protocolId,
+      anchor.marketId,
+      String(anchor.assetRegistryVersion),
+      anchor.assetRegistryFingerprintSha256,
+      anchor.assetSymbol,
+      anchor.assetIdentity,
+      String(anchor.assetDecimals),
+      anchor.actionType,
+      anchor.amountAtomic,
+      anchor.requestedValueUsdMicros,
+      anchor.maximumNetworkFeeAtomic,
+      String(anchor.maximumNetworkFeeBasisPoints),
+      anchor.minimumPostActionNativeBalanceAtomic,
+      anchor.allowanceMode,
+      anchor.allowanceAmountAtomic,
+      anchor.idempotencyKeyDigestSha256,
+      anchor.replayProtectionId,
+      String(Date.parse(issuedAt)),
+      String(Date.parse(expiresAt)),
+      'USER_WALLET_ONLY',
+      'USER_WALLET_ONLY',
+      'false',
+      'false',
+      'false',
+      'false',
+      'false',
+      'false',
+      'false',
+      'true',
+      'false',
+      reviewedCursor.metadata.volatileIntentCommitmentSha256,
+    ],
+  );
 }
 
 function reviewOpaqueVerifierCapability(

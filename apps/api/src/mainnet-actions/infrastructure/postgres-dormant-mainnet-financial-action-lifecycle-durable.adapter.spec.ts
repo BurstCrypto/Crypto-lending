@@ -17,6 +17,7 @@ import {
   parseDormantMainnetFinancialActionIntent,
   type DormantMainnetFinancialActionIntentInputV1,
 } from '../domain/dormant-mainnet-financial-action';
+import { sha256ClmaFp1 } from '../domain/mainnet-financial-action-signed-verification-digest';
 import {
   DORMANT_MAINNET_FINANCIAL_ACTION_DURABLE_LIFECYCLE_VERSION,
   DORMANT_MAINNET_FINANCIAL_ACTION_DURABLE_REQUEST_USE,
@@ -273,6 +274,116 @@ function readRequest(): ReadDormantMainnetFinancialActionDurableRequestV1 {
   return frozenNull({ ...commonRequest(), accountId: ACCOUNT_ID, intentId: INTENT_ID });
 }
 
+function persistedIntentFingerprint(
+  request: PrepareDormantMainnetFinancialActionDurableRequestV1,
+  walletIdentityDigest: WalletRegistrationDigestReference<'address'>,
+): string {
+  const intent = request.intentInput;
+  const ethereum = intent.networkId === ETHEREUM;
+  const assetDecimals = MAINNET_SUPPORTED_ASSET_REGISTRY.latest.identifyAsset(
+    intent.networkId,
+    intent.assetIdentity,
+  )?.decimals;
+  if (assetDecimals === undefined) throw new Error('missing test asset decimals');
+  return sha256ClmaFp1(
+    'CRYPTO_LENDING:MAINNET_ACTION:PERSISTED_INTENT:FRAMED:v1',
+    [
+      'fingerprintEncodingVersion',
+      'intentId',
+      'accountId',
+      'yieldOperationId',
+      'yieldSubmissionId',
+      'ledgerTransactionId',
+      'ledgerBookId',
+      'walletId',
+      'walletChainNamespace',
+      'walletChainReference',
+      'walletIdentityDigestVersion',
+      'walletIdentityDigestHex',
+      'networkId',
+      'providerId',
+      'protocolId',
+      'marketId',
+      'assetRegistryVersion',
+      'assetRegistryFingerprintSha256',
+      'assetSymbol',
+      'assetIdentity',
+      'assetDecimals',
+      'actionType',
+      'amountAtomic',
+      'requestedValueUsdMicros',
+      'maximumNetworkFeeAtomic',
+      'maximumNetworkFeeBasisPoints',
+      'minimumPostActionNativeBalanceAtomic',
+      'allowanceMode',
+      'allowanceAmountAtomic',
+      'idempotencyKeyDigestSha256',
+      'replayProtectionId',
+      'issuedAtEpochMilliseconds',
+      'expiresAtEpochMilliseconds',
+      'signingResponsibility',
+      'broadcastResponsibility',
+      'mayAuthorizeFinancialAction',
+      'apiMaySign',
+      'apiMayBroadcast',
+      'crossChainExecutionAllowed',
+      'automaticResendAllowed',
+      'automaticFeeEscalationAllowed',
+      'volatileIntentDurableReplayProtectionVerified',
+      'databaseReplayProtectionEnforced',
+      'ledgerSettlementAuthority',
+      'volatileIntentCommitmentSha256',
+    ],
+    [
+      '1',
+      intent.intentId,
+      intent.accountId,
+      request.authoritativeLinks.yieldOperationId,
+      request.authoritativeLinks.yieldSubmissionId,
+      request.authoritativeLinks.ledgerTransactionId,
+      request.authoritativeLinks.ledgerBookId,
+      intent.walletRegistrationId,
+      ethereum ? 'eip155' : 'solana',
+      ethereum ? '1' : '5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp',
+      String(walletIdentityDigest.version),
+      walletIdentityDigest.value,
+      intent.networkId,
+      intent.providerId,
+      intent.protocolId,
+      intent.marketId,
+      String(intent.assetRegistryVersion),
+      intent.assetRegistryFingerprintSha256,
+      intent.assetSymbol,
+      intent.assetIdentity,
+      String(assetDecimals),
+      intent.action,
+      intent.amountAtomic,
+      intent.requestedValueUsdMicros,
+      intent.maximumNetworkFeeAtomic,
+      String(intent.maximumNetworkFeeBasisPoints),
+      intent.minimumPostActionNativeBalanceAtomic,
+      intent.allowanceMode,
+      intent.allowanceAmountAtomic,
+      intent.idempotencyKeyDigestSha256,
+      intent.replayProtectionId,
+      String(Date.parse(intent.issuedAt)),
+      String(Date.parse(intent.expiresAt)),
+      'USER_WALLET_ONLY',
+      'USER_WALLET_ONLY',
+      'false',
+      'false',
+      'false',
+      'false',
+      'false',
+      'false',
+      'false',
+      'true',
+      'false',
+      request.volatileIntentCommitment.sha256,
+    ],
+  );
+}
+
 function preparedRow(
   request: PrepareDormantMainnetFinancialActionDurableRequestV1,
   overrides: Record<string, unknown> = {},
@@ -290,7 +401,7 @@ function preparedRow(
     lifecycle_stage: 'PREPARED',
     lifecycle_revision: '1',
     current_snapshot_sha256: PREPARED_SNAPSHOT,
-    intent_record_fingerprint_sha256: INTENT_FINGERPRINT,
+    intent_record_fingerprint_sha256: persistedIntentFingerprint(request, walletIdentityDigest),
     volatile_intent_commitment_sha256: VOLATILE_COMMITMENT,
     fingerprint_encoding_version: 1,
     account_id: intent.accountId,
@@ -753,6 +864,9 @@ describe('PostgresDormantMainnetFinancialActionLifecycleDurableAdapter', () => {
     expect(Reflect.ownKeys(prepared.result.cursor)).toHaveLength(9);
     expect(Object.getOwnPropertySymbols(prepared.result.cursor)).toEqual([]);
     expect(prepared.result.cursor.currentSnapshotSha256).not.toBe(INTENT_FINGERPRINT);
+    expect(prepared.result.cursor.intentRecordFingerprintSha256).toBe(
+      '661fc71ffd5668b9f706782bfaaaa219ec930aa42b2722cec537f575a64ce3fa',
+    );
 
     const bound = await bindConfirmed(test, prepared);
     const reconciliation = reconciliationRequest(bound.result.cursor, 'PENDING');
@@ -1317,6 +1431,14 @@ describe('PostgresDormantMainnetFinancialActionLifecycleDurableAdapter', () => {
     const prepare = prepareRequest();
     const read = readRequest();
     const uint256Overflow = (1n << 256n).toString();
+    const persistedFingerprint = persistedIntentFingerprint(
+      prepare,
+      digestWalletIdentity(
+        activeWalletRegistrationKey(IDENTITY_KEY_RING),
+        prepare.intentInput.networkId,
+        prepare.intentInput.walletAddress,
+      ),
+    );
     const rows = [
       preparedRow(prepare, {
         record_outcome: 'READ',
@@ -1328,7 +1450,7 @@ describe('PostgresDormantMainnetFinancialActionLifecycleDurableAdapter', () => {
       }),
       preparedRow(prepare, {
         record_outcome: 'READ',
-        current_snapshot_sha256: INTENT_FINGERPRINT,
+        current_snapshot_sha256: persistedFingerprint,
       }),
       preparedRow(prepare, {
         record_outcome: 'READ',
@@ -1724,7 +1846,7 @@ describe('PostgresDormantMainnetFinancialActionLifecycleDurableAdapter', () => {
       expect(copiedSetup.test.query).toHaveBeenCalledTimes(copiedQueryCount);
     });
 
-    it('cross-binds every intent field available in the authenticated lifecycle projection before consuming verifier authority', async () => {
+    it('cross-binds every persisted intent field before consuming verifier authority', async () => {
       const setup = await verifiedBindSetup();
       const alternateAsset = MAINNET_SUPPORTED_ASSET_REGISTRY.latest.assets.find(
         (asset) => asset.networkId === ETHEREUM && asset.stablecoin !== 'USDC',
@@ -1750,6 +1872,7 @@ describe('PostgresDormantMainnetFinancialActionLifecycleDurableAdapter', () => {
         ['allowanceAmountAtomic', '2000000'],
         ['idempotencyKeyDigestSha256', digest('f')],
         ['replayProtectionId', OBSERVATION_ID],
+        ['issuedAt', '2026-09-07T11:59:59.000Z'],
         ['expiresAt', '2026-09-07T12:03:59.000Z'],
       ];
 
