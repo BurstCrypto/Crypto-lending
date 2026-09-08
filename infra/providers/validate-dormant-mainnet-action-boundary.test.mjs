@@ -11,6 +11,9 @@ import {
   ACTION_AUTHENTICATED_FINALITY_MIGRATION_INTEGRATION_SPEC_PATH,
   ACTION_AUTHENTICATED_FINALITY_MIGRATION_PATH,
   ACTION_AUTHENTICATED_FINALITY_MIGRATION_SPEC_PATH,
+  ACTION_ATOMIC_FINALITY_MIGRATION_INTEGRATION_SPEC_PATH,
+  ACTION_ATOMIC_FINALITY_MIGRATION_PATH,
+  ACTION_ATOMIC_FINALITY_MIGRATION_SPEC_PATH,
   ACTION_FINALITY_EVIDENCE_PRODUCER_PATH,
   ACTION_FINALITY_EVIDENCE_PRODUCER_SPEC_PATH,
   ACTION_FINALITY_EVIDENCE_SOURCE_PORT_PATH,
@@ -19,6 +22,14 @@ import {
   ACTION_FINALITY_SIDECAR_DURABLE_PORT_SPEC_PATH,
   ACTION_FINALITY_SIDECAR_POSTGRES_ADAPTER_PATH,
   ACTION_FINALITY_SIDECAR_POSTGRES_ADAPTER_SPEC_PATH,
+  ACTION_FINALITY_PREREQUISITE_ISSUER_PORT_PATH,
+  ACTION_FINALITY_PREREQUISITE_MIGRATION_INTEGRATION_SPEC_PATH,
+  ACTION_FINALITY_PREREQUISITE_MIGRATION_PATH,
+  ACTION_FINALITY_PREREQUISITE_MIGRATION_SPEC_PATH,
+  ACTION_FINALITY_PREREQUISITE_POSTGRES_ADAPTER_PATH,
+  ACTION_FINALITY_PREREQUISITE_POSTGRES_ADAPTER_SPEC_PATH,
+  ACTION_FINALITY_WALLET_READER_PATH,
+  ACTION_FINALITY_WALLET_READER_SPEC_PATH,
   ACTION_LIFECYCLE_PATH,
   ACTION_LIFECYCLE_MIGRATION_PATH,
   ACTION_LIFECYCLE_MIGRATION_SPEC_PATH,
@@ -38,6 +49,9 @@ import {
   REVIEWED_ACTION_AUTHENTICATED_FINALITY_MIGRATION_INTEGRATION_SPEC_SHA256,
   REVIEWED_ACTION_AUTHENTICATED_FINALITY_MIGRATION_SHA256,
   REVIEWED_ACTION_AUTHENTICATED_FINALITY_MIGRATION_SPEC_SHA256,
+  REVIEWED_ACTION_ATOMIC_FINALITY_MIGRATION_INTEGRATION_SPEC_SHA256,
+  REVIEWED_ACTION_ATOMIC_FINALITY_MIGRATION_SHA256,
+  REVIEWED_ACTION_ATOMIC_FINALITY_MIGRATION_SPEC_SHA256,
   REVIEWED_ACTION_BOUNDARY_SHA256,
   REVIEWED_ACTION_BOUNDARY_SPEC_SHA256,
   REVIEWED_ACTION_FINALITY_EVIDENCE_PRODUCER_SHA256,
@@ -48,6 +62,14 @@ import {
   REVIEWED_ACTION_FINALITY_SIDECAR_DURABLE_PORT_SPEC_SHA256,
   REVIEWED_ACTION_FINALITY_SIDECAR_POSTGRES_ADAPTER_SHA256,
   REVIEWED_ACTION_FINALITY_SIDECAR_POSTGRES_ADAPTER_SPEC_SHA256,
+  REVIEWED_ACTION_FINALITY_PREREQUISITE_ISSUER_PORT_SHA256,
+  REVIEWED_ACTION_FINALITY_PREREQUISITE_MIGRATION_INTEGRATION_SPEC_SHA256,
+  REVIEWED_ACTION_FINALITY_PREREQUISITE_MIGRATION_SHA256,
+  REVIEWED_ACTION_FINALITY_PREREQUISITE_MIGRATION_SPEC_SHA256,
+  REVIEWED_ACTION_FINALITY_PREREQUISITE_POSTGRES_ADAPTER_SHA256,
+  REVIEWED_ACTION_FINALITY_PREREQUISITE_POSTGRES_ADAPTER_SPEC_SHA256,
+  REVIEWED_ACTION_FINALITY_WALLET_READER_SHA256,
+  REVIEWED_ACTION_FINALITY_WALLET_READER_SPEC_SHA256,
   REVIEWED_ACTION_LIFECYCLE_SHA256,
   REVIEWED_ACTION_LIFECYCLE_DURABLE_PORT_SHA256,
   REVIEWED_ACTION_LIFECYCLE_MIGRATION_SHA256,
@@ -94,6 +116,19 @@ function snapshot() {
     authenticatedFinalityMigrationSpecSource: baseline.authenticatedFinalityMigrationSpecSource,
     authenticatedFinalityMigrationIntegrationSpecSource:
       baseline.authenticatedFinalityMigrationIntegrationSpecSource,
+    finalityPrerequisiteIssuerPortSource: baseline.finalityPrerequisiteIssuerPortSource,
+    finalityPrerequisiteAdapterSource: baseline.finalityPrerequisiteAdapterSource,
+    finalityPrerequisiteAdapterSpecSource: baseline.finalityPrerequisiteAdapterSpecSource,
+    finalityWalletReaderSource: baseline.finalityWalletReaderSource,
+    finalityWalletReaderSpecSource: baseline.finalityWalletReaderSpecSource,
+    finalityPrerequisiteMigrationSource: baseline.finalityPrerequisiteMigrationSource,
+    finalityPrerequisiteMigrationSpecSource: baseline.finalityPrerequisiteMigrationSpecSource,
+    finalityPrerequisiteMigrationIntegrationSpecSource:
+      baseline.finalityPrerequisiteMigrationIntegrationSpecSource,
+    atomicFinalityMigrationSource: baseline.atomicFinalityMigrationSource,
+    atomicFinalityMigrationSpecSource: baseline.atomicFinalityMigrationSpecSource,
+    atomicFinalityMigrationIntegrationSpecSource:
+      baseline.atomicFinalityMigrationIntegrationSpecSource,
     migrationIndexSource: baseline.migrationIndexSource,
     runtimeSources: new Map(baseline.runtimeSources),
   };
@@ -161,6 +196,32 @@ function writeCompleteReviewedFixture(repositoryRoot) {
       ACTION_AUTHENTICATED_FINALITY_MIGRATION_INTEGRATION_SPEC_PATH,
       baseline.authenticatedFinalityMigrationIntegrationSpecSource,
     ],
+    [ACTION_FINALITY_PREREQUISITE_ISSUER_PORT_PATH, baseline.finalityPrerequisiteIssuerPortSource],
+    [
+      ACTION_FINALITY_PREREQUISITE_POSTGRES_ADAPTER_PATH,
+      baseline.finalityPrerequisiteAdapterSource,
+    ],
+    [
+      ACTION_FINALITY_PREREQUISITE_POSTGRES_ADAPTER_SPEC_PATH,
+      baseline.finalityPrerequisiteAdapterSpecSource,
+    ],
+    [ACTION_FINALITY_WALLET_READER_PATH, baseline.finalityWalletReaderSource],
+    [ACTION_FINALITY_WALLET_READER_SPEC_PATH, baseline.finalityWalletReaderSpecSource],
+    [ACTION_FINALITY_PREREQUISITE_MIGRATION_PATH, baseline.finalityPrerequisiteMigrationSource],
+    [
+      ACTION_FINALITY_PREREQUISITE_MIGRATION_SPEC_PATH,
+      baseline.finalityPrerequisiteMigrationSpecSource,
+    ],
+    [
+      ACTION_FINALITY_PREREQUISITE_MIGRATION_INTEGRATION_SPEC_PATH,
+      baseline.finalityPrerequisiteMigrationIntegrationSpecSource,
+    ],
+    [ACTION_ATOMIC_FINALITY_MIGRATION_PATH, baseline.atomicFinalityMigrationSource],
+    [ACTION_ATOMIC_FINALITY_MIGRATION_SPEC_PATH, baseline.atomicFinalityMigrationSpecSource],
+    [
+      ACTION_ATOMIC_FINALITY_MIGRATION_INTEGRATION_SPEC_PATH,
+      baseline.atomicFinalityMigrationIntegrationSpecSource,
+    ],
     [DATABASE_MIGRATION_INDEX_PATH, baseline.migrationIndexSource],
   ]) {
     writeFixture(repositoryRoot, path, source);
@@ -203,17 +264,28 @@ test('the exact Ethereum and Solana lending action candidate boundary is dormant
     REVIEWED_ACTION_AUTHENTICATED_FINALITY_MIGRATION_SHA256,
     REVIEWED_ACTION_AUTHENTICATED_FINALITY_MIGRATION_SPEC_SHA256,
     REVIEWED_ACTION_AUTHENTICATED_FINALITY_MIGRATION_INTEGRATION_SPEC_SHA256,
+    REVIEWED_ACTION_FINALITY_PREREQUISITE_ISSUER_PORT_SHA256,
+    REVIEWED_ACTION_FINALITY_PREREQUISITE_POSTGRES_ADAPTER_SHA256,
+    REVIEWED_ACTION_FINALITY_PREREQUISITE_POSTGRES_ADAPTER_SPEC_SHA256,
+    REVIEWED_ACTION_FINALITY_WALLET_READER_SHA256,
+    REVIEWED_ACTION_FINALITY_WALLET_READER_SPEC_SHA256,
+    REVIEWED_ACTION_FINALITY_PREREQUISITE_MIGRATION_SHA256,
+    REVIEWED_ACTION_FINALITY_PREREQUISITE_MIGRATION_SPEC_SHA256,
+    REVIEWED_ACTION_FINALITY_PREREQUISITE_MIGRATION_INTEGRATION_SPEC_SHA256,
+    REVIEWED_ACTION_ATOMIC_FINALITY_MIGRATION_SHA256,
+    REVIEWED_ACTION_ATOMIC_FINALITY_MIGRATION_SPEC_SHA256,
+    REVIEWED_ACTION_ATOMIC_FINALITY_MIGRATION_INTEGRATION_SPEC_SHA256,
   ]) {
     assert.equal(digest.length, 64);
   }
   assert.equal(REVIEWED_DATABASE_MIGRATION_INDEX_SHA256.length, 64);
   assert.equal(
     REVIEWED_ACTION_LIFECYCLE_POSTGRES_ADAPTER_SHA256,
-    '1d9b1e8c05342736d0bb4942d8f7e141e09b19b93343724de3e2aae3b9c61431',
+    'f9838bddf9ff23573fa2fe920d28fbf9a84d16ffeda74446faea33ecc292d872',
   );
   assert.equal(
     REVIEWED_ACTION_LIFECYCLE_POSTGRES_ADAPTER_SPEC_SHA256,
-    'e191338bf652034c4e8df83195f1473ee2cb11d67e925e65e5910bfefa5877c0',
+    '04ad605487eb8eee7375e59077f0daec37ba6308e2979c3be83c38af3f8d88c0',
   );
   assert.equal(
     REVIEWED_ACTION_LIFECYCLE_POSTGRES_ADAPTER_INTEGRATION_SPEC_SHA256,
@@ -225,7 +297,7 @@ test('the exact Ethereum and Solana lending action candidate boundary is dormant
   );
   assert.equal(
     REVIEWED_ACTION_LIFECYCLE_MIGRATION_SPEC_SHA256,
-    '3ec4b46672b479cd07a18f4aba4acbec55b03215cc2a087f1cfda3eaeb3c044b',
+    'b5b558323cf7d6fe425c5a178a0793311487275cde7cfafc8995cbce0ec15e93',
   );
   assert.equal(
     REVIEWED_ACTION_WALLET_IDENTITY_BINDING_MIGRATION_SHA256,
@@ -233,7 +305,7 @@ test('the exact Ethereum and Solana lending action candidate boundary is dormant
   );
   assert.equal(
     REVIEWED_ACTION_WALLET_IDENTITY_BINDING_MIGRATION_SPEC_SHA256,
-    'f3e1eda4cba1bd92b9d13c56e0efd0adb7d0f2cfa801fb2fd5af1420f24b6a30',
+    '2b26f2cdfc56518ffe70e4c5825f525fa774b8167aff77e7e5d17580a4ea0ad1',
   );
   assert.equal(
     REVIEWED_ACTION_WALLET_IDENTITY_BINDING_MIGRATION_INTEGRATION_SPEC_SHA256,
@@ -241,7 +313,35 @@ test('the exact Ethereum and Solana lending action candidate boundary is dormant
   );
   assert.equal(
     REVIEWED_DATABASE_MIGRATION_INDEX_SHA256,
-    'a70554e3ccbd6af9f2e37beeef2c6db9e3351bf8a350f94ea6f8b85f6cfc47a8',
+    '74d3ba9cdd354954b8577ccfa1474e7b44f7db834186e352280e8f26b9e0d74a',
+  );
+  assert.deepEqual(
+    [
+      REVIEWED_ACTION_FINALITY_PREREQUISITE_ISSUER_PORT_SHA256,
+      REVIEWED_ACTION_FINALITY_PREREQUISITE_POSTGRES_ADAPTER_SHA256,
+      REVIEWED_ACTION_FINALITY_PREREQUISITE_POSTGRES_ADAPTER_SPEC_SHA256,
+      REVIEWED_ACTION_FINALITY_WALLET_READER_SHA256,
+      REVIEWED_ACTION_FINALITY_WALLET_READER_SPEC_SHA256,
+      REVIEWED_ACTION_FINALITY_PREREQUISITE_MIGRATION_SHA256,
+      REVIEWED_ACTION_FINALITY_PREREQUISITE_MIGRATION_SPEC_SHA256,
+      REVIEWED_ACTION_FINALITY_PREREQUISITE_MIGRATION_INTEGRATION_SPEC_SHA256,
+      REVIEWED_ACTION_ATOMIC_FINALITY_MIGRATION_SHA256,
+      REVIEWED_ACTION_ATOMIC_FINALITY_MIGRATION_SPEC_SHA256,
+      REVIEWED_ACTION_ATOMIC_FINALITY_MIGRATION_INTEGRATION_SPEC_SHA256,
+    ],
+    [
+      'cc9237081dbb88a9459465e49b5a077f443fd8ae2e52cd5b5e29e8451f4c5c30',
+      'abf193132225cbea4ad7ae54ba33912694f75f960b540560cac92ba5c0d52ea8',
+      '43ad27fbb5a662db28e71f847446d265d35ffbb485aba20213d812f3461b7ffa',
+      'd8531f14274744cf94e5db487c17b5d61bf87b584e41d3b0a6ca3538463ce7ef',
+      'ffde15529cc4e4525b37075873adbcec97bb3fadc1cdbb0ab3131d3ad570bace',
+      'ee6fb9a68cb3766a5a146ee9a435895ce13c5645976a4a0df9761c88e3c91bcb',
+      'a014c28bcbb20521af30de9bc5e378a385693cfbf2178e0fe9f414af45122501',
+      'c2f93d2974e5ffd81ac7894798edd4dc5af77f73ae14d4ed3d9df3617af1d073',
+      '174ac457309a3ef938c72f93ba2158b7e3887ac40560db0fa92a5bba5e4e439c',
+      '4223b5def362996df6e24dab026e62d1ac109eccfa4bb92cfb0b8d54543770e4',
+      'df82a07a912f4c214f4e38f6bd1b5ab2ab8a846b2704c5814ffd316222999506',
+    ],
   );
 });
 
@@ -780,6 +880,99 @@ test('0035 authenticated finality remains exact, owner-only, and fail closed', (
   );
 });
 
+test('0036 prerequisites and 0037 atomic persistence remain exact and authority-free', () => {
+  for (const [field, expectedError] of [
+    [
+      'finalityPrerequisiteIssuerPortSource',
+      '0036 finality prerequisite issuer port bytes drifted from the reviewed source',
+    ],
+    [
+      'finalityPrerequisiteAdapterSource',
+      '0036 finality prerequisite adapter bytes drifted from the reviewed source',
+    ],
+    [
+      'finalityPrerequisiteAdapterSpecSource',
+      '0036 finality prerequisite adapter spec bytes drifted from the reviewed source',
+    ],
+    [
+      'finalityWalletReaderSource',
+      '0036 finality wallet reader bytes drifted from the reviewed source',
+    ],
+    [
+      'finalityWalletReaderSpecSource',
+      '0036 finality wallet reader spec bytes drifted from the reviewed source',
+    ],
+    [
+      'finalityPrerequisiteMigrationSource',
+      '0036 finality prerequisite migration bytes drifted from the reviewed source',
+    ],
+    [
+      'finalityPrerequisiteMigrationSpecSource',
+      '0036 finality prerequisite migration spec bytes drifted from the reviewed source',
+    ],
+    [
+      'finalityPrerequisiteMigrationIntegrationSpecSource',
+      '0036 finality prerequisite migration integration spec bytes drifted from the reviewed source',
+    ],
+    [
+      'atomicFinalityMigrationSource',
+      '0037 atomic finality migration bytes drifted from the reviewed source',
+    ],
+    [
+      'atomicFinalityMigrationSpecSource',
+      '0037 atomic finality migration spec bytes drifted from the reviewed source',
+    ],
+    [
+      'atomicFinalityMigrationIntegrationSpecSource',
+      '0037 atomic finality migration integration spec bytes drifted from the reviewed source',
+    ],
+  ]) {
+    mutationReports(field, expectedError, (value) => {
+      value[field] += '\n// unreviewed drift';
+    });
+  }
+  mutationReports(
+    '0036 prerequisite SQL drift',
+    '0036 prerequisite adapter SQL or one-shot dispatch allowlist changed',
+    (value) => {
+      value.finalityPrerequisiteAdapterSource = value.finalityPrerequisiteAdapterSource.replace(
+        'read_mainnet_financial_action_reconciliation_prerequisite_v1',
+        'write_mainnet_financial_action_reconciliation_prerequisite_v1',
+      );
+    },
+  );
+  mutationReports(
+    'wallet signer',
+    '0036 prerequisite or wallet adapter gained runtime, signing, or settlement authority',
+    (value) => {
+      value.finalityWalletReaderSource += '\nsignTransaction(payload);';
+    },
+  );
+  mutationReports(
+    '0036 runtime grant',
+    '0036 prerequisite migration grants, persists, signs, or broadcasts authority',
+    (value) => {
+      value.finalityPrerequisiteMigrationSource +=
+        "\nconst unsafe = 'GRANT EXECUTE ON FUNCTION unsafe TO crypto_api_runtime';";
+    },
+  );
+  mutationReports(
+    '0037 unreviewed v1 dependency',
+    '0037 internal v1 database-call allowlist changed',
+    (value) => {
+      value.atomicFinalityMigrationSource += '\nconst unsafe = `unreviewed_mainnet_writer_v1()`;';
+    },
+  );
+  mutationReports(
+    '0037 runtime grant',
+    '0037 atomic finality migration grants, persists extra state, signs, or broadcasts',
+    (value) => {
+      value.atomicFinalityMigrationSource +=
+        "\nconst unsafe = 'GRANT EXECUTE ON FUNCTION unsafe TO crypto_api_runtime';";
+    },
+  );
+});
+
 test('the exact 0033 migration, spec, and index inventory is pinned', () => {
   mutationReports(
     'migration byte drift',
@@ -797,7 +990,7 @@ test('the exact 0033 migration, spec, and index inventory is pinned', () => {
   );
   mutationReports(
     'migration index byte drift',
-    'database migration index bytes drifted from the reviewed 0033/0034/0035 registration',
+    'database migration index bytes drifted from the reviewed 0033-0037 registration',
     (value) => {
       value.migrationIndexSource += '\n// reordered elsewhere';
     },
@@ -963,10 +1156,10 @@ test('0034 grants, runtime activation, candidate persistence, and logging fail c
   }
 });
 
-test('0033/0034/0035 index registration and exact predecessor order fail closed', () => {
+test('0033-0037 index registration and exact predecessor order fail closed', () => {
   mutationReports(
     'production order drift',
-    '0033/0034/0035 migration index registration, predecessor order, or export inventory changed',
+    '0033-0037 migration index registration, predecessor order, or export inventory changed',
     (value) => {
       value.migrationIndexSource = value.migrationIndexSource.replace(
         /createMainnetBalanceAgreementEvidenceV2MigrationV0032,\s+createMainnetFinancialActionLifecycleMigrationV0033,/u,
@@ -976,7 +1169,7 @@ test('0033/0034/0035 index registration and exact predecessor order fail closed'
   );
   mutationReports(
     'wallet binding order drift',
-    '0033/0034/0035 migration index registration, predecessor order, or export inventory changed',
+    '0033-0037 migration index registration, predecessor order, or export inventory changed',
     (value) => {
       value.migrationIndexSource = value.migrationIndexSource.replace(
         /createMainnetFinancialActionLifecycleMigrationV0033,\s+createMainnetFinancialActionWalletIdentityBindingMigrationV0034,/u,
@@ -986,7 +1179,7 @@ test('0033/0034/0035 index registration and exact predecessor order fail closed'
   );
   mutationReports(
     'duplicate registration',
-    '0033/0034/0035 migration index registration, predecessor order, or export inventory changed',
+    '0033-0037 migration index registration, predecessor order, or export inventory changed',
     (value) => {
       value.migrationIndexSource = value.migrationIndexSource.replaceAll(
         'createMainnetFinancialActionLifecycleMigrationV0033,',
@@ -996,7 +1189,7 @@ test('0033/0034/0035 index registration and exact predecessor order fail closed'
   );
   mutationReports(
     'duplicate wallet binding registration',
-    '0033/0034/0035 migration index registration, predecessor order, or export inventory changed',
+    '0033-0037 migration index registration, predecessor order, or export inventory changed',
     (value) => {
       value.migrationIndexSource = value.migrationIndexSource.replaceAll(
         'createMainnetFinancialActionWalletIdentityBindingMigrationV0034,',
@@ -1006,7 +1199,7 @@ test('0033/0034/0035 index registration and exact predecessor order fail closed'
   );
   mutationReports(
     'duplicate authenticated finality registration',
-    '0033/0034/0035 migration index registration, predecessor order, or export inventory changed',
+    '0033-0037 migration index registration, predecessor order, or export inventory changed',
     (value) => {
       value.migrationIndexSource = value.migrationIndexSource.replaceAll(
         'createMainnetFinancialActionAuthenticatedFinalityMigrationV0035,',
@@ -1015,8 +1208,28 @@ test('0033/0034/0035 index registration and exact predecessor order fail closed'
     },
   );
   mutationReports(
+    '0036/0037 predecessor order drift',
+    '0033-0037 migration index registration, predecessor order, or export inventory changed',
+    (value) => {
+      value.migrationIndexSource = value.migrationIndexSource.replace(
+        /createMainnetFinancialActionFinalityPrerequisiteReadMigrationV0036,\s+createMainnetFinancialActionAtomicFinalityPersistenceMigrationV0037,/u,
+        'createMainnetFinancialActionAtomicFinalityPersistenceMigrationV0037,\n  createMainnetFinancialActionFinalityPrerequisiteReadMigrationV0036,',
+      );
+    },
+  );
+  mutationReports(
+    'detached 0037 import',
+    '0033-0037 migration index registration, predecessor order, or export inventory changed',
+    (value) => {
+      value.migrationIndexSource = value.migrationIndexSource.replace(
+        "from './0037-atomically-persist-mainnet-financial-action-finality.migration';",
+        "from './0037-unreviewed.migration';",
+      );
+    },
+  );
+  mutationReports(
     'detached wallet binding import',
-    '0033/0034/0035 migration index registration, predecessor order, or export inventory changed',
+    '0033-0037 migration index registration, predecessor order, or export inventory changed',
     (value) => {
       value.migrationIndexSource = value.migrationIndexSource.replace(
         "from './0034-bind-mainnet-financial-action-wallet-identity.migration';",
@@ -1026,7 +1239,7 @@ test('0033/0034/0035 index registration and exact predecessor order fail closed'
   );
   mutationReports(
     'detached import',
-    '0033/0034/0035 migration index registration, predecessor order, or export inventory changed',
+    '0033-0037 migration index registration, predecessor order, or export inventory changed',
     (value) => {
       value.migrationIndexSource = value.migrationIndexSource.replace(
         "from './0033-create-mainnet-financial-action-lifecycle.migration';",
@@ -1157,11 +1370,11 @@ test('0033 canonical identities, digest-only evidence, framing, and goldens fail
   );
 });
 
-test('only the reviewed migration index may wire or reference 0033/0034/0035 at runtime', () => {
+test('only the reviewed migration index may wire or reference 0033-0037 at runtime', () => {
   assert.ok(baseline.runtimeSources.has(DATABASE_MIGRATION_INDEX_PATH));
   mutationReports(
     'runtime migration import',
-    '0033/0034/0035 dormant action persistence is referenced by runtime source apps/api/src/application-root.ts',
+    '0033-0037 dormant action persistence is referenced by runtime source apps/api/src/application-root.ts',
     (value) => {
       value.runtimeSources.set(
         'apps/api/src/application-root.ts',
@@ -1171,7 +1384,7 @@ test('only the reviewed migration index may wire or reference 0033/0034/0035 at 
   );
   mutationReports(
     'runtime wallet binding migration import',
-    '0033/0034/0035 dormant action persistence is referenced by runtime source apps/api/src/application-root.ts',
+    '0033-0037 dormant action persistence is referenced by runtime source apps/api/src/application-root.ts',
     (value) => {
       value.runtimeSources.set(
         'apps/api/src/application-root.ts',
@@ -1181,7 +1394,7 @@ test('only the reviewed migration index may wire or reference 0033/0034/0035 at 
   );
   mutationReports(
     'runtime repository access',
-    '0033/0034/0035 dormant action persistence is referenced by runtime source apps/api/src/mainnet-actions/runtime-repository.ts',
+    '0033-0037 dormant action persistence is referenced by runtime source apps/api/src/mainnet-actions/runtime-repository.ts',
     (value) => {
       value.runtimeSources.set(
         'apps/api/src/mainnet-actions/runtime-repository.ts',
@@ -1191,7 +1404,7 @@ test('only the reviewed migration index may wire or reference 0033/0034/0035 at 
   );
   mutationReports(
     'runtime lifecycle SQL function',
-    'migration-0033/0034/0035 action SQL function is referenced outside the reviewed adapters by runtime source apps/api/src/mainnet-actions/unsafe-durable-store.ts',
+    'migration-0033-0037 action SQL function is referenced outside the reviewed adapters by runtime source apps/api/src/mainnet-actions/unsafe-durable-store.ts',
     (value) => {
       value.runtimeSources.set(
         'apps/api/src/mainnet-actions/unsafe-durable-store.ts',
@@ -1201,11 +1414,41 @@ test('only the reviewed migration index may wire or reference 0033/0034/0035 at 
   );
   mutationReports(
     'runtime V2 lifecycle SQL function',
-    'migration-0033/0034/0035 action SQL function is referenced outside the reviewed adapters by runtime source apps/api/src/mainnet-actions/unsafe-wallet-binding-store.ts',
+    'migration-0033-0037 action SQL function is referenced outside the reviewed adapters by runtime source apps/api/src/mainnet-actions/unsafe-wallet-binding-store.ts',
     (value) => {
       value.runtimeSources.set(
         'apps/api/src/mainnet-actions/unsafe-wallet-binding-store.ts',
         "const sql = 'SELECT * FROM prepare_mainnet_financial_action_lifecycle_v2($1)';",
+      );
+    },
+  );
+  mutationReports(
+    'raw atomic-finality v2 callsite',
+    'migration-0033-0037 action SQL function is referenced outside the reviewed adapters by runtime source apps/api/src/mainnet-actions/unsafe-atomic-finality-store.ts',
+    (value) => {
+      value.runtimeSources.set(
+        'apps/api/src/mainnet-actions/unsafe-atomic-finality-store.ts',
+        "const sql = 'SELECT * FROM record_authenticated_mainnet_financial_action_reconciliation_v2($1)';",
+      );
+    },
+  );
+  mutationReports(
+    'alternate 0036 prerequisite reference',
+    'dormant mainnet action boundary is referenced by runtime source apps/api/src/mainnet-actions/unsafe-prerequisite-loader.ts',
+    (value) => {
+      value.runtimeSources.set(
+        'apps/api/src/mainnet-actions/unsafe-prerequisite-loader.ts',
+        "import './infrastructure/database/migrations/0036-read-mainnet-financial-action-finality-prerequisite.migration';",
+      );
+    },
+  );
+  mutationReports(
+    'alternate 0037 persistence reference',
+    '0033-0037 dormant action persistence is referenced by runtime source apps/api/src/mainnet-actions/unsafe-atomic-loader.ts',
+    (value) => {
+      value.runtimeSources.set(
+        'apps/api/src/mainnet-actions/unsafe-atomic-loader.ts',
+        'const migration = createMainnetFinancialActionAtomicFinalityPersistenceMigration;',
       );
     },
   );
@@ -1442,6 +1685,35 @@ test('repository loading rejects missing reviewed artifacts with a value-free er
       [
         ACTION_AUTHENTICATED_FINALITY_MIGRATION_INTEGRATION_SPEC_PATH,
         baseline.authenticatedFinalityMigrationIntegrationSpecSource,
+      ],
+      [
+        ACTION_FINALITY_PREREQUISITE_ISSUER_PORT_PATH,
+        baseline.finalityPrerequisiteIssuerPortSource,
+      ],
+      [
+        ACTION_FINALITY_PREREQUISITE_POSTGRES_ADAPTER_PATH,
+        baseline.finalityPrerequisiteAdapterSource,
+      ],
+      [
+        ACTION_FINALITY_PREREQUISITE_POSTGRES_ADAPTER_SPEC_PATH,
+        baseline.finalityPrerequisiteAdapterSpecSource,
+      ],
+      [ACTION_FINALITY_WALLET_READER_PATH, baseline.finalityWalletReaderSource],
+      [ACTION_FINALITY_WALLET_READER_SPEC_PATH, baseline.finalityWalletReaderSpecSource],
+      [ACTION_FINALITY_PREREQUISITE_MIGRATION_PATH, baseline.finalityPrerequisiteMigrationSource],
+      [
+        ACTION_FINALITY_PREREQUISITE_MIGRATION_SPEC_PATH,
+        baseline.finalityPrerequisiteMigrationSpecSource,
+      ],
+      [
+        ACTION_FINALITY_PREREQUISITE_MIGRATION_INTEGRATION_SPEC_PATH,
+        baseline.finalityPrerequisiteMigrationIntegrationSpecSource,
+      ],
+      [ACTION_ATOMIC_FINALITY_MIGRATION_PATH, baseline.atomicFinalityMigrationSource],
+      [ACTION_ATOMIC_FINALITY_MIGRATION_SPEC_PATH, baseline.atomicFinalityMigrationSpecSource],
+      [
+        ACTION_ATOMIC_FINALITY_MIGRATION_INTEGRATION_SPEC_PATH,
+        baseline.atomicFinalityMigrationIntegrationSpecSource,
       ],
     ]) {
       writeFixture(repositoryRoot, path, source);

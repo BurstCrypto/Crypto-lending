@@ -51,12 +51,34 @@ export const ACTION_FINALITY_SIDECAR_POSTGRES_ADAPTER_PATH =
   'apps/api/src/mainnet-actions/infrastructure/postgres-dormant-mainnet-financial-action-finality-sidecar.adapter.ts';
 export const ACTION_FINALITY_SIDECAR_POSTGRES_ADAPTER_SPEC_PATH =
   'apps/api/src/mainnet-actions/infrastructure/postgres-dormant-mainnet-financial-action-finality-sidecar.adapter.spec.ts';
+export const ACTION_FINALITY_PREREQUISITE_ISSUER_PORT_PATH =
+  'apps/api/src/mainnet-actions/application/ports/mainnet-financial-action-finality-prerequisite-issuer.port.ts';
+export const ACTION_FINALITY_PREREQUISITE_POSTGRES_ADAPTER_PATH =
+  'apps/api/src/mainnet-actions/infrastructure/postgres-dormant-mainnet-financial-action-finality-prerequisite.adapter.ts';
+export const ACTION_FINALITY_PREREQUISITE_POSTGRES_ADAPTER_SPEC_PATH =
+  'apps/api/src/mainnet-actions/infrastructure/postgres-dormant-mainnet-financial-action-finality-prerequisite.adapter.spec.ts';
+export const ACTION_FINALITY_WALLET_READER_PATH =
+  'apps/api/src/mainnet-actions/infrastructure/wallet-registration-mainnet-financial-action-finality-wallet.reader.ts';
+export const ACTION_FINALITY_WALLET_READER_SPEC_PATH =
+  'apps/api/src/mainnet-actions/infrastructure/wallet-registration-mainnet-financial-action-finality-wallet.reader.spec.ts';
 export const ACTION_AUTHENTICATED_FINALITY_MIGRATION_PATH =
   'apps/api/src/infrastructure/database/migrations/0035-create-mainnet-financial-action-authenticated-finality.migration.ts';
 export const ACTION_AUTHENTICATED_FINALITY_MIGRATION_SPEC_PATH =
   'apps/api/src/infrastructure/database/migrations/0035-create-mainnet-financial-action-authenticated-finality.migration.spec.ts';
 export const ACTION_AUTHENTICATED_FINALITY_MIGRATION_INTEGRATION_SPEC_PATH =
   'apps/api/test/infrastructure/mainnet-financial-action-authenticated-finality.integration-spec.ts';
+export const ACTION_FINALITY_PREREQUISITE_MIGRATION_PATH =
+  'apps/api/src/infrastructure/database/migrations/0036-read-mainnet-financial-action-finality-prerequisite.migration.ts';
+export const ACTION_FINALITY_PREREQUISITE_MIGRATION_SPEC_PATH =
+  'apps/api/src/infrastructure/database/migrations/0036-read-mainnet-financial-action-finality-prerequisite.migration.spec.ts';
+export const ACTION_FINALITY_PREREQUISITE_MIGRATION_INTEGRATION_SPEC_PATH =
+  'apps/api/test/infrastructure/mainnet-financial-action-finality-prerequisite-read.integration-spec.ts';
+export const ACTION_ATOMIC_FINALITY_MIGRATION_PATH =
+  'apps/api/src/infrastructure/database/migrations/0037-atomically-persist-mainnet-financial-action-finality.migration.ts';
+export const ACTION_ATOMIC_FINALITY_MIGRATION_SPEC_PATH =
+  'apps/api/src/infrastructure/database/migrations/0037-atomically-persist-mainnet-financial-action-finality.migration.spec.ts';
+export const ACTION_ATOMIC_FINALITY_MIGRATION_INTEGRATION_SPEC_PATH =
+  'apps/api/test/infrastructure/mainnet-financial-action-atomic-finality-persistence.integration-spec.ts';
 export const DATABASE_MIGRATION_INDEX_PATH =
   'apps/api/src/infrastructure/database/migrations/index.ts';
 export const MAX_ACTION_BOUNDARY_FILE_BYTES = 512 * 1024;
@@ -76,23 +98,23 @@ export const REVIEWED_ACTION_LIFECYCLE_SPEC_SHA256 =
 export const REVIEWED_ACTION_LIFECYCLE_DURABLE_PORT_SHA256 =
   'aca652cb9770cdfafddf886fb14b52cbc216c4ce8c9041c64577c83df1490142';
 export const REVIEWED_ACTION_LIFECYCLE_POSTGRES_ADAPTER_SHA256 =
-  '1d9b1e8c05342736d0bb4942d8f7e141e09b19b93343724de3e2aae3b9c61431';
+  'f9838bddf9ff23573fa2fe920d28fbf9a84d16ffeda74446faea33ecc292d872';
 export const REVIEWED_ACTION_LIFECYCLE_POSTGRES_ADAPTER_SPEC_SHA256 =
-  'e191338bf652034c4e8df83195f1473ee2cb11d67e925e65e5910bfefa5877c0';
+  '04ad605487eb8eee7375e59077f0daec37ba6308e2979c3be83c38af3f8d88c0';
 export const REVIEWED_ACTION_LIFECYCLE_POSTGRES_ADAPTER_INTEGRATION_SPEC_SHA256 =
   'a3d584df8529a6f15480d0cc469576236825ea26ba436eea8c632619d8854f0e';
 export const REVIEWED_ACTION_LIFECYCLE_MIGRATION_SHA256 =
   'c3840f3b3cd7de0e7dbf159c335fbe0784e55e81c936defdf618c9b0092ffa27';
 export const REVIEWED_ACTION_LIFECYCLE_MIGRATION_SPEC_SHA256 =
-  '3ec4b46672b479cd07a18f4aba4acbec55b03215cc2a087f1cfda3eaeb3c044b';
+  'b5b558323cf7d6fe425c5a178a0793311487275cde7cfafc8995cbce0ec15e93';
 export const REVIEWED_ACTION_WALLET_IDENTITY_BINDING_MIGRATION_SHA256 =
   '11fd11a882e81f417d0efdfbbb7da3c8bed0171ed9aec420068772e8c56a75a7';
 export const REVIEWED_ACTION_WALLET_IDENTITY_BINDING_MIGRATION_SPEC_SHA256 =
-  'f3e1eda4cba1bd92b9d13c56e0efd0adb7d0f2cfa801fb2fd5af1420f24b6a30';
+  '2b26f2cdfc56518ffe70e4c5825f525fa774b8167aff77e7e5d17580a4ea0ad1';
 export const REVIEWED_ACTION_WALLET_IDENTITY_BINDING_MIGRATION_INTEGRATION_SPEC_SHA256 =
   '7aa0e97a3563468bd1c520a80876ee0f7c12939f13b3a8021d9e6bb44b49d31b';
 export const REVIEWED_DATABASE_MIGRATION_INDEX_SHA256 =
-  'a70554e3ccbd6af9f2e37beeef2c6db9e3351bf8a350f94ea6f8b85f6cfc47a8';
+  '74d3ba9cdd354954b8577ccfa1474e7b44f7db834186e352280e8f26b9e0d74a';
 export const REVIEWED_ACTION_FINALITY_EVIDENCE_SOURCE_PORT_SHA256 =
   '27e42722799ec5e39d93b8ad010866f3dfec780d5d0511641faf2558633b3fa0';
 export const REVIEWED_ACTION_FINALITY_EVIDENCE_SOURCE_PORT_SPEC_SHA256 =
@@ -106,15 +128,37 @@ export const REVIEWED_ACTION_FINALITY_SIDECAR_DURABLE_PORT_SHA256 =
 export const REVIEWED_ACTION_FINALITY_SIDECAR_DURABLE_PORT_SPEC_SHA256 =
   'aff0a8af77d2f8d2f3234a4baf1be1b18dbd325d36fd8949789830afed91a909';
 export const REVIEWED_ACTION_FINALITY_SIDECAR_POSTGRES_ADAPTER_SHA256 =
-  'e5fd27dc6838bd8c4dd0b3ac0b60eaf752b8c24e3f04b60ccc7650f3168bf5f6';
+  '0b8b46998701f1c921b83e83416541d040daba4a7865c39315a845db338cb3be';
 export const REVIEWED_ACTION_FINALITY_SIDECAR_POSTGRES_ADAPTER_SPEC_SHA256 =
-  '210fb33b1c490524cb32bd40cc8069df9d97c6dd333775a11da79ef3944a19d6';
+  '40d421a7700d9642e1714916348796dddb2a65437b117bd1d8d5cd7929d52450';
 export const REVIEWED_ACTION_AUTHENTICATED_FINALITY_MIGRATION_SHA256 =
   'f0420669c0fcac4dcba8795851016bd8cc008bff4a56ab39d022ed0da3d110bd';
 export const REVIEWED_ACTION_AUTHENTICATED_FINALITY_MIGRATION_SPEC_SHA256 =
-  'bfd91d7b72fb7cc1ca53d680581898a86284cdffed7235292b1fa68ef7229ce7';
+  '140102f96f30d0349817c3317a7e3b2b0c678a7d5f7a62ca26e0645eb8b782b8';
 export const REVIEWED_ACTION_AUTHENTICATED_FINALITY_MIGRATION_INTEGRATION_SPEC_SHA256 =
   'f49767540e5cc352473fd0a8c595d351eb5688c02410a932bf17e263acb75673';
+export const REVIEWED_ACTION_FINALITY_PREREQUISITE_ISSUER_PORT_SHA256 =
+  'cc9237081dbb88a9459465e49b5a077f443fd8ae2e52cd5b5e29e8451f4c5c30';
+export const REVIEWED_ACTION_FINALITY_PREREQUISITE_POSTGRES_ADAPTER_SHA256 =
+  'abf193132225cbea4ad7ae54ba33912694f75f960b540560cac92ba5c0d52ea8';
+export const REVIEWED_ACTION_FINALITY_PREREQUISITE_POSTGRES_ADAPTER_SPEC_SHA256 =
+  '43ad27fbb5a662db28e71f847446d265d35ffbb485aba20213d812f3461b7ffa';
+export const REVIEWED_ACTION_FINALITY_WALLET_READER_SHA256 =
+  'd8531f14274744cf94e5db487c17b5d61bf87b584e41d3b0a6ca3538463ce7ef';
+export const REVIEWED_ACTION_FINALITY_WALLET_READER_SPEC_SHA256 =
+  'ffde15529cc4e4525b37075873adbcec97bb3fadc1cdbb0ab3131d3ad570bace';
+export const REVIEWED_ACTION_FINALITY_PREREQUISITE_MIGRATION_SHA256 =
+  'ee6fb9a68cb3766a5a146ee9a435895ce13c5645976a4a0df9761c88e3c91bcb';
+export const REVIEWED_ACTION_FINALITY_PREREQUISITE_MIGRATION_SPEC_SHA256 =
+  'a014c28bcbb20521af30de9bc5e378a385693cfbf2178e0fe9f414af45122501';
+export const REVIEWED_ACTION_FINALITY_PREREQUISITE_MIGRATION_INTEGRATION_SPEC_SHA256 =
+  'c2f93d2974e5ffd81ac7894798edd4dc5af77f73ae14d4ed3d9df3617af1d073';
+export const REVIEWED_ACTION_ATOMIC_FINALITY_MIGRATION_SHA256 =
+  '174ac457309a3ef938c72f93ba2158b7e3887ac40560db0fa92a5bba5e4e439c';
+export const REVIEWED_ACTION_ATOMIC_FINALITY_MIGRATION_SPEC_SHA256 =
+  '4223b5def362996df6e24dab026e62d1ac109eccfa4bb92cfb0b8d54543770e4';
+export const REVIEWED_ACTION_ATOMIC_FINALITY_MIGRATION_INTEGRATION_SPEC_SHA256 =
+  'df82a07a912f4c214f4e38f6bd1b5ab2ab8a846b2704c5814ffd316222999506';
 export const ACTION_BOUNDARY_INPUT_ERROR =
   'Dormant mainnet action boundary inputs must be stable, single-link regular UTF-8 files at canonical paths inside the repository and within the reviewed size limits.';
 
@@ -274,6 +318,93 @@ const EXPECTED_AUTHENTICATED_FINALITY_MIGRATION_INTEGRATION_SPEC_IMPORTS = Objec
   '../../src/infrastructure/database/migrations',
   '../../src/wallets/infrastructure/crypto/wallet-registration-crypto',
 ]);
+const EXPECTED_FINALITY_PREREQUISITE_ISSUER_PORT_IMPORTS = Object.freeze([
+  '../../../blockchain/domain/mainnet-launch-network-policy',
+  '../../../mainnet-platforms/application/ports/provider-position-chain-anchor-evidence-recorder.port',
+  '../../../wallets/domain/wallet-identity',
+  '../dormant-mainnet-financial-action-finality-evidence.producer',
+  './dormant-mainnet-financial-action-lifecycle-durable.port',
+  './dormant-mainnet-financial-action-finality-sidecar-durable.port',
+]);
+const EXPECTED_FINALITY_PREREQUISITE_ADAPTER_IMPORTS = Object.freeze([
+  'node:util/types',
+  '../../blockchain/domain/supported-asset-registry',
+  '../../mainnet-platforms/application/ports/provider-position-chain-anchor-evidence-recorder.port',
+  '../../mainnet-platforms/application/dormant-provider-position-chain-anchor-evidence.producer',
+  '../../mainnet-platforms/domain/mainnet-provider-position-chain-assessment',
+  '../../mainnet-platforms/domain/mainnet-provider-position-observation-policy',
+  '../../infrastructure/database/postgres.service',
+  '../../wallets/domain/wallet-identity',
+  '../application/dormant-mainnet-financial-action-finality-evidence.producer',
+  '../application/ports/dormant-mainnet-financial-action-lifecycle-durable.port',
+  '../application/ports/dormant-mainnet-financial-action-finality-sidecar-durable.port',
+  '../application/ports/mainnet-financial-action-finality-prerequisite-issuer.port',
+  '../domain/dormant-mainnet-financial-action',
+]);
+const EXPECTED_FINALITY_PREREQUISITE_ADAPTER_SPEC_IMPORTS = Object.freeze([
+  '../../blockchain/domain/supported-asset-registry',
+  '../../mainnet-platforms/application/dormant-provider-position-chain-anchor-evidence.producer',
+  '../../mainnet-platforms/application/ports/provider-position-chain-anchor-evidence-recorder.port',
+  '../../infrastructure/database/postgres.service',
+  '../../wallets/domain/wallet-identity',
+  '../application/ports/dormant-mainnet-financial-action-lifecycle-durable.port',
+  '../application/ports/dormant-mainnet-financial-action-finality-sidecar-durable.port',
+  '../application/ports/mainnet-financial-action-finality-prerequisite-issuer.port',
+  './postgres-dormant-mainnet-financial-action-finality-prerequisite.adapter',
+  './postgres-dormant-mainnet-financial-action-finality-prerequisite.adapter',
+]);
+const EXPECTED_FINALITY_WALLET_READER_IMPORTS = Object.freeze([
+  'node:util/types',
+  '../../accounts/domain/account-profile',
+  '../../blockchain/domain/supported-asset-registry',
+  '../../wallets/application/ports/wallet-registration-repository.port',
+  '../../wallets/application/wallet-registration.service',
+  '../../wallets/domain/wallet-identity',
+  '../application/ports/mainnet-financial-action-finality-prerequisite-issuer.port',
+]);
+const EXPECTED_FINALITY_WALLET_READER_SPEC_IMPORTS = Object.freeze([
+  'node:buffer',
+  '../../accounts/domain/account-profile',
+  '../../blockchain/domain/supported-asset-registry',
+  '../../wallets/application/ports/wallet-registration-repository.port',
+  '../../wallets/application/wallet-registration.service',
+  '../../wallets/domain/wallet-ownership-proof',
+  '../../wallets/infrastructure/config/wallet-registration.config',
+  '../../wallets/infrastructure/crypto/wallet-registration-crypto',
+  '../application/ports/mainnet-financial-action-finality-prerequisite-issuer.port',
+  './wallet-registration-mainnet-financial-action-finality-wallet.reader',
+]);
+const EXPECTED_FINALITY_PREREQUISITE_MIGRATION_IMPORTS = Object.freeze([
+  'node:crypto',
+  './0028-suspend-generic-worker-balance-authority.migration',
+  './0035-create-mainnet-financial-action-authenticated-finality.migration',
+  './migration',
+]);
+const EXPECTED_FINALITY_PREREQUISITE_MIGRATION_SPEC_IMPORTS = Object.freeze([
+  './0028-suspend-generic-worker-balance-authority.migration',
+  './0036-read-mainnet-financial-action-finality-prerequisite.migration',
+  './index',
+]);
+const EXPECTED_ATOMIC_FINALITY_MIGRATION_IMPORTS = Object.freeze([
+  'node:crypto',
+  './0028-suspend-generic-worker-balance-authority.migration',
+  './0036-read-mainnet-financial-action-finality-prerequisite.migration',
+  './migration',
+]);
+const EXPECTED_ATOMIC_FINALITY_MIGRATION_SPEC_IMPORTS = Object.freeze([
+  './0028-suspend-generic-worker-balance-authority.migration',
+  './0037-atomically-persist-mainnet-financial-action-finality.migration',
+  './index',
+]);
+const EXPECTED_FINALITY_READ_INTEGRATION_SPEC_IMPORTS = Object.freeze([
+  'node:crypto',
+  'pg',
+  'pg',
+  '../../src/blockchain/domain/supported-asset-registry',
+  '../../src/infrastructure/database/migration-runner.service',
+  '../../src/infrastructure/database/migrations',
+  '../../src/wallets/infrastructure/crypto/wallet-registration-crypto',
+]);
 const EXPECTED_DURABLE_PORT_EXPORTS = Object.freeze([
   'DORMANT_MAINNET_FINANCIAL_ACTION_DURABLE_LIFECYCLE_VERSION',
   'DORMANT_MAINNET_FINANCIAL_ACTION_DURABLE_REQUEST_USE',
@@ -378,6 +509,52 @@ const EXPECTED_AUTHENTICATED_FINALITY_MIGRATION_EXPORTS = Object.freeze([
   'createMainnetFinancialActionAuthenticatedFinalityMigrationV0035',
   'createMainnetFinancialActionAuthenticatedFinalityTestSchemaMigrationV0035',
 ]);
+const EXPECTED_FINALITY_PREREQUISITE_ISSUER_PORT_EXPORTS = Object.freeze([
+  'MAINNET_FINANCIAL_ACTION_FINALITY_PREREQUISITE_ISSUER_VERSION',
+  'MAINNET_FINANCIAL_ACTION_RECONCILIATION_PREREQUISITE_ISSUE_USE',
+  'MAINNET_FINANCIAL_ACTION_POST_FINALITY_PREREQUISITE_ISSUE_USE',
+  'MAINNET_FINANCIAL_ACTION_FINALITY_PREREQUISITE_ISSUANCE_USE',
+  'MAINNET_FINANCIAL_ACTION_FINALITY_WALLET_READER_VERSION',
+  'MAINNET_FINANCIAL_ACTION_FINALITY_WALLET_READ_USE',
+  'MAINNET_FINANCIAL_ACTION_FINALITY_WALLET_RESULT_USE',
+  'IssueMainnetFinancialActionReconciliationPrerequisiteRequestV1',
+  'IssueMainnetFinancialActionPostFinalityPrerequisiteRequestV1',
+  'IssueMainnetFinancialActionFinalityPrerequisiteRequestV1',
+  'MainnetFinancialActionReconciliationPrerequisiteIssuanceV1',
+  'MainnetFinancialActionPostFinalityPrerequisiteIssuanceV1',
+  'MainnetFinancialActionFinalityPrerequisiteIssuanceV1',
+  'ReadMainnetFinancialActionFinalityWalletRequestV1',
+  'MainnetFinancialActionFinalityWalletResultV1',
+  'MainnetFinancialActionFinalityWalletReaderPort',
+  'MainnetFinancialActionFinalityPrerequisiteIssuerClock',
+  'MainnetFinancialActionFinalityPrerequisiteIssuerPort',
+  'MainnetFinancialActionFinalityPrerequisiteIssuerDependencies',
+]);
+const EXPECTED_FINALITY_PREREQUISITE_ADAPTER_EXPORTS = Object.freeze([
+  'MAINNET_FINANCIAL_ACTION_RECONCILIATION_PREREQUISITE_DATABASE_FUNCTION',
+  'MAINNET_FINANCIAL_ACTION_POST_FINALITY_PREREQUISITE_DATABASE_FUNCTION',
+  'MAINNET_FINANCIAL_ACTION_FINALITY_PREREQUISITE_DATABASE_ROW_COLUMNS',
+  'MAINNET_FINANCIAL_ACTION_RECONCILIATION_PREREQUISITE_READ_SQL',
+  'MAINNET_FINANCIAL_ACTION_POST_FINALITY_PREREQUISITE_READ_SQL',
+  'MainnetFinancialActionFinalityPrerequisiteIssuerFailureCode',
+  'DormantMainnetFinancialActionFinalityPrerequisiteUnavailableError',
+  'PostgresDormantMainnetFinancialActionFinalityPrerequisiteAdapter',
+]);
+const EXPECTED_FINALITY_WALLET_READER_EXPORTS = Object.freeze([
+  'MainnetFinancialActionFinalityWalletReaderFailureCode',
+  'DormantMainnetFinancialActionFinalityWalletUnavailableError',
+  'WalletRegistrationMainnetFinancialActionFinalityWalletReader',
+]);
+const EXPECTED_FINALITY_PREREQUISITE_MIGRATION_EXPORTS = Object.freeze([
+  'createMainnetFinancialActionFinalityPrerequisiteReadMigration',
+  'createMainnetFinancialActionFinalityPrerequisiteReadMigrationV0036',
+  'createMainnetFinancialActionFinalityPrerequisiteReadTestSchemaMigrationV0036',
+]);
+const EXPECTED_ATOMIC_FINALITY_MIGRATION_EXPORTS = Object.freeze([
+  'createMainnetFinancialActionAtomicFinalityPersistenceMigration',
+  'createMainnetFinancialActionAtomicFinalityPersistenceMigrationV0037',
+  'createMainnetFinancialActionAtomicFinalityPersistenceTestSchemaMigrationV0037',
+]);
 const EXPECTED_WALLET_IDENTITY_BINDING_MIGRATION_EXPORTS = Object.freeze([
   'createMainnetFinancialActionWalletIdentityBindingMigration',
   'createMainnetFinancialActionWalletIdentityBindingMigrationV0034',
@@ -403,8 +580,8 @@ const EXPECTED_FINALITY_SIDECAR_SQL_CONSTANTS = Object.freeze([
   'READ_EFFECTIVE_SAFETY_SQL',
 ]);
 const EXPECTED_FINALITY_SIDECAR_SQL_FUNCTIONS = Object.freeze([
-  'record_authenticated_mainnet_financial_action_reconciliation_v1',
-  'record_mainnet_financial_action_post_finality_review_v1',
+  'record_authenticated_mainnet_financial_action_reconciliation_v2',
+  'record_mainnet_financial_action_post_finality_review_v2',
   'read_mainnet_financial_action_effective_safety_state_v1',
 ]);
 const EXPECTED_AUTHENTICATED_FINALITY_TABLES = Object.freeze([
@@ -450,6 +627,8 @@ const EXPECTED_PRODUCTION_MIGRATION_TAIL = Object.freeze([
   'createMainnetFinancialActionLifecycleMigrationV0033',
   'createMainnetFinancialActionWalletIdentityBindingMigrationV0034',
   'createMainnetFinancialActionAuthenticatedFinalityMigrationV0035',
+  'createMainnetFinancialActionFinalityPrerequisiteReadMigrationV0036',
+  'createMainnetFinancialActionAtomicFinalityPersistenceMigrationV0037',
 ]);
 const EXPECTED_TEST_MIGRATION_TAIL = Object.freeze([
   'createProviderPositionChainAnchorEvidenceTestSchemaMigrationV0029',
@@ -459,6 +638,8 @@ const EXPECTED_TEST_MIGRATION_TAIL = Object.freeze([
   'createMainnetFinancialActionLifecycleTestSchemaMigrationV0033',
   'createMainnetFinancialActionWalletIdentityBindingTestSchemaMigrationV0034',
   'createMainnetFinancialActionAuthenticatedFinalityTestSchemaMigrationV0035',
+  'createMainnetFinancialActionFinalityPrerequisiteReadTestSchemaMigrationV0036',
+  'createMainnetFinancialActionAtomicFinalityPersistenceTestSchemaMigrationV0037',
 ]);
 const EXPECTED_WALLET_IDENTITY_PREPARE_FUNCTION_IDENTITY =
   'prepare_mainnet_financial_action_lifecycle_v2(uuid,uuid,uuid,uuid,uuid,uuid,uuid,text,text,uuid,text,text,text,text,integer,text,text,text,smallint,text,text,text,text,integer,text,text,text,timestamp with time zone,timestamp with time zone,uuid,smallint[],text[])';
@@ -526,11 +707,11 @@ const UNSAFE_CAPABILITY =
 const PROHIBITED_BOUNDARY_SOURCE =
   /(?:\bprocess\.env\b|\b(?:fetch|WebSocket|XMLHttpRequest|eval|Function)\s*\(|\b(?:require|import)\s*\(|\bexport\s+(?:\*|\{[^}]*\})\s+from\s*['"]|\b(?:sendRawTransaction|sendTransaction|signTransaction|broadcastTransaction|eth_sendRawTransaction)\b|@(Injectable|Module|Controller)\s*\()/u;
 const RUNTIME_REFERENCE =
-  /(?:dormant-mainnet-financial-action|mainnet-financial-action-finality-evidence|DormantMainnetFinancialAction|MainnetFinancialActionFinality|DORMANT_MAINNET_FINANCIAL_ACTION|MAINNET_FINANCIAL_ACTION_(?:PROVIDER_CANDIDATES|DATABASE_FINGERPRINT_ENCODING|FINALITY)|PostgresDormantMainnetFinancialAction(?:LifecycleDurable|FinalitySidecar)Adapter|assessDormantMainnetFinancialAction|parseDormantMainnetFinancialActionIntent|createDormantMainnetFinancialActionLifecycleProtocol)/u;
+  /(?:dormant-mainnet-financial-action|mainnet-financial-action-finality-(?:evidence|prerequisite)|wallet-registration-mainnet-financial-action-finality-wallet|DormantMainnetFinancialAction|MainnetFinancialActionFinality|DORMANT_MAINNET_FINANCIAL_ACTION|MAINNET_FINANCIAL_ACTION_(?:PROVIDER_CANDIDATES|DATABASE_FINGERPRINT_ENCODING|FINALITY)|PostgresDormantMainnetFinancialAction(?:LifecycleDurable|FinalitySidecar|FinalityPrerequisite)Adapter|WalletRegistrationMainnetFinancialActionFinalityWalletReader|assessDormantMainnetFinancialAction|parseDormantMainnetFinancialActionIntent|createDormantMainnetFinancialActionLifecycleProtocol)/u;
 const ACTION_LIFECYCLE_MIGRATION_REFERENCE =
-  /(?:0033-create-mainnet-financial-action-lifecycle|0034-bind-mainnet-financial-action-wallet-identity|0035-create-mainnet-financial-action-authenticated-finality|createMainnetFinancialActionLifecycle(?:TestSchema)?MigrationV0033|createMainnetFinancialActionWalletIdentityBinding(?:TestSchema)?MigrationV0034|createMainnetFinancialActionAuthenticatedFinality(?:TestSchema)?MigrationV0035|MAINNET_ACTION_FINGERPRINT_GOLDEN_VECTORS|mainnet_financial_action_(?:intents|events|evidence_claims|reconciliation_(?:source_authorities|deployment_authorities|authority_controls|admissions)|post_finality_reviews)|(?:read|prepare|bind|record|control)_mainnet_financial_action_(?:lifecycle(?:_v2)?|submission|broadcast_observation|reconciliation_observation|reconciliation_authority_v1|post_finality_review_v1|effective_safety_state_v1))/u;
+  /(?:0033-create-mainnet-financial-action-lifecycle|0034-bind-mainnet-financial-action-wallet-identity|0035-create-mainnet-financial-action-authenticated-finality|0036-read-mainnet-financial-action-finality-prerequisite|0037-atomically-persist-mainnet-financial-action-finality|createMainnetFinancialActionLifecycle(?:TestSchema)?MigrationV0033|createMainnetFinancialActionWalletIdentityBinding(?:TestSchema)?MigrationV0034|createMainnetFinancialActionAuthenticatedFinality(?:TestSchema)?MigrationV0035|createMainnetFinancialActionFinalityPrerequisiteRead(?:Migration|(?:TestSchema)?MigrationV0036)|createMainnetFinancialActionAtomicFinalityPersistence(?:Migration|(?:TestSchema)?MigrationV0037)|MAINNET_ACTION_FINGERPRINT_GOLDEN_VECTORS|mainnet_financial_action_(?:intents|events|evidence_claims|reconciliation_(?:source_authorities|deployment_authorities|authority_controls|admissions)|post_finality_reviews)|(?:read|prepare|bind|record|control)_mainnet_financial_action_(?:lifecycle(?:_v2)?|submission|broadcast_observation|reconciliation_observation|reconciliation_(?:prerequisite_v1|authority_v1)|post_finality_(?:prerequisite_v1|review_v[12])|effective_safety_state_v1))/u;
 const ACTION_LIFECYCLE_DATABASE_FUNCTION_REFERENCE =
-  /\b(?:prepare_mainnet_financial_action_lifecycle(?:_v2)?|bind_mainnet_financial_action_submission|record_mainnet_financial_action_broadcast_observation|record_mainnet_financial_action_reconciliation_observation|read_mainnet_financial_action_lifecycle|record_authenticated_mainnet_financial_action_reconciliation_v1|record_mainnet_financial_action_post_finality_review_v1|read_mainnet_financial_action_effective_safety_state_v1|control_mainnet_financial_action_reconciliation_authority_v1)\b/u;
+  /\b(?:prepare_mainnet_financial_action_lifecycle(?:_v2)?|bind_mainnet_financial_action_submission|record_mainnet_financial_action_broadcast_observation|record_mainnet_financial_action_reconciliation_observation|read_mainnet_financial_action_lifecycle|read_mainnet_financial_action_(?:reconciliation|post_finality)_prerequisite_v1|record_authenticated_mainnet_financial_action_reconciliation_v[12]|record_mainnet_financial_action_post_finality_review_v[12]|read_mainnet_financial_action_effective_safety_state_v1|control_mainnet_financial_action_reconciliation_authority_v1)\b/u;
 const DURABLE_SOURCE_SYMBOL_BRAND = /\bSymbol(?:\.for)?\s*\(/u;
 const DURABLE_STANDALONE_RESULT_EXPORT =
   /\bexport\s+(?:(?:const|function)\s+(?:decode(?:Dormant)?MainnetFinancialActionDatabaseResult|createDormantMainnetFinancialActionDatabaseOutcomeUnknown|databaseOutcomeUnknown)|(?:type|interface|class)\s+DormantMainnetFinancialActionLifecycleDatabase(?:CommandV1|Codec|CodecError|CodecErrorCode))\b/u;
@@ -555,7 +736,12 @@ const REVIEWED_DORMANT_SOURCE_PATHS = new Set([
   ACTION_FINALITY_EVIDENCE_PRODUCER_PATH,
   ACTION_FINALITY_SIDECAR_DURABLE_PORT_PATH,
   ACTION_FINALITY_SIDECAR_POSTGRES_ADAPTER_PATH,
+  ACTION_FINALITY_PREREQUISITE_ISSUER_PORT_PATH,
+  ACTION_FINALITY_PREREQUISITE_POSTGRES_ADAPTER_PATH,
+  ACTION_FINALITY_WALLET_READER_PATH,
   ACTION_AUTHENTICATED_FINALITY_MIGRATION_PATH,
+  ACTION_FINALITY_PREREQUISITE_MIGRATION_PATH,
+  ACTION_ATOMIC_FINALITY_MIGRATION_PATH,
 ]);
 const REVIEWED_RUNTIME_DYNAMIC_IMPORTS = new Map([
   ['apps/api/src/application-root.ts', Object.freeze(['./local-development-app.module'])],
@@ -919,6 +1105,20 @@ function validateDormantActionMigrationSnapshot(migrationSource, migrationSpecSo
       (value) =>
         value === 'createMainnetFinancialActionAuthenticatedFinalityTestSchemaMigrationV0035',
     ).length !== 1 ||
+    productionMigrations?.filter(
+      (value) => value === 'createMainnetFinancialActionFinalityPrerequisiteReadMigrationV0036',
+    ).length !== 1 ||
+    testMigrations?.filter(
+      (value) =>
+        value === 'createMainnetFinancialActionFinalityPrerequisiteReadTestSchemaMigrationV0036',
+    ).length !== 1 ||
+    productionMigrations?.filter(
+      (value) => value === 'createMainnetFinancialActionAtomicFinalityPersistenceMigrationV0037',
+    ).length !== 1 ||
+    testMigrations?.filter(
+      (value) =>
+        value === 'createMainnetFinancialActionAtomicFinalityPersistenceTestSchemaMigrationV0037',
+    ).length !== 1 ||
     occurrences(
       indexSource,
       "from './0033-create-mainnet-financial-action-lifecycle.migration';",
@@ -930,10 +1130,18 @@ function validateDormantActionMigrationSnapshot(migrationSource, migrationSpecSo
     occurrences(
       indexSource,
       "from './0035-create-mainnet-financial-action-authenticated-finality.migration';",
+    ) !== 2 ||
+    occurrences(
+      indexSource,
+      "from './0036-read-mainnet-financial-action-finality-prerequisite.migration';",
+    ) !== 2 ||
+    occurrences(
+      indexSource,
+      "from './0037-atomically-persist-mainnet-financial-action-finality.migration';",
     ) !== 2
   ) {
     errors.push(
-      '0033/0034/0035 migration index registration, predecessor order, or export inventory changed',
+      '0033-0037 migration index registration, predecessor order, or export inventory changed',
     );
   }
 
@@ -1855,6 +2063,243 @@ function validateAuthenticatedFinalityMigrationSnapshot(
   return errors;
 }
 
+function validateAtomicFinalityPrerequisiteSnapshot(
+  issuerPortSource,
+  prerequisiteAdapterSource,
+  prerequisiteAdapterSpecSource,
+  walletReaderSource,
+  walletReaderSpecSource,
+  prerequisiteMigrationSource,
+  prerequisiteMigrationSpecSource,
+  prerequisiteMigrationIntegrationSpecSource,
+  atomicMigrationSource,
+  atomicMigrationSpecSource,
+  atomicMigrationIntegrationSpecSource,
+) {
+  const errors = [];
+  if (
+    !exactArray(
+      extractImports(issuerPortSource),
+      EXPECTED_FINALITY_PREREQUISITE_ISSUER_PORT_IMPORTS,
+    ) ||
+    hasUnsupportedExportSyntax(issuerPortSource) ||
+    !exactArray(
+      extractExports(issuerPortSource),
+      EXPECTED_FINALITY_PREREQUISITE_ISSUER_PORT_EXPORTS,
+    ) ||
+    !exactArray(
+      extractImports(prerequisiteAdapterSource),
+      EXPECTED_FINALITY_PREREQUISITE_ADAPTER_IMPORTS,
+    ) ||
+    hasUnsupportedExportSyntax(prerequisiteAdapterSource) ||
+    !exactArray(
+      extractExports(prerequisiteAdapterSource),
+      EXPECTED_FINALITY_PREREQUISITE_ADAPTER_EXPORTS,
+    ) ||
+    !exactArray(
+      extractImports(prerequisiteAdapterSpecSource),
+      EXPECTED_FINALITY_PREREQUISITE_ADAPTER_SPEC_IMPORTS,
+    ) ||
+    hasUnsupportedExportSyntax(prerequisiteAdapterSpecSource) ||
+    extractExports(prerequisiteAdapterSpecSource).length !== 0
+  ) {
+    errors.push('0036 prerequisite port, adapter, or spec import/export inventory changed');
+  }
+  if (
+    !exactArray(extractImports(walletReaderSource), EXPECTED_FINALITY_WALLET_READER_IMPORTS) ||
+    hasUnsupportedExportSyntax(walletReaderSource) ||
+    !exactArray(extractExports(walletReaderSource), EXPECTED_FINALITY_WALLET_READER_EXPORTS) ||
+    !exactArray(
+      extractImports(walletReaderSpecSource),
+      EXPECTED_FINALITY_WALLET_READER_SPEC_IMPORTS,
+    ) ||
+    hasUnsupportedExportSyntax(walletReaderSpecSource) ||
+    extractExports(walletReaderSpecSource).length !== 0
+  ) {
+    errors.push('0036 wallet reader or spec import/export inventory changed');
+  }
+  if (
+    occurrences(prerequisiteAdapterSource, 'queryWithCancellation') !== 2 ||
+    occurrences(prerequisiteAdapterSource, 'Reflect.apply(this.#databaseQuery.method') !== 1 ||
+    occurrences(prerequisiteAdapterSource, 'this.#issue(') !== 2 ||
+    occurrences(
+      prerequisiteAdapterSource,
+      'read_mainnet_financial_action_reconciliation_prerequisite_v1',
+    ) !== 2 ||
+    occurrences(
+      prerequisiteAdapterSource,
+      'read_mainnet_financial_action_post_finality_prerequisite_v1',
+    ) !== 2 ||
+    PROHIBITED_ADAPTER_DATABASE_CONTROL.test(prerequisiteAdapterSource) ||
+    PROHIBITED_ADAPTER_SQL_AUTHORITY.test(prerequisiteAdapterSource)
+  ) {
+    errors.push('0036 prerequisite adapter SQL or one-shot dispatch allowlist changed');
+  }
+  if (
+    [issuerPortSource, prerequisiteAdapterSource, walletReaderSource].some(
+      (source) =>
+        PROHIBITED_DURABLE_REGISTRATION.test(source) ||
+        PROHIBITED_DURABLE_AUTHORITY.test(source) ||
+        DURABLE_SOURCE_SYMBOL_BRAND.test(source),
+    ) ||
+    !prerequisiteAdapterSource.includes('readonly #spentRequests = new WeakSet<object>();') ||
+    !walletReaderSource.includes('readonly #startedRequests = new WeakSet<object>();') ||
+    !walletReaderSource.includes('mayAuthorizeFinancialAction: false,')
+  ) {
+    errors.push(
+      '0036 prerequisite or wallet adapter gained runtime, signing, or settlement authority',
+    );
+  }
+  if (
+    !exactArray(
+      extractImports(prerequisiteMigrationSource),
+      EXPECTED_FINALITY_PREREQUISITE_MIGRATION_IMPORTS,
+    ) ||
+    hasUnsupportedExportSyntax(prerequisiteMigrationSource) ||
+    !exactArray(
+      extractExports(prerequisiteMigrationSource),
+      EXPECTED_FINALITY_PREREQUISITE_MIGRATION_EXPORTS,
+    ) ||
+    !exactArray(
+      extractImports(prerequisiteMigrationSpecSource),
+      EXPECTED_FINALITY_PREREQUISITE_MIGRATION_SPEC_IMPORTS,
+    ) ||
+    !exactArray(
+      extractImports(prerequisiteMigrationIntegrationSpecSource),
+      EXPECTED_FINALITY_READ_INTEGRATION_SPEC_IMPORTS,
+    ) ||
+    hasUnsupportedExportSyntax(prerequisiteMigrationSpecSource) ||
+    hasUnsupportedExportSyntax(prerequisiteMigrationIntegrationSpecSource) ||
+    extractExports(prerequisiteMigrationSpecSource).length !== 0 ||
+    extractExports(prerequisiteMigrationIntegrationSpecSource).length !== 0
+  ) {
+    errors.push('0036 prerequisite migration import or export inventory changed');
+  }
+  for (const marker of [
+    "id: '0036'",
+    "supersedesVerificationOf: ['0035']",
+    'CREATE FUNCTION read_mainnet_financial_action_reconciliation_prerequisite_v1(',
+    'CREATE FUNCTION read_mainnet_financial_action_post_finality_prerequisite_v1(',
+    'LANGUAGE plpgsql SECURITY DEFINER VOLATILE STRICT PARALLEL UNSAFE',
+    'LANGUAGE plpgsql SECURITY DEFINER VOLATILE CALLED ON NULL INPUT PARALLEL UNSAFE',
+    'SET search_path TO pg_catalog, %I, pg_temp',
+    'REVOKE ALL ON FUNCTION ${RECONCILIATION_READ_IDENTITY} FROM ${guarded};',
+    'REVOKE ALL ON FUNCTION ${POST_FINALITY_READ_IDENTITY} FROM ${guarded};',
+  ]) {
+    if (!prerequisiteMigrationSource.includes(marker)) {
+      errors.push(`0036 prerequisite migration lacks owner-only marker: ${marker}`);
+    }
+  }
+  if (
+    prerequisiteMigrationSource.includes('GRANT ') ||
+    occurrences(prerequisiteMigrationSource, 'CREATE FUNCTION ') !== 2 ||
+    occurrences(prerequisiteMigrationSource, 'CREATE TABLE ') !== 0 ||
+    PROHIBITED_DURABLE_AUTHORITY.test(prerequisiteMigrationSource)
+  ) {
+    errors.push('0036 prerequisite migration grants, persists, signs, or broadcasts authority');
+  }
+  if (
+    countDeclaredTests(prerequisiteAdapterSpecSource) !== 16 ||
+    countDeclaredTests(walletReaderSpecSource) !== 15 ||
+    countDeclaredTests(prerequisiteMigrationSpecSource) !== 10 ||
+    countDeclaredTests(prerequisiteMigrationIntegrationSpecSource) !== 5 ||
+    !prerequisiteMigrationIntegrationSpecSource.includes(
+      "process.env.RUN_INFRASTRUCTURE_INTEGRATION === '1'",
+    ) ||
+    !prerequisiteMigrationIntegrationSpecSource.includes("({ id }) => id <= '0036'") ||
+    !prerequisiteMigrationIntegrationSpecSource.includes(
+      "!['localhost', '127.0.0.1', '[::1]', '::1'].includes(hostname)",
+    ) ||
+    !prerequisiteMigrationIntegrationSpecSource.includes('fails closed after wallet revocation')
+  ) {
+    errors.push('0036 prerequisite tests lost fail-closed or local-only evidence');
+  }
+
+  if (
+    !exactArray(
+      extractImports(atomicMigrationSource),
+      EXPECTED_ATOMIC_FINALITY_MIGRATION_IMPORTS,
+    ) ||
+    hasUnsupportedExportSyntax(atomicMigrationSource) ||
+    !exactArray(
+      extractExports(atomicMigrationSource),
+      EXPECTED_ATOMIC_FINALITY_MIGRATION_EXPORTS,
+    ) ||
+    !exactArray(
+      extractImports(atomicMigrationSpecSource),
+      EXPECTED_ATOMIC_FINALITY_MIGRATION_SPEC_IMPORTS,
+    ) ||
+    !exactArray(
+      extractImports(atomicMigrationIntegrationSpecSource),
+      EXPECTED_FINALITY_READ_INTEGRATION_SPEC_IMPORTS,
+    ) ||
+    hasUnsupportedExportSyntax(atomicMigrationSpecSource) ||
+    hasUnsupportedExportSyntax(atomicMigrationIntegrationSpecSource) ||
+    extractExports(atomicMigrationSpecSource).length !== 0 ||
+    extractExports(atomicMigrationIntegrationSpecSource).length !== 0
+  ) {
+    errors.push('0037 atomic finality migration import or export inventory changed');
+  }
+  const internalV1References = [...atomicMigrationSource.matchAll(/\b[a-z][a-z0-9_]*_v1\b/gu)].map(
+    (match) => match[0],
+  );
+  if (
+    !exactArray(internalV1References, [
+      'record_authenticated_mainnet_financial_action_reconciliation_v1',
+      'record_mainnet_financial_action_post_finality_review_v1',
+      'read_mainnet_financial_action_reconciliation_prerequisite_v1',
+      'read_mainnet_financial_action_post_finality_prerequisite_v1',
+    ]) ||
+    occurrences(atomicMigrationSource, '${RECORD_ADMISSION_V1}(') !== 2 ||
+    occurrences(atomicMigrationSource, '${RECORD_REVIEW_V1}(') !== 2
+  ) {
+    errors.push('0037 internal v1 database-call allowlist changed');
+  }
+  for (const marker of [
+    "id: '0037'",
+    "supersedesVerificationOf: ['0036']",
+    "const RECORD_ADMISSION_V2 = 'record_authenticated_mainnet_financial_action_reconciliation_v2';",
+    "const RECORD_REVIEW_V2 = 'record_mainnet_financial_action_post_finality_review_v2';",
+    'LANGUAGE plpgsql SECURITY DEFINER VOLATILE CALLED ON NULL INPUT PARALLEL UNSAFE',
+    'SET search_path TO pg_catalog, %I, pg_temp',
+    'REVOKE ALL ON FUNCTION ${RECORD_ADMISSION_V2_IDENTITY} FROM ${guarded};',
+    'REVOKE ALL ON FUNCTION ${RECORD_REVIEW_V2_IDENTITY} FROM ${guarded};',
+  ]) {
+    if (!atomicMigrationSource.includes(marker)) {
+      errors.push(`0037 atomic finality migration lacks owner-only marker: ${marker}`);
+    }
+  }
+  if (
+    atomicMigrationSource.includes('GRANT ') ||
+    occurrences(atomicMigrationSource, 'CREATE FUNCTION ') !== 2 ||
+    occurrences(atomicMigrationSource, 'CREATE TABLE ') !== 0 ||
+    PROHIBITED_DURABLE_AUTHORITY.test(atomicMigrationSource)
+  ) {
+    errors.push(
+      '0037 atomic finality migration grants, persists extra state, signs, or broadcasts',
+    );
+  }
+  if (
+    countDeclaredTests(atomicMigrationSpecSource) !== 13 ||
+    countDeclaredTests(atomicMigrationIntegrationSpecSource) !== 13 ||
+    !atomicMigrationIntegrationSpecSource.includes(
+      "process.env.RUN_INFRASTRUCTURE_INTEGRATION === '1'",
+    ) ||
+    !atomicMigrationIntegrationSpecSource.includes("({ id }) => id <= '0037'") ||
+    !atomicMigrationIntegrationSpecSource.includes(
+      "!['localhost', '127.0.0.1', '[::1]', '::1'].includes(hostname)",
+    ) ||
+    !atomicMigrationIntegrationSpecSource.includes('without deadlock') ||
+    !atomicMigrationIntegrationSpecSource.includes('revoke-wins races') ||
+    !atomicMigrationIntegrationSpecSource.includes(
+      'rolls back a newly recorded result that crosses its effective expiry',
+    )
+  ) {
+    errors.push('0037 atomic finality tests lost race, rollback, or local-only evidence');
+  }
+  return errors;
+}
+
 function hasUnreviewedDynamicLoading(path, source) {
   if (/\b(?:require|eval|Function)\s*\(/u.test(source)) return true;
   const tokenCount = (source.match(/\bimport\s*\(/gu) ?? []).length;
@@ -1893,6 +2338,17 @@ export function validateDormantMainnetActionBoundarySnapshot(snapshot) {
     typeof snapshot.authenticatedFinalityMigrationSource !== 'string' ||
     typeof snapshot.authenticatedFinalityMigrationSpecSource !== 'string' ||
     typeof snapshot.authenticatedFinalityMigrationIntegrationSpecSource !== 'string' ||
+    typeof snapshot.finalityPrerequisiteIssuerPortSource !== 'string' ||
+    typeof snapshot.finalityPrerequisiteAdapterSource !== 'string' ||
+    typeof snapshot.finalityPrerequisiteAdapterSpecSource !== 'string' ||
+    typeof snapshot.finalityWalletReaderSource !== 'string' ||
+    typeof snapshot.finalityWalletReaderSpecSource !== 'string' ||
+    typeof snapshot.finalityPrerequisiteMigrationSource !== 'string' ||
+    typeof snapshot.finalityPrerequisiteMigrationSpecSource !== 'string' ||
+    typeof snapshot.finalityPrerequisiteMigrationIntegrationSpecSource !== 'string' ||
+    typeof snapshot.atomicFinalityMigrationSource !== 'string' ||
+    typeof snapshot.atomicFinalityMigrationSpecSource !== 'string' ||
+    typeof snapshot.atomicFinalityMigrationIntegrationSpecSource !== 'string' ||
     typeof snapshot.migrationIndexSource !== 'string' ||
     !(snapshot.runtimeSources instanceof Map)
   ) {
@@ -1993,9 +2449,7 @@ export function validateDormantMainnetActionBoundarySnapshot(snapshot) {
     createHash('sha256').update(snapshot.migrationIndexSource, 'utf8').digest('hex') !==
     REVIEWED_DATABASE_MIGRATION_INDEX_SHA256
   ) {
-    errors.push(
-      'database migration index bytes drifted from the reviewed 0033/0034/0035 registration',
-    );
+    errors.push('database migration index bytes drifted from the reviewed 0033-0037 registration');
   }
   for (const [field, digest, message] of [
     [
@@ -2053,6 +2507,61 @@ export function validateDormantMainnetActionBoundarySnapshot(snapshot) {
       REVIEWED_ACTION_AUTHENTICATED_FINALITY_MIGRATION_INTEGRATION_SPEC_SHA256,
       '0035 authenticated finality migration integration spec bytes drifted from the reviewed source',
     ],
+    [
+      'finalityPrerequisiteIssuerPortSource',
+      REVIEWED_ACTION_FINALITY_PREREQUISITE_ISSUER_PORT_SHA256,
+      '0036 finality prerequisite issuer port bytes drifted from the reviewed source',
+    ],
+    [
+      'finalityPrerequisiteAdapterSource',
+      REVIEWED_ACTION_FINALITY_PREREQUISITE_POSTGRES_ADAPTER_SHA256,
+      '0036 finality prerequisite adapter bytes drifted from the reviewed source',
+    ],
+    [
+      'finalityPrerequisiteAdapterSpecSource',
+      REVIEWED_ACTION_FINALITY_PREREQUISITE_POSTGRES_ADAPTER_SPEC_SHA256,
+      '0036 finality prerequisite adapter spec bytes drifted from the reviewed source',
+    ],
+    [
+      'finalityWalletReaderSource',
+      REVIEWED_ACTION_FINALITY_WALLET_READER_SHA256,
+      '0036 finality wallet reader bytes drifted from the reviewed source',
+    ],
+    [
+      'finalityWalletReaderSpecSource',
+      REVIEWED_ACTION_FINALITY_WALLET_READER_SPEC_SHA256,
+      '0036 finality wallet reader spec bytes drifted from the reviewed source',
+    ],
+    [
+      'finalityPrerequisiteMigrationSource',
+      REVIEWED_ACTION_FINALITY_PREREQUISITE_MIGRATION_SHA256,
+      '0036 finality prerequisite migration bytes drifted from the reviewed source',
+    ],
+    [
+      'finalityPrerequisiteMigrationSpecSource',
+      REVIEWED_ACTION_FINALITY_PREREQUISITE_MIGRATION_SPEC_SHA256,
+      '0036 finality prerequisite migration spec bytes drifted from the reviewed source',
+    ],
+    [
+      'finalityPrerequisiteMigrationIntegrationSpecSource',
+      REVIEWED_ACTION_FINALITY_PREREQUISITE_MIGRATION_INTEGRATION_SPEC_SHA256,
+      '0036 finality prerequisite migration integration spec bytes drifted from the reviewed source',
+    ],
+    [
+      'atomicFinalityMigrationSource',
+      REVIEWED_ACTION_ATOMIC_FINALITY_MIGRATION_SHA256,
+      '0037 atomic finality migration bytes drifted from the reviewed source',
+    ],
+    [
+      'atomicFinalityMigrationSpecSource',
+      REVIEWED_ACTION_ATOMIC_FINALITY_MIGRATION_SPEC_SHA256,
+      '0037 atomic finality migration spec bytes drifted from the reviewed source',
+    ],
+    [
+      'atomicFinalityMigrationIntegrationSpecSource',
+      REVIEWED_ACTION_ATOMIC_FINALITY_MIGRATION_INTEGRATION_SPEC_SHA256,
+      '0037 atomic finality migration integration spec bytes drifted from the reviewed source',
+    ],
   ]) {
     if (createHash('sha256').update(snapshot[field], 'utf8').digest('hex') !== digest) {
       errors.push(message);
@@ -2101,6 +2610,21 @@ export function validateDormantMainnetActionBoundarySnapshot(snapshot) {
       snapshot.authenticatedFinalityMigrationSource,
       snapshot.authenticatedFinalityMigrationSpecSource,
       snapshot.authenticatedFinalityMigrationIntegrationSpecSource,
+    ),
+  );
+  errors.push(
+    ...validateAtomicFinalityPrerequisiteSnapshot(
+      snapshot.finalityPrerequisiteIssuerPortSource,
+      snapshot.finalityPrerequisiteAdapterSource,
+      snapshot.finalityPrerequisiteAdapterSpecSource,
+      snapshot.finalityWalletReaderSource,
+      snapshot.finalityWalletReaderSpecSource,
+      snapshot.finalityPrerequisiteMigrationSource,
+      snapshot.finalityPrerequisiteMigrationSpecSource,
+      snapshot.finalityPrerequisiteMigrationIntegrationSpecSource,
+      snapshot.atomicFinalityMigrationSource,
+      snapshot.atomicFinalityMigrationSpecSource,
+      snapshot.atomicFinalityMigrationIntegrationSpecSource,
     ),
   );
   if (!exactArray(extractActions(source), EXPECTED_ACTIONS)) {
@@ -2191,17 +2715,18 @@ export function validateDormantMainnetActionBoundarySnapshot(snapshot) {
       errors.push(`runtime source contains unreviewed dynamic loading: ${path}`);
     } else if (ACTION_LIFECYCLE_DATABASE_FUNCTION_REFERENCE.test(runtimeSource)) {
       errors.push(
-        `migration-0033/0034/0035 action SQL function is referenced outside the reviewed adapters by runtime source ${path}`,
+        `migration-0033-0037 action SQL function is referenced outside the reviewed adapters by runtime source ${path}`,
       );
-    } else if (RUNTIME_REFERENCE.test(runtimeSource)) {
+    } else if (
+      normalizedPath(path) !== DATABASE_MIGRATION_INDEX_PATH &&
+      RUNTIME_REFERENCE.test(runtimeSource)
+    ) {
       errors.push(`dormant mainnet action boundary is referenced by runtime source ${path}`);
     } else if (
       normalizedPath(path) !== DATABASE_MIGRATION_INDEX_PATH &&
       ACTION_LIFECYCLE_MIGRATION_REFERENCE.test(runtimeSource)
     ) {
-      errors.push(
-        `0033/0034/0035 dormant action persistence is referenced by runtime source ${path}`,
-      );
+      errors.push(`0033-0037 dormant action persistence is referenced by runtime source ${path}`);
     }
   }
   return [...new Set(errors)];
@@ -2394,6 +2919,50 @@ function loadSnapshot(repositoryRoot, afterInitialRuntimeEnumeration) {
         repositoryRoot,
         ACTION_AUTHENTICATED_FINALITY_MIGRATION_INTEGRATION_SPEC_PATH,
       ),
+      finalityPrerequisiteIssuerPortSource: repositoryFile(
+        repositoryRoot,
+        ACTION_FINALITY_PREREQUISITE_ISSUER_PORT_PATH,
+      ),
+      finalityPrerequisiteAdapterSource: repositoryFile(
+        repositoryRoot,
+        ACTION_FINALITY_PREREQUISITE_POSTGRES_ADAPTER_PATH,
+      ),
+      finalityPrerequisiteAdapterSpecSource: repositoryFile(
+        repositoryRoot,
+        ACTION_FINALITY_PREREQUISITE_POSTGRES_ADAPTER_SPEC_PATH,
+      ),
+      finalityWalletReaderSource: repositoryFile(
+        repositoryRoot,
+        ACTION_FINALITY_WALLET_READER_PATH,
+      ),
+      finalityWalletReaderSpecSource: repositoryFile(
+        repositoryRoot,
+        ACTION_FINALITY_WALLET_READER_SPEC_PATH,
+      ),
+      finalityPrerequisiteMigrationSource: repositoryFile(
+        repositoryRoot,
+        ACTION_FINALITY_PREREQUISITE_MIGRATION_PATH,
+      ),
+      finalityPrerequisiteMigrationSpecSource: repositoryFile(
+        repositoryRoot,
+        ACTION_FINALITY_PREREQUISITE_MIGRATION_SPEC_PATH,
+      ),
+      finalityPrerequisiteMigrationIntegrationSpecSource: repositoryFile(
+        repositoryRoot,
+        ACTION_FINALITY_PREREQUISITE_MIGRATION_INTEGRATION_SPEC_PATH,
+      ),
+      atomicFinalityMigrationSource: repositoryFile(
+        repositoryRoot,
+        ACTION_ATOMIC_FINALITY_MIGRATION_PATH,
+      ),
+      atomicFinalityMigrationSpecSource: repositoryFile(
+        repositoryRoot,
+        ACTION_ATOMIC_FINALITY_MIGRATION_SPEC_PATH,
+      ),
+      atomicFinalityMigrationIntegrationSpecSource: repositoryFile(
+        repositoryRoot,
+        ACTION_ATOMIC_FINALITY_MIGRATION_INTEGRATION_SPEC_PATH,
+      ),
       migrationIndexSource: repositoryFile(repositoryRoot, DATABASE_MIGRATION_INDEX_PATH),
       runtimeSources,
     };
@@ -2439,7 +3008,7 @@ if (import.meta.url === invokedPath) {
   const errors = validateDormantMainnetActionBoundaryFiles();
   if (errors.length === 0) {
     console.log(
-      'Dormant mainnet action boundary is valid: 10 candidates, 0 enabled, owner-only 0033/0034/0035 persistence, unregistered authenticated-finality producer and sidecar',
+      'Dormant mainnet action boundary is valid: 10 candidates, 0 enabled, owner-only 0033-0037 persistence, unregistered authenticated-finality adapters',
     );
   } else {
     for (const error of errors) console.error(`- ${error}`);
