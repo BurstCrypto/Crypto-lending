@@ -60,19 +60,20 @@ describe('migration 0033 dormant mainnet financial action lifecycle', () => {
     expect(migration.id).toBe('0033');
     expect(migration.supersedesVerificationOf).toEqual(['0032']);
     expect(migration.transactional).not.toBe(false);
-    expect(DATABASE_MIGRATION_LIST.at(-2)).toBe(
+    expect(DATABASE_MIGRATION_LIST.at(-3)).toBe(
       createMainnetFinancialActionLifecycleMigrationV0033,
     );
-    expect(DATABASE_TEST_SCHEMA_MIGRATION_LIST.at(-2)).toBe(
+    expect(DATABASE_TEST_SCHEMA_MIGRATION_LIST.at(-3)).toBe(
       createMainnetFinancialActionLifecycleTestSchemaMigrationV0033,
     );
-    expect(DATABASE_MIGRATION_LIST.map(({ id }) => id).slice(-6)).toEqual([
+    expect(DATABASE_MIGRATION_LIST.map(({ id }) => id).slice(-7)).toEqual([
       '0029',
       '0030',
       '0031',
       '0032',
       '0033',
       '0034',
+      '0035',
     ]);
     expect(verifier).toContain('balance_sync_financial_agreement_evidence_v2');
   });

@@ -20,19 +20,20 @@ describe('migration 0032 deployment-aware mainnet balance agreement evidence', (
     expect(migration.id).toBe('0032');
     expect(migration.supersedesVerificationOf).toEqual(['0031']);
     expect(migration.transactional).not.toBe(false);
-    expect(DATABASE_MIGRATION_LIST.at(-3)).toBe(
+    expect(DATABASE_MIGRATION_LIST.at(-4)).toBe(
       createMainnetBalanceAgreementEvidenceV2MigrationV0032,
     );
-    expect(DATABASE_TEST_SCHEMA_MIGRATION_LIST.at(-3)).toBe(
+    expect(DATABASE_TEST_SCHEMA_MIGRATION_LIST.at(-4)).toBe(
       createMainnetBalanceAgreementEvidenceV2TestSchemaMigrationV0032,
     );
-    expect(DATABASE_MIGRATION_LIST.map(({ id }) => id).slice(-6)).toEqual([
+    expect(DATABASE_MIGRATION_LIST.map(({ id }) => id).slice(-7)).toEqual([
       '0029',
       '0030',
       '0031',
       '0032',
       '0033',
       '0034',
+      '0035',
     ]);
     expect(verifier).toContain('provider_position_chain_anchor_record_intents');
   });
