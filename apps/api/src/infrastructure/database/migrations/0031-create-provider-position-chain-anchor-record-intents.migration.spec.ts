@@ -62,13 +62,13 @@ describe('migration 0031 provider position chain anchor record intents', () => {
     expect(migration.transactional).not.toBe(false);
     expect(migration.description).toContain('one-shot');
     expect(migration.description).toContain('source-only reconciliation');
-    expect(DATABASE_MIGRATION_LIST.at(-5)).toBe(
+    expect(DATABASE_MIGRATION_LIST.at(-6)).toBe(
       createProviderPositionChainAnchorRecordIntentMigrationV0031,
     );
-    expect(DATABASE_TEST_SCHEMA_MIGRATION_LIST.at(-5)).toBe(
+    expect(DATABASE_TEST_SCHEMA_MIGRATION_LIST.at(-6)).toBe(
       createProviderPositionChainAnchorRecordIntentTestSchemaMigrationV0031,
     );
-    expect(DATABASE_MIGRATION_LIST.map(({ id }) => id).slice(-7)).toEqual([
+    expect(DATABASE_MIGRATION_LIST.map(({ id }) => id).slice(-8)).toEqual([
       '0029',
       '0030',
       '0031',
@@ -76,6 +76,7 @@ describe('migration 0031 provider position chain anchor record intents', () => {
       '0033',
       '0034',
       '0035',
+      '0036',
     ]);
   });
 
