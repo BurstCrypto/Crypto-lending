@@ -1758,6 +1758,7 @@ function startRead(
   request: ReadMainnetFinancialActionFinalityEvidenceSourceRequestV1,
 ): Promise<unknown> {
   return Promise.resolve().then(() => {
+    if (aborted(request.signal)) return fail('STALE_EVIDENCE');
     const operation = Reflect.apply(binding.readAttestation, binding.receiver, [request]);
     try {
       if (

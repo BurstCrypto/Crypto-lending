@@ -589,6 +589,7 @@ describe('dormant mainnet financial-action finality evidence producer', () => {
     const operation = value.producer.produceReconciliationAdmissionCandidate(
       value.request as ProduceMainnetFinancialActionReconciliationEvidenceRequestV1,
     );
+    await Promise.resolve();
     value.controller.abort();
     await expectCode(operation, 'STALE_EVIDENCE');
     expect(value.primary.requests).toHaveLength(1);
