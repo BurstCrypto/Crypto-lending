@@ -13,7 +13,10 @@ import {
   type WalletRegistrationKey,
   type WalletRegistrationKeyRing,
 } from '../../wallets/infrastructure/crypto/wallet-registration-crypto';
-import type { DormantMainnetFinancialActionIntentInputV1 } from '../domain/dormant-mainnet-financial-action';
+import {
+  parseDormantMainnetFinancialActionIntent,
+  type DormantMainnetFinancialActionIntentInputV1,
+} from '../domain/dormant-mainnet-financial-action';
 import {
   DORMANT_MAINNET_FINANCIAL_ACTION_DURABLE_LIFECYCLE_VERSION,
   DORMANT_MAINNET_FINANCIAL_ACTION_DURABLE_REQUEST_USE,
@@ -27,6 +30,24 @@ import {
   type RecordDormantMainnetFinancialActionBroadcastRequestV1,
   type RecordDormantMainnetFinancialActionReconciliationRequestV1,
 } from '../application/ports/dormant-mainnet-financial-action-lifecycle-durable.port';
+import {
+  DORMANT_MAINNET_SIGNED_SUBMISSION_CAPABILITY_USE,
+  DORMANT_MAINNET_SIGNED_SUBMISSION_RESULT_USE,
+  DORMANT_MAINNET_SIGNED_SUBMISSION_VERIFICATION_USE,
+  DORMANT_MAINNET_SIGNED_SUBMISSION_VERIFIER_VERSION,
+  type DormantMainnetFinancialActionSignedSubmissionVerifierPort,
+  type DormantMainnetSignedSubmissionCapabilityV1,
+  type DormantMainnetSignedSubmissionVerificationResultV1,
+  type VerifyDormantMainnetSignedSubmissionRequestV1,
+} from '../application/ports/dormant-mainnet-financial-action-signed-submission-verifier.port';
+import {
+  DORMANT_MAINNET_VERIFIED_SUBMISSION_BINDER_VERSION,
+  DORMANT_MAINNET_VERIFIED_SUBMISSION_BIND_CAPABILITY_USE,
+  DORMANT_MAINNET_VERIFIED_SUBMISSION_BIND_REQUEST_USE,
+  type BindDormantMainnetVerifiedSubmissionRequestV1,
+  type DormantMainnetVerifiedSubmissionBindCapabilityV1,
+} from '../application/ports/dormant-mainnet-financial-action-verified-submission-binder.port';
+import { fingerprintDormantMainnetSignedVerificationIntent } from './mainnet-financial-action-write-manifest';
 import {
   type DormantMainnetFinancialActionLifecycleClock,
   PostgresDormantMainnetFinancialActionLifecycleDurableAdapter,
@@ -77,6 +98,10 @@ const EVIDENCE_DIGEST = digest('d');
 const SOURCE_DIGEST = digest('e');
 const BLOCK_IDENTITY_DIGEST = 'bc'.repeat(32);
 const FINALIZED_BLOCK_IDENTITY_DIGEST = 'cd'.repeat(32);
+const SIGNED_ENVELOPE_DIGEST = '12'.repeat(32);
+const CHAIN_REPLAY_DIGEST = '13'.repeat(32);
+const WRITE_MANIFEST_DIGEST = '14'.repeat(32);
+const PROVIDER_ACTION_BINDING_DIGEST = '15'.repeat(32);
 const IDENTITY_KEY_V1 = createWalletRegistrationKey(
   'identity-hmac',
   1,
@@ -411,9 +436,11 @@ interface Fixture {
 
 function fixture(
   walletIdentityKeyRing: WalletRegistrationKeyRing<'identity-hmac'> = IDENTITY_KEY_RING,
+  signedSubmissionVerifier?: DormantMainnetFinancialActionSignedSubmissionVerifierPort,
+  now = NOW,
 ): Fixture {
   const query: jest.Mock<Promise<unknown>, [string, readonly unknown[], AbortSignal]> = jest.fn();
-  const clock = jest.fn(() => new Date(NOW));
+  const clock = jest.fn(() => new Date(now));
   const postgres = { queryWithCancellation: query } as unknown as PostgresService;
   const adapter = new PostgresDormantMainnetFinancialActionLifecycleDurableAdapter(
     postgres,
@@ -421,6 +448,7 @@ function fixture(
       now: clock,
     } as DormantMainnetFinancialActionLifecycleClock,
     walletIdentityKeyRing,
+    signedSubmissionVerifier,
   );
   return { adapter, query, clock };
 }
@@ -450,6 +478,145 @@ function rejectOnce(query: Fixture['query'], error: Error): void {
   query.mockImplementationOnce(() => Promise.reject(error));
 }
 
+class FakeSignedSubmissionVerifier implements DormantMainnetFinancialActionSignedSubmissionVerifierPort {
+  readonly verifierVersion = DORMANT_MAINNET_SIGNED_SUBMISSION_VERIFIER_VERSION;
+  readonly #issued = new WeakMap<
+    object,
+    Readonly<{
+      request: VerifyDormantMainnetSignedSubmissionRequestV1;
+      result: DormantMainnetSignedSubmissionVerificationResultV1;
+    }>
+  >();
+  reviewCalls = 0;
+
+  verifySubmission(_request: VerifyDormantMainnetSignedSubmissionRequestV1): Promise<unknown> {
+    void _request;
+    return Promise.resolve(null);
+  }
+
+  issue(
+    request: VerifyDormantMainnetSignedSubmissionRequestV1,
+    result: DormantMainnetSignedSubmissionVerificationResultV1,
+  ): DormantMainnetSignedSubmissionCapabilityV1 {
+    const capability = frozenNull({
+      verifierVersion: DORMANT_MAINNET_SIGNED_SUBMISSION_VERIFIER_VERSION,
+      use: DORMANT_MAINNET_SIGNED_SUBMISSION_CAPABILITY_USE,
+      mayAuthorizeFinancialAction: false as const,
+      mayPersist: false as const,
+      apiMaySign: false as const,
+      apiMayBroadcast: false as const,
+    });
+    this.#issued.set(capability, Object.freeze({ request, result }));
+    return capability;
+  }
+
+  reviewResult(
+    capability: unknown,
+    request: VerifyDormantMainnetSignedSubmissionRequestV1,
+  ): DormantMainnetSignedSubmissionVerificationResultV1 | null {
+    this.reviewCalls += 1;
+    if (typeof capability !== 'object' || capability === null) return null;
+    const issued = this.#issued.get(capability);
+    if (issued === undefined) return null;
+    this.#issued.delete(capability);
+    return issued.request === request ? issued.result : null;
+  }
+}
+
+function signedVerificationRequest(
+  prepared: Awaited<ReturnType<typeof prepareConfirmed>>,
+  signal: AbortSignal,
+): VerifyDormantMainnetSignedSubmissionRequestV1 {
+  const intent = parseDormantMainnetFinancialActionIntent(
+    prepared.request.intentInput,
+    new Date(ISSUED_AT),
+  );
+  return Object.freeze({
+    verifierVersion: DORMANT_MAINNET_SIGNED_SUBMISSION_VERIFIER_VERSION,
+    use: DORMANT_MAINNET_SIGNED_SUBMISSION_VERIFICATION_USE,
+    mayAuthorizeFinancialAction: false,
+    mayPersist: false,
+    intentRecordFingerprintSha256: prepared.result.cursor.intentRecordFingerprintSha256,
+    intent,
+    wire: Object.freeze(
+      intent.networkId === ETHEREUM
+        ? {
+            networkId: ETHEREUM,
+            encoding: 'LOWERCASE_0X_HEX' as const,
+            signedTransaction: '0x02raw-signed-wire-must-not-escape',
+          }
+        : {
+            networkId: SOLANA,
+            encoding: 'CANONICAL_BASE64' as const,
+            signedTransaction: 'cmF3LXNpZ25lZC13aXJlLW11c3Qtbm90LWVzY2FwZQ==',
+          },
+    ),
+    signal,
+  });
+}
+
+function signedVerificationResult(
+  request: VerifyDormantMainnetSignedSubmissionRequestV1,
+  overrides: Partial<DormantMainnetSignedSubmissionVerificationResultV1> = {},
+): DormantMainnetSignedSubmissionVerificationResultV1 {
+  const ethereum = request.intent.networkId === ETHEREUM;
+  return Object.freeze({
+    verifierVersion: DORMANT_MAINNET_SIGNED_SUBMISSION_VERIFIER_VERSION,
+    use: DORMANT_MAINNET_SIGNED_SUBMISSION_RESULT_USE,
+    mayAuthorizeFinancialAction: false,
+    mayPersist: false,
+    apiMaySign: false,
+    apiMayBroadcast: false,
+    mayResendTransaction: false,
+    automaticRetryAllowed: false,
+    dynamicChainStateVerified: false,
+    providerDeploymentVerified: false,
+    currentNonceOrBlockhashVerified: false,
+    walletBalanceVerified: false,
+    intentId: request.intent.intentId,
+    intentRecordFingerprintSha256: request.intentRecordFingerprintSha256,
+    verificationIntentFingerprintSha256: fingerprintDormantMainnetSignedVerificationIntent(
+      request.intentRecordFingerprintSha256,
+      request.intent,
+    ),
+    networkId: request.intent.networkId,
+    transactionId: ethereum ? ETHEREUM_TRANSACTION : SOLANA_TRANSACTION,
+    signerWalletAddress: request.intent.walletAddress,
+    signatureScheme: ethereum
+      ? ('ECDSA_SECP256K1_EIP1559' as const)
+      : ('ED25519_SOLANA_TRANSACTION' as const),
+    signedEnvelopeSha256: SIGNED_ENVELOPE_DIGEST,
+    signingPayloadSha256: PAYLOAD_DIGEST,
+    signatureEvidenceSha256: SIGNATURE_DIGEST,
+    chainReplayIdentitySha256: CHAIN_REPLAY_DIGEST,
+    providerWriteManifestFingerprintSha256: WRITE_MANIFEST_DIGEST,
+    providerActionBindingSha256: PROVIDER_ACTION_BINDING_DIGEST,
+    ethereumNonce: ethereum ? '7' : null,
+    solanaRecentBlockhash: ethereum ? null : SOLANA_BLOCK,
+    staticCommandVerification: 'CRYPTOGRAPHIC_SIGNATURE_AND_EXACT_MANIFEST_MATCH',
+    ...overrides,
+  });
+}
+
+function verifiedBindRequest(
+  cursor: DormantMainnetFinancialActionClmaDatabaseCursorV1,
+  verificationRequest: VerifyDormantMainnetSignedSubmissionRequestV1,
+  verificationCapability: DormantMainnetSignedSubmissionCapabilityV1,
+  signal: AbortSignal = verificationRequest.signal,
+): BindDormantMainnetVerifiedSubmissionRequestV1 {
+  return frozenNull({
+    verifiedSubmissionBinderVersion: DORMANT_MAINNET_VERIFIED_SUBMISSION_BINDER_VERSION,
+    use: DORMANT_MAINNET_VERIFIED_SUBMISSION_BIND_REQUEST_USE,
+    mayAuthorizeFinancialAction: false as const,
+    mayPersist: false as const,
+    cursor,
+    verificationRequest,
+    verificationCapability,
+    correlationId: CORRELATION_ID,
+    signal,
+  });
+}
+
 function confirmed(
   adapter: PostgresDormantMainnetFinancialActionLifecycleDurableAdapter,
   capability: unknown,
@@ -467,6 +634,18 @@ function unknownOutcome(
 ): DormantMainnetFinancialActionDatabaseOutcomeUnknownV1 {
   const result = adapter.reviewResult(capability, request);
   if (result?.outcome !== 'DATABASE_OUTCOME_UNKNOWN') throw new Error('expected unknown result');
+  return result;
+}
+
+function reviewedVerifiedBind(
+  adapter: PostgresDormantMainnetFinancialActionLifecycleDurableAdapter,
+  capability: unknown,
+  request: BindDormantMainnetVerifiedSubmissionRequestV1,
+): DormantMainnetFinancialActionDatabaseConfirmedResultV1 {
+  const result = adapter.reviewVerifiedSubmissionBindResult(capability, request);
+  if (result?.outcome !== 'DATABASE_STATE_CONFIRMED') {
+    throw new Error('expected verified bind confirmation');
+  }
   return result;
 }
 
@@ -500,6 +679,42 @@ async function bindConfirmed(
   resolveOnce(test.query, queryResult(boundRow(prepared.request, transactionId)));
   const capability = await test.adapter.bindSubmission(request);
   return { request, result: confirmed(test.adapter, capability, request) };
+}
+
+async function verifiedBindSetup(networkId: typeof ETHEREUM | typeof SOLANA = ETHEREUM): Promise<
+  Readonly<{
+    test: Fixture;
+    verifier: FakeSignedSubmissionVerifier;
+    prepared: Awaited<ReturnType<typeof prepareConfirmed>>;
+    verificationRequest: VerifyDormantMainnetSignedSubmissionRequestV1;
+    verificationResult: DormantMainnetSignedSubmissionVerificationResultV1;
+    verificationCapability: DormantMainnetSignedSubmissionCapabilityV1;
+    request: BindDormantMainnetVerifiedSubmissionRequestV1;
+    abortController: AbortController;
+  }>
+> {
+  const verifier = new FakeSignedSubmissionVerifier();
+  const test = fixture(IDENTITY_KEY_RING, verifier, SIGNED_AT);
+  const prepared = await prepareConfirmed(test, networkId);
+  const abortController = new AbortController();
+  const verificationRequest = signedVerificationRequest(prepared, abortController.signal);
+  const verificationResult = signedVerificationResult(verificationRequest);
+  const verificationCapability = verifier.issue(verificationRequest, verificationResult);
+  const request = verifiedBindRequest(
+    prepared.result.cursor,
+    verificationRequest,
+    verificationCapability,
+  );
+  return Object.freeze({
+    test,
+    verifier,
+    prepared,
+    verificationRequest,
+    verificationResult,
+    verificationCapability,
+    request,
+    abortController,
+  });
 }
 
 describe('PostgresDormantMainnetFinancialActionLifecycleDurableAdapter', () => {
@@ -1300,5 +1515,508 @@ describe('PostgresDormantMainnetFinancialActionLifecycleDurableAdapter', () => {
     expect(result.lastConfirmedCursor).toBe(prepared.result.cursor);
     expect(result.reconciliationOnly).toBe(true);
     expect(test.query).toHaveBeenCalledTimes(2);
+  });
+
+  describe('verified signed-submission binder', () => {
+    it.each([ETHEREUM, SOLANA] as const)(
+      'consumes one %s verifier capability and sends only the fixed 17 reviewed arguments',
+      async (networkId) => {
+        const setup = await verifiedBindSetup(networkId);
+        const transactionId = networkId === ETHEREUM ? ETHEREUM_TRANSACTION : SOLANA_TRANSACTION;
+        resolveOnce(setup.test.query, queryResult(boundRow(setup.prepared.request, transactionId)));
+
+        const capability = await setup.test.adapter.bindVerifiedSubmission(setup.request);
+
+        expect(setup.verifier.reviewCalls).toBe(1);
+        expect(setup.test.query).toHaveBeenCalledTimes(2);
+        const [sql, values, signal] = setup.test.query.mock.calls[1]!;
+        expect(sql).toContain('bind_verified_mainnet_financial_action_submission_v2(');
+        expect(sql).not.toContain('bind_mainnet_financial_action_submission(');
+        expect(signal).toBe(setup.request.signal);
+        expect(values).toEqual([
+          ACCOUNT_ID,
+          INTENT_ID,
+          '1',
+          PREPARED_SNAPSHOT,
+          transactionId,
+          PAYLOAD_DIGEST,
+          SIGNATURE_DIGEST,
+          CORRELATION_ID,
+          DORMANT_MAINNET_SIGNED_SUBMISSION_VERIFIER_VERSION,
+          setup.verificationResult.verificationIntentFingerprintSha256,
+          SIGNED_ENVELOPE_DIGEST,
+          WRITE_MANIFEST_DIGEST,
+          PROVIDER_ACTION_BINDING_DIGEST,
+          CHAIN_REPLAY_DIGEST,
+          networkId === ETHEREUM ? 'ECDSA_SECP256K1_EIP1559' : 'ED25519_SOLANA_TRANSACTION',
+          networkId === ETHEREUM ? '7' : null,
+          networkId === ETHEREUM ? null : SOLANA_BLOCK,
+        ]);
+        expect(values).toHaveLength(17);
+        expect(JSON.stringify(values)).not.toContain(
+          setup.verificationRequest.wire.signedTransaction,
+        );
+        expect(values).not.toContain(setup.verificationRequest.intent.walletAddress);
+        expect(capability).toEqual({
+          verifiedSubmissionBinderVersion: DORMANT_MAINNET_VERIFIED_SUBMISSION_BINDER_VERSION,
+          use: DORMANT_MAINNET_VERIFIED_SUBMISSION_BIND_CAPABILITY_USE,
+          mayAuthorizeFinancialAction: false,
+          mayPersist: false,
+          apiMaySign: false,
+          apiMayBroadcast: false,
+          mayResendTransaction: false,
+          automaticRetryAllowed: false,
+        });
+
+        const result = reviewedVerifiedBind(setup.test.adapter, capability, setup.request);
+        expect(result).toMatchObject({
+          operation: 'BIND_SUBMISSION',
+          stage: 'WALLET_SIGNED_SUBMISSION_BOUND',
+          chainTransactionId: transactionId,
+          apiMaySign: false,
+          apiMayBroadcast: false,
+          mayResendTransaction: false,
+          automaticRetryAllowed: false,
+          ledgerSettlementAuthority: false,
+        });
+        expect(
+          setup.test.adapter.reviewVerifiedSubmissionBindResult(capability, setup.request),
+        ).toBeNull();
+      },
+    );
+
+    it('accepts an authenticated later-stage replay but treats an impossible later RECORDED row as unknown', async () => {
+      const replay = await verifiedBindSetup();
+      resolveOnce(
+        replay.test.query,
+        queryResult(
+          broadcastRow(replay.prepared.request, ETHEREUM_TRANSACTION, {
+            record_outcome: 'REPLAYED',
+          }),
+        ),
+      );
+
+      const replayCapability = await replay.test.adapter.bindVerifiedSubmission(replay.request);
+      expect(
+        reviewedVerifiedBind(replay.test.adapter, replayCapability, replay.request),
+      ).toMatchObject({
+        databaseRecordOutcome: 'REPLAYED',
+        stage: 'BROADCAST_OUTCOME_AMBIGUOUS',
+        recoveryMode: 'READ_THEN_RECONCILE_ONLY',
+      });
+
+      const impossible = await verifiedBindSetup();
+      resolveOnce(
+        impossible.test.query,
+        queryResult(
+          broadcastRow(impossible.prepared.request, ETHEREUM_TRANSACTION, {
+            record_outcome: 'RECORDED',
+          }),
+        ),
+      );
+      const impossibleCapability = await impossible.test.adapter.bindVerifiedSubmission(
+        impossible.request,
+      );
+      expect(
+        impossible.test.adapter.reviewVerifiedSubmissionBindResult(
+          impossibleCapability,
+          impossible.request,
+        ),
+      ).toMatchObject({
+        outcome: 'DATABASE_OUTCOME_UNKNOWN',
+        operation: 'BIND_SUBMISSION',
+        recoveryMode: 'READ_THEN_RECONCILE_ONLY',
+      });
+    });
+
+    it('rejects copied/cross-instance cursors, copied verifier capabilities, and signal mismatch before I/O', async () => {
+      const setup = await verifiedBindSetup();
+      const queryCount = setup.test.query.mock.calls.length;
+      const copiedCursor = Object.freeze({ ...setup.prepared.result.cursor });
+      await expect(
+        setup.test.adapter.bindVerifiedSubmission(
+          verifiedBindRequest(
+            copiedCursor,
+            setup.verificationRequest,
+            setup.verificationCapability,
+          ),
+        ),
+      ).rejects.toThrow('database value is invalid');
+
+      await expect(
+        setup.test.adapter.bindVerifiedSubmission(
+          verifiedBindRequest(
+            setup.prepared.result.cursor,
+            setup.verificationRequest,
+            setup.verificationCapability,
+            new AbortController().signal,
+          ),
+        ),
+      ).rejects.toThrow('database value is invalid');
+
+      const copiedCapability = frozenNull({ ...setup.verificationCapability });
+      await expect(
+        setup.test.adapter.bindVerifiedSubmission(
+          verifiedBindRequest(
+            setup.prepared.result.cursor,
+            setup.verificationRequest,
+            copiedCapability,
+          ),
+        ),
+      ).rejects.toThrow('database value is invalid');
+      expect(setup.verifier.reviewCalls).toBe(1);
+      expect(setup.test.query).toHaveBeenCalledTimes(queryCount);
+
+      const otherVerifier = new FakeSignedSubmissionVerifier();
+      const other = fixture(IDENTITY_KEY_RING, otherVerifier, SIGNED_AT);
+      await expect(
+        other.adapter.bindVerifiedSubmission(
+          verifiedBindRequest(
+            setup.prepared.result.cursor,
+            setup.verificationRequest,
+            otherVerifier.issue(
+              setup.verificationRequest,
+              signedVerificationResult(setup.verificationRequest),
+            ),
+          ),
+        ),
+      ).rejects.toThrow('database value is invalid');
+      expect(other.query).not.toHaveBeenCalled();
+    });
+
+    it('rejects a rebound intent fingerprint and a copied verifier request before I/O', async () => {
+      const fingerprintSetup = await verifiedBindSetup();
+      const fingerprintQueryCount = fingerprintSetup.test.query.mock.calls.length;
+      const reboundRequest = Object.freeze({
+        ...fingerprintSetup.verificationRequest,
+        intentRecordFingerprintSha256: digest('f'),
+      });
+      const reboundCapability = fingerprintSetup.verifier.issue(
+        reboundRequest,
+        signedVerificationResult(reboundRequest),
+      );
+
+      await expect(
+        fingerprintSetup.test.adapter.bindVerifiedSubmission(
+          verifiedBindRequest(
+            fingerprintSetup.prepared.result.cursor,
+            reboundRequest,
+            reboundCapability,
+          ),
+        ),
+      ).rejects.toThrow('database value is invalid');
+      expect(fingerprintSetup.verifier.reviewCalls).toBe(0);
+      expect(fingerprintSetup.test.query).toHaveBeenCalledTimes(fingerprintQueryCount);
+
+      const copiedSetup = await verifiedBindSetup();
+      const copiedQueryCount = copiedSetup.test.query.mock.calls.length;
+      const copiedVerificationRequest = Object.freeze({ ...copiedSetup.verificationRequest });
+      await expect(
+        copiedSetup.test.adapter.bindVerifiedSubmission(
+          verifiedBindRequest(
+            copiedSetup.prepared.result.cursor,
+            copiedVerificationRequest,
+            copiedSetup.verificationCapability,
+          ),
+        ),
+      ).rejects.toThrow('database value is invalid');
+      expect(copiedSetup.verifier.reviewCalls).toBe(1);
+      expect(copiedSetup.test.query).toHaveBeenCalledTimes(copiedQueryCount);
+    });
+
+    it('cross-binds every intent field available in the authenticated lifecycle projection before consuming verifier authority', async () => {
+      const setup = await verifiedBindSetup();
+      const alternateAsset = MAINNET_SUPPORTED_ASSET_REGISTRY.latest.assets.find(
+        (asset) => asset.networkId === ETHEREUM && asset.stablecoin !== 'USDC',
+      );
+      if (alternateAsset === undefined) throw new Error('missing alternate asset');
+      const mismatches: readonly (readonly [string, unknown])[] = [
+        ['walletRegistrationId', OBSERVATION_ID],
+        ['providerId', 'morpho'],
+        ['protocolId', 'morpho-blue'],
+        ['marketId', '0x3333333333333333333333333333333333333333'],
+        ['assetRegistryVersion', setup.verificationRequest.intent.assetRegistryVersion + 1],
+        ['assetRegistryFingerprintSha256', digest('f')],
+        ['assetSymbol', alternateAsset.stablecoin],
+        ['assetIdentity', alternateAsset.identity],
+        ['assetDecimals', setup.verificationRequest.intent.assetDecimals + 1],
+        ['action', 'WITHDRAW'],
+        ['amountAtomic', '2000000'],
+        ['requestedValueUsdMicros', '2000000'],
+        ['maximumNetworkFeeAtomic', '20000'],
+        ['maximumNetworkFeeBasisPoints', 51],
+        ['minimumPostActionNativeBalanceAtomic', '2'],
+        ['allowanceMode', 'UNLIMITED'],
+        ['allowanceAmountAtomic', '2000000'],
+        ['idempotencyKeyDigestSha256', digest('f')],
+        ['replayProtectionId', OBSERVATION_ID],
+        ['expiresAt', '2026-09-07T12:03:59.000Z'],
+      ];
+
+      for (const [field, replacement] of mismatches) {
+        const intent = Object.freeze({
+          ...setup.verificationRequest.intent,
+          [field]: replacement,
+        }) as typeof setup.verificationRequest.intent;
+        const verificationRequest = Object.freeze({
+          ...setup.verificationRequest,
+          intent,
+        });
+        const verificationCapability = setup.verifier.issue(
+          verificationRequest,
+          signedVerificationResult(verificationRequest),
+        );
+        await expect(
+          setup.test.adapter.bindVerifiedSubmission(
+            verifiedBindRequest(
+              setup.prepared.result.cursor,
+              verificationRequest,
+              verificationCapability,
+            ),
+          ),
+        ).rejects.toThrow('database value is invalid');
+      }
+
+      expect(setup.verifier.reviewCalls).toBe(0);
+      expect(setup.test.query).toHaveBeenCalledTimes(1);
+    });
+
+    it('rejects verifier authority widening, result rebinding, and a wallet-address HMAC mismatch before I/O', async () => {
+      const setup = await verifiedBindSetup();
+      const hostileResults: readonly Readonly<Record<string, unknown>>[] = [
+        { mayAuthorizeFinancialAction: true },
+        { mayPersist: true },
+        { apiMaySign: true },
+        { apiMayBroadcast: true },
+        { mayResendTransaction: true },
+        { automaticRetryAllowed: true },
+        { dynamicChainStateVerified: true },
+        { providerDeploymentVerified: true },
+        { currentNonceOrBlockhashVerified: true },
+        { walletBalanceVerified: true },
+        { intentId: OBSERVATION_ID },
+        { intentRecordFingerprintSha256: digest('f') },
+        { verificationIntentFingerprintSha256: digest('f') },
+        { signerWalletAddress: '0x2222222222222222222222222222222222222222' },
+        { signingPayloadSha256: SIGNATURE_DIGEST },
+        { signatureScheme: 'ED25519_SOLANA_TRANSACTION', ethereumNonce: null },
+        { ethereumNonce: '18446744073709551616' },
+      ];
+
+      for (const overrides of hostileResults) {
+        const result = signedVerificationResult(
+          setup.verificationRequest,
+          overrides as Partial<DormantMainnetSignedSubmissionVerificationResultV1>,
+        );
+        const capability = setup.verifier.issue(setup.verificationRequest, result);
+        await expect(
+          setup.test.adapter.bindVerifiedSubmission(
+            verifiedBindRequest(
+              setup.prepared.result.cursor,
+              setup.verificationRequest,
+              capability,
+            ),
+          ),
+        ).rejects.toThrow('database value is invalid');
+      }
+
+      const mismatchedIntent = Object.freeze({
+        ...setup.verificationRequest.intent,
+        walletAddress: '0x2222222222222222222222222222222222222222',
+      }) as typeof setup.verificationRequest.intent;
+      const mismatchedRequest = Object.freeze({
+        ...setup.verificationRequest,
+        intent: mismatchedIntent,
+      });
+      const mismatchedCapability = setup.verifier.issue(
+        mismatchedRequest,
+        signedVerificationResult(mismatchedRequest),
+      );
+      await expect(
+        setup.test.adapter.bindVerifiedSubmission(
+          verifiedBindRequest(
+            setup.prepared.result.cursor,
+            mismatchedRequest,
+            mismatchedCapability,
+          ),
+        ),
+      ).rejects.toThrow('database value is invalid');
+
+      expect(setup.test.query).toHaveBeenCalledTimes(1);
+    });
+
+    it('rejects unfrozen, aborted, stale-stage, repeated, and expired requests without a bind call', async () => {
+      const setup = await verifiedBindSetup();
+      await expect(setup.test.adapter.bindVerifiedSubmission({ ...setup.request })).rejects.toThrow(
+        'database value is invalid',
+      );
+
+      const abortController = new AbortController();
+      const abortedVerificationRequest = signedVerificationRequest(
+        setup.prepared,
+        abortController.signal,
+      );
+      const abortedCapability = setup.verifier.issue(
+        abortedVerificationRequest,
+        signedVerificationResult(abortedVerificationRequest),
+      );
+      abortController.abort();
+      await expect(
+        setup.test.adapter.bindVerifiedSubmission(
+          verifiedBindRequest(
+            setup.prepared.result.cursor,
+            abortedVerificationRequest,
+            abortedCapability,
+          ),
+        ),
+      ).rejects.toThrow('database value is invalid');
+
+      setup.test.clock.mockReturnValue(new Date(POST_EXPIRY_AT));
+      await expect(setup.test.adapter.bindVerifiedSubmission(setup.request)).rejects.toThrow(
+        'database value is invalid',
+      );
+      expect(setup.verifier.reviewCalls).toBe(0);
+      expect(setup.test.query).toHaveBeenCalledTimes(1);
+
+      const later = await verifiedBindSetup();
+      const bound = await bindConfirmed(later.test, later.prepared);
+      const lateVerificationRequest = signedVerificationRequest(
+        later.prepared,
+        bound.request.signal,
+      );
+      const lateCapability = later.verifier.issue(
+        lateVerificationRequest,
+        signedVerificationResult(lateVerificationRequest),
+      );
+      await expect(
+        later.test.adapter.bindVerifiedSubmission(
+          verifiedBindRequest(bound.result.cursor, lateVerificationRequest, lateCapability),
+        ),
+      ).rejects.toThrow('database value is invalid');
+      expect(later.test.query).toHaveBeenCalledTimes(2);
+    });
+
+    it('captures verifier methods and converts every post-verification database uncertainty to one-shot reconcile-only recovery', async () => {
+      const setup = await verifiedBindSetup();
+      Object.defineProperty(setup.verifier, 'reviewResult', {
+        configurable: true,
+        value: () => null,
+      });
+      rejectOnce(setup.test.query, new Error('postgres://must-not-escape'));
+
+      const capability = await setup.test.adapter.bindVerifiedSubmission(setup.request);
+      expect(setup.verifier.reviewCalls).toBe(1);
+      expect(setup.test.query).toHaveBeenCalledTimes(2);
+      expect(capability).not.toHaveProperty('wire');
+      expect(capability).not.toHaveProperty('walletAddress');
+      const result = setup.test.adapter.reviewVerifiedSubmissionBindResult(
+        capability,
+        setup.request,
+      );
+      expect(result).toMatchObject({
+        outcome: 'DATABASE_OUTCOME_UNKNOWN',
+        operation: 'BIND_SUBMISSION',
+        lastConfirmedCursor: setup.prepared.result.cursor,
+        recoveryMode: 'READ_THEN_RECONCILE_ONLY',
+        reconciliationOnly: true,
+        apiMaySign: false,
+        apiMayBroadcast: false,
+        mayResendTransaction: false,
+        automaticRetryAllowed: false,
+        ledgerSettlementAuthority: false,
+      });
+      expect(
+        setup.test.adapter.reviewVerifiedSubmissionBindResult(capability, setup.request),
+      ).toBeNull();
+      await expect(setup.test.adapter.bindVerifiedSubmission(setup.request)).rejects.toThrow(
+        'database value is invalid',
+      );
+      expect(setup.test.query).toHaveBeenCalledTimes(2);
+    });
+
+    it('sanitizes a captured clock failure before verifier or database I/O', async () => {
+      const setup = await verifiedBindSetup();
+      const queryCount = setup.test.query.mock.calls.length;
+      setup.test.clock.mockImplementation(() => {
+        throw new Error('postgres://clock-secret-must-not-escape');
+      });
+
+      let caught: unknown;
+      try {
+        await setup.test.adapter.bindVerifiedSubmission(setup.request);
+      } catch (error) {
+        caught = error;
+      }
+      expect(caught).toMatchObject({
+        code: 'INVALID_VERIFIED_BIND_SUBMISSION_REQUEST',
+        message: 'Dormant mainnet financial action database value is invalid.',
+      });
+      expect(String(caught)).not.toContain('clock-secret-must-not-escape');
+      expect(setup.verifier.reviewCalls).toBe(0);
+      expect(setup.test.query).toHaveBeenCalledTimes(queryCount);
+    });
+
+    it('preserves exact one-shot result provenance across capability copies, proxies, instances, and requests', async () => {
+      const setup = await verifiedBindSetup();
+      resolveOnce(
+        setup.test.query,
+        queryResult(boundRow(setup.prepared.request, ETHEREUM_TRANSACTION)),
+      );
+      const capability = await setup.test.adapter.bindVerifiedSubmission(setup.request);
+      const copiedCapability = frozenNull({
+        ...(capability as DormantMainnetVerifiedSubmissionBindCapabilityV1),
+      });
+      const proxiedCapability = new Proxy(capability as object, {});
+      const other = fixture();
+
+      expect(
+        setup.test.adapter.reviewVerifiedSubmissionBindResult(copiedCapability, setup.request),
+      ).toBeNull();
+      expect(
+        setup.test.adapter.reviewVerifiedSubmissionBindResult(proxiedCapability, setup.request),
+      ).toBeNull();
+      expect(
+        other.adapter.reviewVerifiedSubmissionBindResult(capability, setup.request),
+      ).toBeNull();
+
+      const copiedRequest = frozenNull({ ...setup.request });
+      expect(
+        setup.test.adapter.reviewVerifiedSubmissionBindResult(capability, copiedRequest),
+      ).toBeNull();
+      expect(
+        setup.test.adapter.reviewVerifiedSubmissionBindResult(capability, setup.request),
+      ).toBeNull();
+    });
+
+    it('returns read-then-reconcile-only when the exact signal aborts during the sole database call', async () => {
+      const setup = await verifiedBindSetup();
+      let rejectQuery: ((reason?: unknown) => void) | undefined;
+      setup.test.query.mockImplementationOnce(
+        () =>
+          new Promise((_resolve, reject) => {
+            rejectQuery = reject;
+          }),
+      );
+
+      const pending = setup.test.adapter.bindVerifiedSubmission(setup.request);
+      expect(setup.verifier.reviewCalls).toBe(1);
+      expect(setup.test.query).toHaveBeenCalledTimes(2);
+      setup.abortController.abort();
+      rejectQuery?.(new Error('cancelled after dispatch'));
+
+      const capability = await pending;
+      expect(
+        setup.test.adapter.reviewVerifiedSubmissionBindResult(capability, setup.request),
+      ).toMatchObject({
+        outcome: 'DATABASE_OUTCOME_UNKNOWN',
+        operation: 'BIND_SUBMISSION',
+        lastConfirmedCursor: setup.prepared.result.cursor,
+        recoveryMode: 'READ_THEN_RECONCILE_ONLY',
+        reconciliationOnly: true,
+        mayResendTransaction: false,
+        automaticRetryAllowed: false,
+      });
+      expect(setup.test.query).toHaveBeenCalledTimes(2);
+    });
   });
 });

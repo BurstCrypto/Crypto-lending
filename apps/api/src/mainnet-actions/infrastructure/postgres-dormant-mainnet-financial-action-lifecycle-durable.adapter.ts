@@ -10,6 +10,7 @@ import {
   activeWalletRegistrationKey,
   digestWalletIdentity,
   MAX_WALLET_REGISTRATION_KEYS_PER_PURPOSE,
+  walletRegistrationDigestEquals,
   walletRegistrationKeyForVersion,
   type WalletRegistrationDigestReference,
   type WalletRegistrationKeyRing,
@@ -40,6 +41,25 @@ import {
   type RecordDormantMainnetFinancialActionBroadcastRequestV1,
   type RecordDormantMainnetFinancialActionReconciliationRequestV1,
 } from '../application/ports/dormant-mainnet-financial-action-lifecycle-durable.port';
+import {
+  DORMANT_MAINNET_SIGNED_SUBMISSION_CAPABILITY_USE,
+  DORMANT_MAINNET_SIGNED_SUBMISSION_RESULT_USE,
+  DORMANT_MAINNET_SIGNED_SUBMISSION_VERIFICATION_USE,
+  DORMANT_MAINNET_SIGNED_SUBMISSION_VERIFIER_VERSION,
+  type DormantMainnetFinancialActionSignedSubmissionVerifierPort,
+  type DormantMainnetSignedSubmissionVerificationResultV1,
+  type VerifyDormantMainnetSignedSubmissionRequestV1,
+} from '../application/ports/dormant-mainnet-financial-action-signed-submission-verifier.port';
+import {
+  DORMANT_MAINNET_VERIFIED_SUBMISSION_BINDER_VERSION,
+  DORMANT_MAINNET_VERIFIED_SUBMISSION_BIND_CAPABILITY_USE,
+  DORMANT_MAINNET_VERIFIED_SUBMISSION_BIND_REQUEST_USE,
+  type BindDormantMainnetVerifiedSubmissionRequestV1,
+  type DormantMainnetFinancialActionVerifiedSubmissionBinderPort,
+  type DormantMainnetVerifiedSubmissionBindCapabilityV1,
+} from '../application/ports/dormant-mainnet-financial-action-verified-submission-binder.port';
+import { sha256Framed } from '../domain/mainnet-financial-action-signed-verification-digest';
+import { fingerprintDormantMainnetSignedVerificationIntent } from './mainnet-financial-action-write-manifest';
 
 const ETHEREUM_MAINNET = 'eip155:1' as const;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
@@ -101,6 +121,118 @@ const BIND_KEYS = Object.freeze([
   'walletSignedPayloadSha256',
   'walletSignatureEvidenceSha256',
   'signedAt',
+] as const);
+const VERIFIED_BIND_KEYS = Object.freeze([
+  'verifiedSubmissionBinderVersion',
+  'use',
+  'mayAuthorizeFinancialAction',
+  'mayPersist',
+  'cursor',
+  'verificationRequest',
+  'verificationCapability',
+  'correlationId',
+  'signal',
+] as const);
+const VERIFIED_BIND_CAPABILITY_KEYS = Object.freeze([
+  'verifiedSubmissionBinderVersion',
+  'use',
+  'mayAuthorizeFinancialAction',
+  'mayPersist',
+  'apiMaySign',
+  'apiMayBroadcast',
+  'mayResendTransaction',
+  'automaticRetryAllowed',
+] as const);
+const SIGNED_VERIFICATION_CAPABILITY_KEYS = Object.freeze([
+  'verifierVersion',
+  'use',
+  'mayAuthorizeFinancialAction',
+  'mayPersist',
+  'apiMaySign',
+  'apiMayBroadcast',
+] as const);
+const SIGNED_VERIFICATION_REQUEST_KEYS = Object.freeze([
+  'verifierVersion',
+  'use',
+  'mayAuthorizeFinancialAction',
+  'mayPersist',
+  'intentRecordFingerprintSha256',
+  'intent',
+  'wire',
+  'signal',
+] as const);
+const SIGNED_VERIFICATION_WIRE_KEYS = Object.freeze([
+  'networkId',
+  'encoding',
+  'signedTransaction',
+] as const);
+const SIGNED_VERIFICATION_INTENT_KEYS = Object.freeze([
+  'schemaVersion',
+  'use',
+  'mayAuthorizeFinancialAction',
+  'intentId',
+  'accountId',
+  'walletRegistrationId',
+  'replayProtectionId',
+  'idempotencyKeyDigestSha256',
+  'networkId',
+  'walletAddress',
+  'providerId',
+  'protocolId',
+  'marketId',
+  'assetRegistryVersion',
+  'assetRegistryFingerprintSha256',
+  'assetSymbol',
+  'assetIdentity',
+  'assetDecimals',
+  'action',
+  'amountAtomic',
+  'requestedValueUsdMicros',
+  'maximumNetworkFeeAtomic',
+  'maximumNetworkFeeBasisPoints',
+  'minimumPostActionNativeBalanceAtomic',
+  'allowanceMode',
+  'allowanceAmountAtomic',
+  'issuedAt',
+  'expiresAt',
+  'signingResponsibility',
+  'broadcastResponsibility',
+  'apiMaySign',
+  'apiMayBroadcast',
+  'crossChainExecutionAllowed',
+  'automaticResendAllowed',
+  'automaticFeeEscalationAllowed',
+  'durableReplayProtectionVerified',
+] as const);
+const SIGNED_VERIFICATION_RESULT_KEYS = Object.freeze([
+  'verifierVersion',
+  'use',
+  'mayAuthorizeFinancialAction',
+  'mayPersist',
+  'apiMaySign',
+  'apiMayBroadcast',
+  'mayResendTransaction',
+  'automaticRetryAllowed',
+  'dynamicChainStateVerified',
+  'providerDeploymentVerified',
+  'currentNonceOrBlockhashVerified',
+  'walletBalanceVerified',
+  'intentId',
+  'intentRecordFingerprintSha256',
+  'verificationIntentFingerprintSha256',
+  'networkId',
+  'transactionId',
+  'signerWalletAddress',
+  'signatureScheme',
+  'signedEnvelopeSha256',
+  'signingPayloadSha256',
+  'signatureEvidenceSha256',
+  'chainReplayIdentitySha256',
+  'providerWriteManifestFingerprintSha256',
+  'providerActionBindingSha256',
+  'ethereumNonce',
+  'solanaRecentBlockhash',
+  'staticCommandVerification',
 ] as const);
 const BROADCAST_KEYS = Object.freeze([
   ...REQUEST_COMMON_KEYS,
@@ -229,6 +361,7 @@ const PROVIDER_BINDINGS = new Set([
 type DormantMainnetFinancialActionLifecycleDatabaseCodecErrorCode =
   | 'INVALID_PREPARE_REQUEST'
   | 'INVALID_BIND_SUBMISSION_REQUEST'
+  | 'INVALID_VERIFIED_BIND_SUBMISSION_REQUEST'
   | 'INVALID_BROADCAST_REQUEST'
   | 'INVALID_RECONCILIATION_REQUEST'
   | 'INVALID_READ_REQUEST'
@@ -282,6 +415,22 @@ interface CursorDatabaseArgumentsV1 {
   readonly intentId: string;
   readonly expectedRevision: string;
   readonly expectedSnapshotSha256: string;
+}
+
+interface VerifiedBindDatabaseArgumentsV1 extends CursorDatabaseArgumentsV1 {
+  readonly transactionId: string;
+  readonly signingPayloadSha256: string;
+  readonly signatureEvidenceSha256: string;
+  readonly correlationId: string;
+  readonly verifierVersion: number;
+  readonly verificationIntentFingerprintSha256: string;
+  readonly signedEnvelopeSha256: string;
+  readonly providerWriteManifestFingerprintSha256: string;
+  readonly providerActionBindingSha256: string;
+  readonly chainReplayIdentitySha256: string;
+  readonly signatureScheme: 'ECDSA_SECP256K1_EIP1559' | 'ED25519_SOLANA_TRANSACTION';
+  readonly ethereumNonce: string | null;
+  readonly solanaRecentBlockhash: string | null;
 }
 
 interface CursorMetadata {
@@ -391,6 +540,13 @@ type DormantMainnetFinancialActionLifecycleDatabaseCommandV1 =
       >;
     }>
   | Readonly<{
+      operation: 'BIND_VERIFIED_SUBMISSION';
+      cursor: DormantMainnetFinancialActionClmaDatabaseCursorV1;
+      signal: AbortSignal;
+      requestBindingSha256: string;
+      arguments: Readonly<VerifiedBindDatabaseArgumentsV1>;
+    }>
+  | Readonly<{
       operation: 'RECORD_BROADCAST';
       request: RecordDormantMainnetFinancialActionBroadcastRequestV1;
       cursor: DormantMainnetFinancialActionClmaDatabaseCursorV1;
@@ -459,6 +615,25 @@ class DormantMainnetFinancialActionLifecycleDatabaseCodec {
     readonly operation: 'BIND_SUBMISSION';
   } {
     return encodeBindSubmission(this.#cursorMetadata, value);
+  }
+
+  encodeVerifiedBindSubmission(
+    value: unknown,
+    serverNow: () => unknown,
+    reviewVerifierResult: (
+      capability: unknown,
+      request: VerifyDormantMainnetSignedSubmissionRequestV1,
+    ) => DormantMainnetSignedSubmissionVerificationResultV1 | null,
+  ): DormantMainnetFinancialActionLifecycleDatabaseCommandV1 & {
+    readonly operation: 'BIND_VERIFIED_SUBMISSION';
+  } {
+    return encodeVerifiedBindSubmission(
+      this.#cursorMetadata,
+      value,
+      serverNow,
+      this.#walletIdentityKeyRing,
+      reviewVerifierResult,
+    );
   }
 
   encodeBroadcast(value: unknown): DormantMainnetFinancialActionLifecycleDatabaseCommandV1 & {
@@ -751,6 +926,358 @@ function encodeBindSubmission(
   });
 }
 
+/**
+ * Reviews and consumes one verifier-issued capability before producing the
+ * digest-only migration-0039 argument set. No signed wire crosses this codec.
+ */
+function encodeVerifiedBindSubmission(
+  cursorMetadata: WeakMap<object, CursorMetadata>,
+  value: unknown,
+  serverNow: () => unknown,
+  walletIdentityKeyRing: WalletRegistrationKeyRing<'identity-hmac'>,
+  reviewVerifierResult: (
+    capability: unknown,
+    request: VerifyDormantMainnetSignedSubmissionRequestV1,
+  ) => DormantMainnetSignedSubmissionVerificationResultV1 | null,
+): DormantMainnetFinancialActionLifecycleDatabaseCommandV1 & {
+  readonly operation: 'BIND_VERIFIED_SUBMISSION';
+} {
+  const code = 'INVALID_VERIFIED_BIND_SUBMISSION_REQUEST' as const;
+  const record = exactFrozenRecord(value, VERIFIED_BIND_KEYS, code);
+  if (
+    record.verifiedSubmissionBinderVersion !== DORMANT_MAINNET_VERIFIED_SUBMISSION_BINDER_VERSION ||
+    record.use !== DORMANT_MAINNET_VERIFIED_SUBMISSION_BIND_REQUEST_USE ||
+    record.mayAuthorizeFinancialAction !== false ||
+    record.mayPersist !== false
+  ) {
+    return invalid(code);
+  }
+  const signal = activeNativeAbortSignal(record.signal, code);
+  const reviewedCursor = reviewCursor(cursorMetadata, record.cursor);
+  if (
+    reviewedCursor.metadata.stage !== 'PREPARED' ||
+    reviewedCursor.metadata.terminal ||
+    reviewedCursor.metadata.chainTransactionId !== null ||
+    reviewedCursor.metadata.submissionFingerprintSha256 !== null ||
+    reviewedCursor.cursor.lifecycleRevision !== '1'
+  ) {
+    return invalid(code);
+  }
+
+  const verificationRequestRecord = exactFrozenRecord(
+    record.verificationRequest,
+    SIGNED_VERIFICATION_REQUEST_KEYS,
+    code,
+  );
+  const verificationIntentRecord = exactFrozenRecord(
+    verificationRequestRecord.intent,
+    SIGNED_VERIFICATION_INTENT_KEYS,
+    code,
+  );
+  const verificationWireRecord = exactFrozenRecord(
+    verificationRequestRecord.wire,
+    SIGNED_VERIFICATION_WIRE_KEYS,
+    code,
+  );
+  const verificationRequest =
+    record.verificationRequest as VerifyDormantMainnetSignedSubmissionRequestV1;
+  if (
+    verificationRequestRecord.verifierVersion !==
+      DORMANT_MAINNET_SIGNED_SUBMISSION_VERIFIER_VERSION ||
+    verificationRequestRecord.use !== DORMANT_MAINNET_SIGNED_SUBMISSION_VERIFICATION_USE ||
+    verificationRequestRecord.mayAuthorizeFinancialAction !== false ||
+    verificationRequestRecord.mayPersist !== false ||
+    digest(verificationRequestRecord.intentRecordFingerprintSha256, code) !==
+      reviewedCursor.cursor.intentRecordFingerprintSha256 ||
+    verificationRequestRecord.signal !== signal ||
+    verificationWireRecord.networkId !== reviewedCursor.cursor.networkId ||
+    (reviewedCursor.cursor.networkId === ETHEREUM_MAINNET
+      ? verificationWireRecord.encoding !== 'LOWERCASE_0X_HEX'
+      : verificationWireRecord.encoding !== 'CANONICAL_BASE64') ||
+    typeof verificationWireRecord.signedTransaction !== 'string' ||
+    verificationWireRecord.signedTransaction.length < 1
+  ) {
+    return invalid(code);
+  }
+  const intent = verificationRequestRecord.intent as DormantMainnetFinancialActionIntentV1;
+  reviewVerifiedIntentBinding(reviewedCursor, verificationIntentRecord, intent, code);
+
+  const startedAt = timestamp(serverNow(), code);
+  const expiresAtMilliseconds = Date.parse(
+    reviewedCursor.metadata.authoritativeIntentAnchor.expiresAt,
+  );
+  if (
+    Date.parse(startedAt) < Date.parse(reviewedCursor.metadata.recordedAt) ||
+    Date.parse(startedAt) >= expiresAtMilliseconds
+  ) {
+    return invalid(code);
+  }
+  const correlationId = uuid(record.correlationId, code);
+  reviewOpaqueVerifierCapability(record.verificationCapability, code);
+
+  let reviewedResult: DormantMainnetSignedSubmissionVerificationResultV1 | null;
+  try {
+    reviewedResult = reviewVerifierResult(record.verificationCapability, verificationRequest);
+  } catch {
+    return invalid(code);
+  }
+  if (reviewedResult === null || isAborted(signal)) return invalid(code);
+  const completedAt = timestamp(serverNow(), code);
+  if (
+    Date.parse(completedAt) < Date.parse(startedAt) ||
+    Date.parse(completedAt) >= expiresAtMilliseconds
+  ) {
+    return invalid(code);
+  }
+  const argumentsValue = reviewSignedVerificationResult(
+    reviewedResult,
+    verificationRequest,
+    reviewedCursor,
+    walletIdentityKeyRing,
+    correlationId,
+    code,
+  );
+  if (isAborted(signal)) return invalid(code);
+  const request = value as BindDormantMainnetVerifiedSubmissionRequestV1;
+  return Object.freeze({
+    operation: 'BIND_VERIFIED_SUBMISSION' as const,
+    cursor: reviewedCursor.cursor,
+    signal,
+    requestBindingSha256: verifiedBindRequestSha256(request),
+    arguments: argumentsValue,
+  });
+}
+
+function reviewVerifiedIntentBinding(
+  reviewedCursor: ReviewedCursor,
+  record: Record<string, unknown>,
+  intent: DormantMainnetFinancialActionIntentV1,
+  code: DormantMainnetFinancialActionLifecycleDatabaseCodecErrorCode,
+): void {
+  const anchor = reviewedCursor.metadata.authoritativeIntentAnchor;
+  if (
+    record.schemaVersion !== 1 ||
+    record.use !== 'DORMANT_MAINNET_FINANCIAL_ACTION_INTENT_VALIDATION_ONLY' ||
+    record.mayAuthorizeFinancialAction !== false ||
+    record.signingResponsibility !== 'USER_WALLET_ONLY' ||
+    record.broadcastResponsibility !== 'USER_WALLET_ONLY' ||
+    record.apiMaySign !== false ||
+    record.apiMayBroadcast !== false ||
+    record.crossChainExecutionAllowed !== false ||
+    record.automaticResendAllowed !== false ||
+    record.automaticFeeEscalationAllowed !== false ||
+    record.durableReplayProtectionVerified !== false ||
+    record.intentId !== reviewedCursor.cursor.intentId ||
+    record.accountId !== reviewedCursor.cursor.accountId ||
+    record.networkId !== reviewedCursor.cursor.networkId ||
+    record.walletRegistrationId !== anchor.walletId ||
+    record.providerId !== anchor.providerId ||
+    record.protocolId !== anchor.protocolId ||
+    record.marketId !== anchor.marketId ||
+    record.assetRegistryVersion !== anchor.assetRegistryVersion ||
+    record.assetRegistryFingerprintSha256 !== anchor.assetRegistryFingerprintSha256 ||
+    record.assetSymbol !== anchor.assetSymbol ||
+    record.assetIdentity !== anchor.assetIdentity ||
+    record.assetDecimals !== anchor.assetDecimals ||
+    record.action !== anchor.actionType ||
+    record.amountAtomic !== anchor.amountAtomic ||
+    record.requestedValueUsdMicros !== anchor.requestedValueUsdMicros ||
+    record.maximumNetworkFeeAtomic !== anchor.maximumNetworkFeeAtomic ||
+    record.maximumNetworkFeeBasisPoints !== anchor.maximumNetworkFeeBasisPoints ||
+    record.minimumPostActionNativeBalanceAtomic !== anchor.minimumPostActionNativeBalanceAtomic ||
+    record.allowanceMode !== anchor.allowanceMode ||
+    record.allowanceAmountAtomic !== anchor.allowanceAmountAtomic ||
+    record.idempotencyKeyDigestSha256 !== anchor.idempotencyKeyDigestSha256 ||
+    record.replayProtectionId !== anchor.replayProtectionId ||
+    record.expiresAt !== anchor.expiresAt ||
+    typeof record.issuedAt !== 'string' ||
+    typeof record.walletAddress !== 'string'
+  ) {
+    return invalid(code);
+  }
+  try {
+    if (
+      fingerprintDormantMainnetSignedVerificationIntent(
+        reviewedCursor.cursor.intentRecordFingerprintSha256,
+        intent,
+      ).length !== 64
+    ) {
+      return invalid(code);
+    }
+  } catch {
+    return invalid(code);
+  }
+}
+
+function reviewOpaqueVerifierCapability(
+  value: unknown,
+  code: DormantMainnetFinancialActionLifecycleDatabaseCodecErrorCode,
+): void {
+  const record = exactFrozenRecord(value, SIGNED_VERIFICATION_CAPABILITY_KEYS, code);
+  if (
+    record.verifierVersion !== DORMANT_MAINNET_SIGNED_SUBMISSION_VERIFIER_VERSION ||
+    record.use !== DORMANT_MAINNET_SIGNED_SUBMISSION_CAPABILITY_USE ||
+    record.mayAuthorizeFinancialAction !== false ||
+    record.mayPersist !== false ||
+    record.apiMaySign !== false ||
+    record.apiMayBroadcast !== false
+  ) {
+    return invalid(code);
+  }
+}
+
+function reviewSignedVerificationResult(
+  value: unknown,
+  verificationRequest: VerifyDormantMainnetSignedSubmissionRequestV1,
+  reviewedCursor: ReviewedCursor,
+  walletIdentityKeyRing: WalletRegistrationKeyRing<'identity-hmac'>,
+  correlationId: string,
+  code: DormantMainnetFinancialActionLifecycleDatabaseCodecErrorCode,
+): Readonly<VerifiedBindDatabaseArgumentsV1> {
+  const record = exactFrozenRecord(value, SIGNED_VERIFICATION_RESULT_KEYS, code);
+  const intent = verificationRequest.intent;
+  const expectedVerificationIntentFingerprint = fingerprintDormantMainnetSignedVerificationIntent(
+    reviewedCursor.cursor.intentRecordFingerprintSha256,
+    intent,
+  );
+  if (
+    record.verifierVersion !== DORMANT_MAINNET_SIGNED_SUBMISSION_VERIFIER_VERSION ||
+    record.use !== DORMANT_MAINNET_SIGNED_SUBMISSION_RESULT_USE ||
+    record.mayAuthorizeFinancialAction !== false ||
+    record.mayPersist !== false ||
+    record.apiMaySign !== false ||
+    record.apiMayBroadcast !== false ||
+    record.mayResendTransaction !== false ||
+    record.automaticRetryAllowed !== false ||
+    record.dynamicChainStateVerified !== false ||
+    record.providerDeploymentVerified !== false ||
+    record.currentNonceOrBlockhashVerified !== false ||
+    record.walletBalanceVerified !== false ||
+    record.intentId !== reviewedCursor.cursor.intentId ||
+    record.intentRecordFingerprintSha256 !== reviewedCursor.cursor.intentRecordFingerprintSha256 ||
+    record.verificationIntentFingerprintSha256 !== expectedVerificationIntentFingerprint ||
+    record.networkId !== reviewedCursor.cursor.networkId ||
+    record.signerWalletAddress !== intent.walletAddress ||
+    record.staticCommandVerification !== 'CRYPTOGRAPHIC_SIGNATURE_AND_EXACT_MANIFEST_MATCH'
+  ) {
+    return invalid(code);
+  }
+
+  const transactionId = chainIdentity(
+    reviewedCursor.cursor.networkId,
+    record.transactionId,
+    'TRANSACTION',
+    code,
+  );
+  const signedEnvelopeSha256 = digest(record.signedEnvelopeSha256, code);
+  const signingPayloadSha256 = digest(record.signingPayloadSha256, code);
+  const signatureEvidenceSha256 = digest(record.signatureEvidenceSha256, code);
+  const chainReplayIdentitySha256 = digest(record.chainReplayIdentitySha256, code);
+  const providerWriteManifestFingerprintSha256 = digest(
+    record.providerWriteManifestFingerprintSha256,
+    code,
+  );
+  const providerActionBindingSha256 = digest(record.providerActionBindingSha256, code);
+  if (
+    signingPayloadSha256 === signatureEvidenceSha256 ||
+    new Set([
+      signedEnvelopeSha256,
+      signingPayloadSha256,
+      signatureEvidenceSha256,
+      chainReplayIdentitySha256,
+      providerWriteManifestFingerprintSha256,
+      providerActionBindingSha256,
+    ]).size !== 6
+  ) {
+    return invalid(code);
+  }
+
+  let signatureScheme: VerifiedBindDatabaseArgumentsV1['signatureScheme'];
+  let ethereumNonce: string | null;
+  let solanaRecentBlockhash: string | null;
+  if (reviewedCursor.cursor.networkId === ETHEREUM_MAINNET) {
+    if (
+      record.signatureScheme !== 'ECDSA_SECP256K1_EIP1559' ||
+      record.solanaRecentBlockhash !== null
+    ) {
+      return invalid(code);
+    }
+    signatureScheme = 'ECDSA_SECP256K1_EIP1559';
+    ethereumNonce = uint64(record.ethereumNonce, code);
+    solanaRecentBlockhash = null;
+  } else {
+    if (record.signatureScheme !== 'ED25519_SOLANA_TRANSACTION' || record.ethereumNonce !== null) {
+      return invalid(code);
+    }
+    signatureScheme = 'ED25519_SOLANA_TRANSACTION';
+    ethereumNonce = null;
+    solanaRecentBlockhash = chainIdentity(
+      reviewedCursor.cursor.networkId,
+      record.solanaRecentBlockhash,
+      'BLOCK',
+      code,
+    );
+  }
+
+  const anchor = reviewedCursor.metadata.authoritativeIntentAnchor;
+  let walletDigest: WalletRegistrationDigestReference<'address'>;
+  try {
+    walletDigest = digestWalletIdentity(
+      walletRegistrationKeyForVersion(walletIdentityKeyRing, anchor.walletIdentityDigestVersion),
+      reviewedCursor.cursor.networkId,
+      intent.walletAddress,
+    );
+  } catch {
+    return invalid(code);
+  }
+  if (
+    !walletRegistrationDigestEquals(walletDigest, {
+      version: anchor.walletIdentityDigestVersion,
+      value:
+        anchor.walletIdentityDigestHex as WalletRegistrationDigestReference<'address'>['value'],
+    })
+  ) {
+    return invalid(code);
+  }
+
+  return Object.freeze({
+    ...cursorArguments(reviewedCursor.cursor),
+    transactionId,
+    signingPayloadSha256,
+    signatureEvidenceSha256,
+    correlationId,
+    verifierVersion: DORMANT_MAINNET_SIGNED_SUBMISSION_VERIFIER_VERSION,
+    verificationIntentFingerprintSha256: expectedVerificationIntentFingerprint,
+    signedEnvelopeSha256,
+    providerWriteManifestFingerprintSha256,
+    providerActionBindingSha256,
+    chainReplayIdentitySha256,
+    signatureScheme,
+    ethereumNonce,
+    solanaRecentBlockhash,
+  });
+}
+
+function verifiedBindRequestSha256(request: BindDormantMainnetVerifiedSubmissionRequestV1): string {
+  const verification = request.verificationRequest;
+  return sha256Framed('CLMA-VERIFIED-SUBMISSION-BINDER-REQUEST-1', [
+    request.cursor.accountId,
+    request.cursor.intentId,
+    request.cursor.networkId,
+    request.cursor.lifecycleRevision,
+    request.cursor.currentSnapshotSha256,
+    request.cursor.intentRecordFingerprintSha256,
+    request.correlationId,
+    fingerprintDormantMainnetSignedVerificationIntent(
+      verification.intentRecordFingerprintSha256,
+      verification.intent,
+    ),
+    verification.wire.networkId,
+    verification.wire.encoding,
+    sha256Framed('CLMA-TRANSIENT-SIGNED-WIRE-1', [verification.wire.signedTransaction]),
+  ]);
+}
+
 /** Pure pre-I/O encoder; it records wallet evidence but grants no broadcast authority. */
 function encodeBroadcast(
   cursorMetadata: WeakMap<object, CursorMetadata>,
@@ -932,7 +1459,10 @@ function decodeDatabaseResult(
   value: unknown,
 ): DormantMainnetFinancialActionDatabaseConfirmedResultV1 {
   const code = 'INVALID_DATABASE_RESULT' as const;
-  const operation = command.operation;
+  const operation =
+    command.operation === 'BIND_VERIFIED_SUBMISSION'
+      ? ('BIND_SUBMISSION' as const)
+      : command.operation;
   const row = exactRecord(value, RESULT_ROW_KEYS, code);
   if (
     !(['RECORDED', 'REPLAYED', 'READ'] as readonly unknown[]).includes(row.record_outcome) ||
@@ -1193,15 +1723,22 @@ function databaseOutcomeUnknown(
   cursorMetadata: WeakMap<object, CursorMetadata>,
   command: DormantMainnetFinancialActionLifecycleDatabaseCommandV1,
 ): DormantMainnetFinancialActionDatabaseOutcomeUnknownV1 {
-  const operation = command.operation;
+  const operation =
+    command.operation === 'BIND_VERIFIED_SUBMISSION'
+      ? ('BIND_SUBMISSION' as const)
+      : command.operation;
   if (!OPERATIONS.includes(operation)) return invalid('INVALID_DATABASE_RESULT');
   const postWallet =
     operation === 'BIND_SUBMISSION' ||
     operation === 'RECORD_BROADCAST' ||
     operation === 'RECORD_RECONCILIATION';
-  const lastConfirmedCursor = postWallet
-    ? reviewCursor(cursorMetadata, command.cursor).cursor
-    : null;
+  const lastConfirmedCursor =
+    command.operation === 'BIND_SUBMISSION' ||
+    command.operation === 'BIND_VERIFIED_SUBMISSION' ||
+    command.operation === 'RECORD_BROADCAST' ||
+    command.operation === 'RECORD_RECONCILIATION'
+      ? reviewCursor(cursorMetadata, command.cursor).cursor
+      : null;
   const common = {
     durableLifecycleVersion: DORMANT_MAINNET_FINANCIAL_ACTION_DURABLE_LIFECYCLE_VERSION,
     use: DORMANT_MAINNET_FINANCIAL_ACTION_DURABLE_RESULT_USE,
@@ -1359,6 +1896,23 @@ function reviewCommandResultBinding(
       (binding.stage === 'WALLET_SIGNED_SUBMISSION_BOUND' &&
         (BigInt(binding.lifecycleRevision) !== BigInt(args.expectedRevision) + 1n ||
           binding.effectiveAt !== args.signedAt))
+    ) {
+      return invalid(code);
+    }
+    return;
+  }
+
+  if (command.operation === 'BIND_VERIFIED_SUBMISSION') {
+    const args = command.arguments;
+    if (
+      binding.stage === 'PREPARED' ||
+      binding.chainTransactionId !== args.transactionId ||
+      binding.submissionFingerprintSha256 === null ||
+      BigInt(binding.lifecycleRevision) < BigInt(args.expectedRevision) + 1n ||
+      (binding.recordOutcome === 'RECORDED' &&
+        binding.stage !== 'WALLET_SIGNED_SUBMISSION_BOUND') ||
+      (binding.stage === 'WALLET_SIGNED_SUBMISSION_BOUND' &&
+        BigInt(binding.lifecycleRevision) !== BigInt(args.expectedRevision) + 1n)
     ) {
       return invalid(code);
     }
@@ -1849,6 +2403,55 @@ function exactRecord(
   }
 }
 
+function exactFrozenRecord(
+  value: unknown,
+  expectedKeys: readonly string[],
+  code: DormantMainnetFinancialActionLifecycleDatabaseCodecErrorCode,
+): Record<string, unknown> {
+  try {
+    if (
+      typeof value !== 'object' ||
+      value === null ||
+      isProxy(value) ||
+      Array.isArray(value) ||
+      !Object.isFrozen(value)
+    ) {
+      return invalid(code);
+    }
+    const prototype = Object.getPrototypeOf(value);
+    if (prototype !== Object.prototype && prototype !== null) return invalid(code);
+    const descriptors = Object.getOwnPropertyDescriptors(value) as unknown as Record<
+      PropertyKey,
+      PropertyDescriptor | undefined
+    >;
+    const keys = Reflect.ownKeys(descriptors);
+    if (
+      keys.length !== expectedKeys.length ||
+      keys.some((key) => typeof key !== 'string' || !expectedKeys.includes(key))
+    ) {
+      return invalid(code);
+    }
+    const record = Object.create(null) as Record<string, unknown>;
+    for (const key of expectedKeys) {
+      const descriptor = descriptors[key];
+      if (
+        descriptor === undefined ||
+        !descriptor.enumerable ||
+        descriptor.configurable ||
+        !('value' in descriptor) ||
+        descriptor.writable
+      ) {
+        return invalid(code);
+      }
+      record[key] = descriptor.value;
+    }
+    return record;
+  } catch (error) {
+    if (error instanceof DormantMainnetFinancialActionLifecycleDatabaseCodecError) throw error;
+    return invalid(code);
+  }
+}
+
 function dataProperty(
   descriptor: PropertyDescriptor | undefined,
   code: DormantMainnetFinancialActionLifecycleDatabaseCodecErrorCode,
@@ -1876,6 +2479,20 @@ function activeAbortSignal(
       return invalid(code);
     }
     return value;
+  } catch (error) {
+    if (error instanceof DormantMainnetFinancialActionLifecycleDatabaseCodecError) throw error;
+    return invalid(code);
+  }
+}
+
+function activeNativeAbortSignal(
+  value: unknown,
+  code: DormantMainnetFinancialActionLifecycleDatabaseCodecErrorCode,
+): AbortSignal {
+  const signal = activeAbortSignal(value, code);
+  try {
+    if (Object.getPrototypeOf(signal) !== AbortSignal.prototype) return invalid(code);
+    return signal;
   } catch (error) {
     if (error instanceof DormantMainnetFinancialActionLifecycleDatabaseCodecError) throw error;
     return invalid(code);
@@ -2111,7 +2728,12 @@ function invalid(code: DormantMainnetFinancialActionLifecycleDatabaseCodecErrorC
 
 type QueryWithCancellation = PostgresService['queryWithCancellation'];
 type DatabaseMethod =
-  'prepare' | 'bindSubmission' | 'recordBroadcast' | 'recordReconciliation' | 'read';
+  | 'prepare'
+  | 'bindSubmission'
+  | 'bindVerifiedSubmission'
+  | 'recordBroadcast'
+  | 'recordReconciliation'
+  | 'read';
 
 export interface DormantMainnetFinancialActionLifecycleClock {
   now(): unknown;
@@ -2125,6 +2747,21 @@ interface CapturedMethod<Method extends (...arguments_: never[]) => unknown> {
 interface IssuedResult {
   readonly method: DatabaseMethod;
   readonly request: DormantMainnetFinancialActionDurableRequestV1;
+  readonly signal: AbortSignal;
+  readonly result: DormantMainnetFinancialActionDurableResultV1;
+}
+
+interface CapturedSignedSubmissionVerifier {
+  readonly receiver: object;
+  readonly verifierVersion: typeof DORMANT_MAINNET_SIGNED_SUBMISSION_VERIFIER_VERSION;
+  readonly verify: DormantMainnetFinancialActionSignedSubmissionVerifierPort['verifySubmission'];
+  readonly review: DormantMainnetFinancialActionSignedSubmissionVerifierPort['reviewResult'];
+}
+
+interface IssuedVerifiedBindResult {
+  readonly capability: DormantMainnetVerifiedSubmissionBindCapabilityV1;
+  readonly request: WeakRef<BindDormantMainnetVerifiedSubmissionRequestV1>;
+  readonly requestBindingSha256: string;
   readonly signal: AbortSignal;
   readonly result: DormantMainnetFinancialActionDurableResultV1;
 }
@@ -2206,6 +2843,13 @@ FROM bind_mainnet_financial_action_submission(
   $8::timestamptz, $9::uuid
 ) AS result`;
 
+const BIND_VERIFIED_SUBMISSION_SQL = `SELECT ${RESULT_PROJECTION}
+FROM bind_verified_mainnet_financial_action_submission_v2(
+  $1::uuid, $2::uuid, $3::bigint, $4::text, $5::text, $6::text, $7::text,
+  $8::uuid, $9::smallint, $10::text, $11::text, $12::text, $13::text,
+  $14::text, $15::text, $16::numeric, $17::text
+) AS result`;
+
 const RECORD_BROADCAST_SQL = `SELECT ${RESULT_PROJECTION}
 FROM record_mainnet_financial_action_broadcast_observation(
   $1::uuid, $2::uuid, $3::bigint, $4::text, $5::uuid, $6::text, $7::text,
@@ -2227,8 +2871,13 @@ FROM read_mainnet_financial_action_lifecycle($1::uuid, $2::uuid) AS result`;
  * and unregistered, owns no signer/broadcaster, and performs one database call
  * per invocation with no loop or automatic retry.
  */
-export class PostgresDormantMainnetFinancialActionLifecycleDurableAdapter implements DormantMainnetFinancialActionLifecycleDurablePort {
+export class PostgresDormantMainnetFinancialActionLifecycleDurableAdapter
+  implements
+    DormantMainnetFinancialActionLifecycleDurablePort,
+    DormantMainnetFinancialActionVerifiedSubmissionBinderPort
+{
   readonly durableLifecycleVersion = DORMANT_MAINNET_FINANCIAL_ACTION_DURABLE_LIFECYCLE_VERSION;
+  readonly verifiedSubmissionBinderVersion = DORMANT_MAINNET_VERIFIED_SUBMISSION_BINDER_VERSION;
 
   readonly #databaseReceiver: object;
   readonly #databaseQuery: QueryWithCancellation;
@@ -2237,11 +2886,15 @@ export class PostgresDormantMainnetFinancialActionLifecycleDurableAdapter implem
   readonly #codec: DormantMainnetFinancialActionLifecycleDatabaseCodec;
   readonly #issuedResults = new WeakMap<object, IssuedResult>();
   readonly #requestMethods = new WeakMap<object, DatabaseMethod>();
+  readonly #signedSubmissionVerifier: CapturedSignedSubmissionVerifier | null;
+  readonly #startedVerifiedBindRequests = new WeakSet<object>();
+  readonly #issuedVerifiedBindResults = new WeakMap<object, IssuedVerifiedBindResult>();
 
   constructor(
     postgres: PostgresService,
     clock: DormantMainnetFinancialActionLifecycleClock,
     walletIdentityKeyRing: WalletRegistrationKeyRing<'identity-hmac'>,
+    signedSubmissionVerifier?: DormantMainnetFinancialActionSignedSubmissionVerifierPort,
   ) {
     const database = captureMethod<QueryWithCancellation>(postgres, 'queryWithCancellation');
     const capturedClock = captureMethod<DormantMainnetFinancialActionLifecycleClock['now']>(
@@ -2255,6 +2908,10 @@ export class PostgresDormantMainnetFinancialActionLifecycleDurableAdapter implem
     this.#codec = new DormantMainnetFinancialActionLifecycleDatabaseCodec(
       captureWalletIdentityKeyRing(walletIdentityKeyRing),
     );
+    this.#signedSubmissionVerifier =
+      signedSubmissionVerifier === undefined
+        ? null
+        : captureSignedSubmissionVerifier(signedSubmissionVerifier);
   }
 
   async prepare(request: PrepareDormantMainnetFinancialActionDurableRequestV1): Promise<unknown> {
@@ -2266,6 +2923,40 @@ export class PostgresDormantMainnetFinancialActionLifecycleDurableAdapter implem
     request: BindDormantMainnetFinancialActionSubmissionRequestV1,
   ): Promise<unknown> {
     return this.#execute('bindSubmission', request, this.#codec.encodeBindSubmission(request));
+  }
+
+  bindVerifiedSubmission(request: BindDormantMainnetVerifiedSubmissionRequestV1): Promise<unknown> {
+    try {
+      const verifier = this.#signedSubmissionVerifier;
+      if (
+        verifier === null ||
+        typeof request !== 'object' ||
+        request === null ||
+        isProxy(request) ||
+        this.#startedVerifiedBindRequests.has(request)
+      ) {
+        return invalid('INVALID_VERIFIED_BIND_SUBMISSION_REQUEST');
+      }
+      this.#startedVerifiedBindRequests.add(request);
+      const command = this.#codec.encodeVerifiedBindSubmission(
+        request,
+        () => Reflect.apply(this.#clockNow, this.#clockReceiver, []) as unknown,
+        (capability, verificationRequest) =>
+          Reflect.apply(verifier.review, verifier.receiver, [
+            capability,
+            verificationRequest,
+          ]) as DormantMainnetSignedSubmissionVerificationResultV1 | null,
+      );
+      return this.#executeVerifiedBind(new WeakRef(request), command);
+    } catch (error) {
+      return Promise.reject(
+        error instanceof DormantMainnetFinancialActionLifecycleDatabaseCodecError
+          ? error
+          : new DormantMainnetFinancialActionLifecycleDatabaseCodecError(
+              'INVALID_VERIFIED_BIND_SUBMISSION_REQUEST',
+            ),
+      );
+    }
   }
 
   async recordBroadcast(
@@ -2321,6 +3012,124 @@ export class PostgresDormantMainnetFinancialActionLifecycleDurableAdapter implem
     } catch {
       return null;
     }
+  }
+
+  reviewVerifiedSubmissionBindResult(
+    capability: unknown,
+    request: BindDormantMainnetVerifiedSubmissionRequestV1,
+  ): DormantMainnetFinancialActionDurableResultV1 | null {
+    try {
+      if (
+        typeof capability !== 'object' ||
+        capability === null ||
+        isProxy(capability) ||
+        typeof request !== 'object' ||
+        request === null ||
+        isProxy(request)
+      ) {
+        return null;
+      }
+      const capabilityRecord = exactFrozenRecord(
+        capability,
+        VERIFIED_BIND_CAPABILITY_KEYS,
+        'INVALID_VERIFIED_BIND_SUBMISSION_REQUEST',
+      );
+      if (
+        capabilityRecord.verifiedSubmissionBinderVersion !==
+          DORMANT_MAINNET_VERIFIED_SUBMISSION_BINDER_VERSION ||
+        capabilityRecord.use !== DORMANT_MAINNET_VERIFIED_SUBMISSION_BIND_CAPABILITY_USE ||
+        capabilityRecord.mayAuthorizeFinancialAction !== false ||
+        capabilityRecord.mayPersist !== false ||
+        capabilityRecord.apiMaySign !== false ||
+        capabilityRecord.apiMayBroadcast !== false ||
+        capabilityRecord.mayResendTransaction !== false ||
+        capabilityRecord.automaticRetryAllowed !== false
+      ) {
+        return null;
+      }
+      const issued = this.#issuedVerifiedBindResults.get(capability);
+      if (issued === undefined) return null;
+      this.#issuedVerifiedBindResults.delete(capability);
+      const requestRecord = exactFrozenRecord(
+        request,
+        VERIFIED_BIND_KEYS,
+        'INVALID_VERIFIED_BIND_SUBMISSION_REQUEST',
+      );
+      if (
+        issued.capability !== capability ||
+        issued.request.deref() !== request ||
+        requestRecord.signal !== issued.signal ||
+        verifiedBindRequestSha256(request) !== issued.requestBindingSha256
+      ) {
+        return null;
+      }
+      return issued.result;
+    } catch {
+      return null;
+    }
+  }
+
+  async #executeVerifiedBind(
+    request: WeakRef<BindDormantMainnetVerifiedSubmissionRequestV1>,
+    command: DormantMainnetFinancialActionLifecycleDatabaseCommandV1 & {
+      readonly operation: 'BIND_VERIFIED_SUBMISSION';
+    },
+  ): Promise<unknown> {
+    const invocation = databaseInvocation(command);
+    let pending: unknown;
+    try {
+      pending = Reflect.apply(this.#databaseQuery, this.#databaseReceiver, [
+        invocation.sql,
+        invocation.values,
+        command.signal,
+      ]);
+    } catch {
+      return this.#issueVerifiedBind(request, command, this.#codec.databaseOutcomeUnknown(command));
+    }
+
+    let result: DormantMainnetFinancialActionDurableResultV1;
+    try {
+      const reviewedPending = nativePromise(pending);
+      if (reviewedPending === null) throw new Error('DATABASE_OUTCOME_UNKNOWN');
+      const queryResult = (await reviewedPending) as unknown;
+      if (isAborted(command.signal)) throw new Error('DATABASE_OUTCOME_UNKNOWN');
+      result = this.#codec.decode(command, singleRow(queryResult));
+    } catch {
+      result = this.#codec.databaseOutcomeUnknown(command);
+    }
+    return this.#issueVerifiedBind(request, command, result);
+  }
+
+  #issueVerifiedBind(
+    request: WeakRef<BindDormantMainnetVerifiedSubmissionRequestV1>,
+    command: DormantMainnetFinancialActionLifecycleDatabaseCommandV1 & {
+      readonly operation: 'BIND_VERIFIED_SUBMISSION';
+    },
+    result: DormantMainnetFinancialActionDurableResultV1,
+  ): DormantMainnetVerifiedSubmissionBindCapabilityV1 {
+    const capability = Object.freeze(
+      Object.assign(Object.create(null) as object, {
+        verifiedSubmissionBinderVersion: DORMANT_MAINNET_VERIFIED_SUBMISSION_BINDER_VERSION,
+        use: DORMANT_MAINNET_VERIFIED_SUBMISSION_BIND_CAPABILITY_USE,
+        mayAuthorizeFinancialAction: false as const,
+        mayPersist: false as const,
+        apiMaySign: false as const,
+        apiMayBroadcast: false as const,
+        mayResendTransaction: false as const,
+        automaticRetryAllowed: false as const,
+      }),
+    ) as DormantMainnetVerifiedSubmissionBindCapabilityV1;
+    this.#issuedVerifiedBindResults.set(
+      capability,
+      Object.freeze({
+        capability,
+        request,
+        requestBindingSha256: command.requestBindingSha256,
+        signal: command.signal,
+        result,
+      }),
+    );
+    return capability;
   }
 
   async #execute(
@@ -2453,6 +3262,31 @@ function databaseInvocation(
         ]),
       });
     }
+    case 'BIND_VERIFIED_SUBMISSION': {
+      const args = command.arguments;
+      return Object.freeze({
+        sql: BIND_VERIFIED_SUBMISSION_SQL,
+        values: Object.freeze([
+          args.accountId,
+          args.intentId,
+          args.expectedRevision,
+          args.expectedSnapshotSha256,
+          args.transactionId,
+          args.signingPayloadSha256,
+          args.signatureEvidenceSha256,
+          args.correlationId,
+          args.verifierVersion,
+          args.verificationIntentFingerprintSha256,
+          args.signedEnvelopeSha256,
+          args.providerWriteManifestFingerprintSha256,
+          args.providerActionBindingSha256,
+          args.chainReplayIdentitySha256,
+          args.signatureScheme,
+          args.ethereumNonce,
+          args.solanaRecentBlockhash,
+        ]),
+      });
+    }
     case 'RECORD_BROADCAST': {
       const args = command.arguments;
       return Object.freeze({
@@ -2538,6 +3372,45 @@ function captureMethod<Method extends (...arguments_: never[]) => unknown>(
     }
   }
   throw new TypeError('Invalid dormant lifecycle dependency.');
+}
+
+function captureSignedSubmissionVerifier(
+  value: DormantMainnetFinancialActionSignedSubmissionVerifierPort,
+): CapturedSignedSubmissionVerifier {
+  const failure = (): never => {
+    throw new TypeError('Invalid dormant signed-submission verifier dependency.');
+  };
+  try {
+    if (typeof value !== 'object' || value === null || isProxy(value)) return failure();
+    const versionDescriptor = Object.getOwnPropertyDescriptor(value, 'verifierVersion');
+    if (
+      versionDescriptor === undefined ||
+      !('value' in versionDescriptor) ||
+      versionDescriptor.value !== DORMANT_MAINNET_SIGNED_SUBMISSION_VERIFIER_VERSION
+    ) {
+      return failure();
+    }
+    const verify = captureMethod<
+      DormantMainnetFinancialActionSignedSubmissionVerifierPort['verifySubmission']
+    >(value, 'verifySubmission');
+    const review = captureMethod<
+      DormantMainnetFinancialActionSignedSubmissionVerifierPort['reviewResult']
+    >(value, 'reviewResult');
+    return Object.freeze({
+      receiver: value,
+      verifierVersion: DORMANT_MAINNET_SIGNED_SUBMISSION_VERIFIER_VERSION,
+      verify: verify.method,
+      review: review.method,
+    });
+  } catch (error) {
+    if (
+      error instanceof TypeError &&
+      error.message === 'Invalid dormant signed-submission verifier dependency.'
+    ) {
+      throw error;
+    }
+    return failure();
+  }
 }
 
 function singleRow(value: unknown): unknown {
