@@ -224,15 +224,39 @@ database retains the immutable registration-era digest as its audit anchor, so
 v1-parent/v2-current key rotation remains valid; address A paired with wallet B
 is rejected without creating lifecycle history.
 
-This closes the local schema-and-adapter portion of durable replay, restart
-state, and wallet-identity binding. It does not create API/worker composition,
-a runtime grant, unresolved-work discovery/claim/lease processing, a scheduled
-reconciler, authenticated chain-finality admission, a post-finality reorg
-record, an exact transaction-payload verifier, a signer, a broadcaster, a
-mainnet provider binding, or write authority. Both migrations are registered
-solely in the cumulative migration index; V2 and its V1 owner-only delegate
-remain unavailable to application principals, the adapter is unregistered,
-and all policy limits and approvals remain zero.
+Commits `bae3116` and `3e3ce75` add a direct-import-only authenticated-finality
+producer and source contract. For `SUPPLY` and `WITHDRAW` only, the producer
+binds two distinct source identities and independently authenticated source and
+deployment prerequisites to the exact wallet, provider, protocol, market,
+asset, action, amount, transaction, and Ethereum or Solana finality facts. It
+rechecks those bindings before and after source I/O, applies chain-specific
+finality and deep-reorg rules, and fails closed on abort, expiry, stale evidence,
+unsupported actions, or a changed prerequisite. A concrete source must honor
+the supplied abort signal and deadline; none is implemented or registered yet.
+
+Commit `e7e27b7` adds a direct-import-only PostgreSQL finality sidecar. Its
+one-shot, exact-data cursors bind lifecycle revision, snapshot, transition,
+transaction, position, block, and review state. It issues one fixed database
+call, never retries an ambiguous result, and permits only a fresh read for
+recovery. Commit `4f0a79f` adds owner-only migration `0035`: empty source and
+deployment authority tables, append-only authenticated admissions, authority
+control events, and a post-finality review chain. A deferred trigger rejects a
+terminal reconciliation without its matching admission; deep-reorg and
+authority-controlled states quarantine permanently without rewriting terminal
+history or authorizing a ledger reversal, resend, settlement, signing, or
+broadcast.
+
+This closes the local contract, schema, and adapter portions of durable replay,
+wallet-identity binding, authenticated-finality admission, and append-only
+post-finality quarantine. It does not create API/worker composition, a runtime
+grant, controlled authority-row population, concrete prerequisite or chain
+sources, unresolved-work discovery/claim/lease processing, a scheduled
+reviewer/reconciler, exact signed-payload verification, downstream ledger
+remediation, a signer, a broadcaster, a mainnet provider binding, or write
+authority. Migrations `0033` through `0035` are registered solely in the
+cumulative migration index; their functions remain unavailable to application
+principals, both adapters and the producer are unregistered, both `0035`
+authority tables are empty, and all policy limits and approvals remain zero.
 
 ## Additional gates before any real-value write
 
@@ -245,13 +269,20 @@ and all policy limits and approvals remain zero.
   unresolved transaction per wallet, and no automatic resend or fee escalation.
 - Use exact allowances by default. Any unlimited allowance needs a separate
   security decision and explicit user disclosure.
-- Authorize and register only the address-bound `0034` V2 adapter through a
-  separately reviewed transactional prepare-before-dispatch runtime. Add
-  durable unresolved-work discovery, claim/lease recovery, and reconciliation
-  without automatic resubmission; never log its HMAC candidate arrays.
-- Authenticate network observations and transaction payload/signature evidence,
-  then record post-finality reorgs without silently rewriting terminal history.
-- Define provisional, safe, finalized, and accepted financial-finality states.
+- Approve two independently controlled Ethereum/Solana evidence sources and the
+  exact deployment identities, then populate the empty `0035` authority tables
+  through a separately controlled, audited owner workflow. An authority row is
+  evidence admission only and must never grant write or settlement authority.
+- Implement and independently review the concrete prerequisite/source adapters,
+  exact transaction-payload and wallet-signature verification, address-bound
+  `0034` preparation, and the `0035` sidecar before any runtime registration or
+  database grant. Every source must cooperatively stop on abort/deadline.
+- Add durable unresolved-work discovery, claim/lease reconciliation, and a
+  post-finality review scheduler without automatic resubmission; never log HMAC
+  candidates or opaque attestations.
+- Define downstream handling for provisional, safe, finalized, inconclusive,
+  authority-controlled, and deep-reorg states. Quarantine must not silently
+  rewrite terminal history or reverse a ledger.
 - Exercise pause, provider divergence, deployment drift, recovery, withdrawal,
   and incident runbooks in a fork or simulation, then obtain independent
   security review.
@@ -276,6 +307,10 @@ deployment, or paid resource is created by the local implementation. The
 separate balance-sync queue definition has no activated consumer or chain
 egress and grants no live-read authority. Migration `0031`, recorder V2, the
 dormant reconciliation processor, its bounded lifecycle, owner-only migrations
-`0033`/`0034`, and the direct-import-only durable adapter add no application
-database grant, runtime composition, or external egress. The same is true of
-the deferred Base artifacts retained outside the Ethereum/Solana launch scope.
+`0033` through `0035`, the authenticated-finality producer, and both
+direct-import-only PostgreSQL adapters add no application database grant,
+runtime composition, or external egress. Migration `0035` installs no source or
+deployment authority rows and every returned financial, resend, signing,
+broadcast, and settlement capability remains false. Its deep-reorg state is a
+quarantine record only, not a ledger reversal. The same is true of the deferred
+Base artifacts retained outside the Ethereum/Solana launch scope.

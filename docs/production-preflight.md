@@ -162,12 +162,13 @@ exact extension inventory, and reviewed mutable-field window policy exist.
 Separately from that 73-artifact byte-pinned contract, the repository loader
 derives a private runtime-absence attestation from every lowercase `.ts` and
 `.tsx` file under `apps/api/src` that is not excluded by the exact pinned build
-exclusions (`*.spec.ts` and `*.e2e-spec.ts`): currently 398 files and 6,389,629
-bytes. After the migration-`0033` binding correction in `5976d32`, the
-direct-import-only durable port and PostgreSQL adapter in `b7289ac`, and the
-address-bound migration/adapter updates in `9af00ef` and `79c4b71`, the current
-aggregate SHA-256 is
-`15858ec81b7be55d312fe13e6cb969b3a34e8fcea25c3c735eac52888b7e875a`.
+exclusions (`*.spec.ts` and `*.e2e-spec.ts`). After the migration-`0033` binding
+correction in `5976d32`, the
+direct-import-only durable port and PostgreSQL adapter in `b7289ac`, the
+address-bound migration/adapter updates in `9af00ef` and `79c4b71`, and the
+authenticated-finality producer, sidecar, and migration through `4f0a79f`, the
+current snapshot contains 403 files and 6,704,387 bytes. Its aggregate SHA-256
+is `d1854a4f4e55ed4321e06a7bf6684bdf164f82819b8a4e751c0c94b8747621e5`.
 The aggregate also binds the exact `nest-cli.json`, `tsconfig.json`, and
 `tsconfig.build.json` build inputs and the resolved
 `src/blockchain/domain/local-evm-development-manifest.json` runtime data input.
@@ -286,9 +287,9 @@ mainnet observations.
 The 73-artifact balance-consumer slice also byte-pins the exact migration
 `0005` principal constants inherited through `0028`, immutable migration
 `0027`, migration `0032`, and the migration index whose reviewed tail now ends
-with `0033`. The dedicated dormant-action validator, rather than balance-
-consumer semantics, owns migration `0033`. Its semantic inspection
-requires a separate permanent append-only
+with `0035`. The dedicated dormant-action validator, rather than balance-
+consumer semantics, owns migrations `0033` through `0035`. Its semantic
+inspection requires a separate permanent append-only
 `balance_sync_financial_agreement_evidence_v2` relation, the exact V2 source-
 attestation and agreement fingerprint domains, all 51 generated coordinator-
 declared JSON string-type gates, owner-only V2 envelope validator and recorder
@@ -888,6 +889,19 @@ broadcaster, retry, settlement, or other financial-action authority. Commit
 `a61bb57` separately supplies three isolated test-schema/verifier-control cases
 against disposable PostgreSQL 16.
 
+Validator commit `f81273c` extends that exact boundary through the finality
+source contract and producer, one-shot PostgreSQL sidecar, and owner-only
+migration `0035`, including every focused unit/integration artifact and the
+production/test migration-index tail. Its semantic checks retain exact
+Ethereum/Solana and `SUPPLY`/`WITHDRAW` scope, two distinct sources, earliest
+deadline/authority/evidence expiry, cooperative abort, legacy terminal-write
+exclusion, frozen one-shot cursor provenance, the 24/25/2-argument SQL
+allowlists, empty authority tables, deferred authenticated admission, and sticky
+post-finality quarantine with every signing, broadcast, resend, persistence,
+settlement, and ledger capability false. The runtime scan now includes `.tsx`
+and rejects add/remove/rename races by comparing a bounded, metadata-bound tree
+inventory before and after secure reads. All 30 focused mutation cases pass.
+
 The adapter accepts only the registry's active USDC, USDT, and PYUSD identities
 on Ethereum and Solana mainnet and an exact static allowlist of six Ethereum and
 four Solana provider/protocol bindings. These are input restrictions, not live
@@ -897,12 +911,15 @@ without a loop or automatic retry. A thrown, aborted, or malformed post-dispatch
 result is `DATABASE_OUTCOME_UNKNOWN`; post-wallet ambiguity is
 `READ_THEN_RECONCILE_ONLY` and cannot authorize resend.
 
-This boundary remains unregistered and ungranted. It has no plaintext wallet-
-address-to-identity-digest proof, cryptographic signature verification,
-authenticated live reconciliation source, provider credential or approved
-write manifest, provider/legal/security/finance approval, release-bound deployed
-evidence, signing or broadcast authority, ledger-settlement authority, or
-deep-reorg reversal workflow.
+This boundary remains unregistered and ungranted. The lifecycle adapter derives
+wallet identity internally, but no concrete finality prerequisite/source adapter,
+cryptographic transaction-payload/signature verification, controlled `0035`
+authority population, unresolved-work claim/lease scheduler, provider credential
+or approved write manifest, provider/legal/security/finance approval, or
+release-bound deployed evidence exists. Migration `0035` can record a deep-reorg
+quarantine locally, but no runtime review scheduler or downstream ledger-
+remediation policy exists; quarantine never rewrites terminal history or
+authorizes a ledger reversal.
 
 A third independent local result validates the closed,
 reviewed four-provider capture packet for Compound, Euler, Gearbox, and Jupiter,
@@ -1135,10 +1152,11 @@ commit `5550fbf` bring the current provider-position boundary to 45 artifacts an
 commits `5fcc7ca` and `040e93a`, while the dormant-action validator covers
 `ee9204d`, `a387124`, `6ef71ff`, and the `0034`/adapter attestation in `51967aa`;
 `a61bb57`, `b0b39d9`, `9af00ef`, and `79c4b71` supply separate disposable
-PostgreSQL integration coverage. None enlarges that slice. Preflight rebaseline
-`d51f85e` pins the reviewed whole-API runtime snapshot at 398 files and
-6,389,629 bytes with SHA-256
-`15858ec81b7be55d312fe13e6cb969b3a34e8fcea25c3c735eac52888b7e875a`.
+PostgreSQL integration coverage. None enlarges that provider slice. The
+authenticated-finality commits `bae3116`, `3e3ce75`, `e7e27b7`, and `4f0a79f`
+are pinned by boundary commit `f81273c`. Preflight rebaseline `413af59` pins the
+reviewed whole-API runtime snapshot at 403 files and 6,704,387 bytes with
+SHA-256 `d1854a4f4e55ed4321e06a7bf6684bdf164f82819b8a4e751c0c94b8747621e5`.
 The record-intent migration was also exercised
 in a disposable local PostgreSQL 16 instance: all six focused integration cases
 passed, covering clean up/down/up migration verification, Ethereum and Solana
@@ -1173,6 +1191,19 @@ mutation cases, and preflight `d51f85e` passes all 85 focused cases while its CL
 correctly remains `BLOCKED` with 10 planned, 0 live-read, and 0 transaction
 providers. This is local safety evidence only and creates no runtime grant,
 provider call, signing, broadcast, settlement, deployment, or mainnet authority.
+
+The authenticated-finality producer/source pair passes 28 focused cases and the
+sidecar port/adapter passes 23. Migration `0035` passes 10 focused unit cases,
+the impacted 9-suite/88-case migration-order set, and 6 guarded loopback
+PostgreSQL 16 cases spanning Ethereum and Solana admission, direct legacy-bypass
+rejection, concurrent exact replay, authority controls, historical replay with
+current review state, sticky deep-reorg quarantine, owner-only ACLs, and catalog
+tampering. Boundary validation passes 30/30 focused mutation cases. The five
+directly impacted preflight cases and preflight typecheck pass; the offline CLI
+still exits `1` with 10 planned, 0 live-read, and 0 transaction providers and
+reports zero network, DNS, cloud, provider, secret, configuration-environment,
+and write calls. These results remove stale local-drift failures only; all
+external approval, deployed-evidence, and runtime-activation blockers remain.
 
 These checks are also part of the root `lint`, `typecheck`, and `test` scripts
 used by CI.
