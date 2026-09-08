@@ -1,4 +1,5 @@
 import { PRODUCTION_BALANCE_CONSUMER_PRINCIPALS } from './0028-suspend-generic-worker-balance-authority.migration';
+import { createRevokedWalletMetadataKeyRetirementMigrationV0041 } from './0041-preserve-revoked-wallet-metadata-key-retirement.migration';
 import {
   createMainnetFinancialActionDurableSchedulerMigration,
   createMainnetFinancialActionDurableSchedulerMigrationV0042,
@@ -27,8 +28,21 @@ describe('migration 0042 durable mainnet action scheduler', () => {
   const complete = functionBody(up, 'complete_mainnet_financial_action_scheduler_job_v1');
   const jobGuard = functionBody(up, 'enforce_mainnet_financial_action_scheduler_job_v1');
 
-  it('stays outside migration registration until tail coordination', () => {
-    expect(migration).toMatchObject({ id: '0042', supersedesVerificationOf: ['0040'] });
+  it('forms the exact linear 0040 -> 0041 -> 0042 verification graph', () => {
+    expect(createRevokedWalletMetadataKeyRetirementMigrationV0041).toMatchObject({
+      id: '0041',
+      supersedesVerificationOf: ['0040'],
+    });
+    expect(migration).toMatchObject({ id: '0042', supersedesVerificationOf: ['0041'] });
+    expect(verifier).toContain('wallet_metadata_revoked_rewrap_authorizations');
+    expect(verifier).toContain('verify_wallet_metadata_revoked_rewrap_state_v1() AS valid');
+    for (const rewrittenPredecessorBodySha256 of [
+      'a9b937cc7933d065e711c9cec12b93dfc07f1946e3f3ac69891acfa47a4e5fd2',
+      'd5ee3c8ad792f831ffd1f50dbc3f36c15fd8e21ab745a6e230c74ad358b4c019',
+      '8acdf41ad2acfd7a2c72793cdfbd701fa31499bd2386cbc23bcd388d0c21fdf1',
+    ]) {
+      expect(verifier).toContain(rewrittenPredecessorBodySha256);
+    }
     expect(migration.transactional).not.toBe(false);
     expect(up).toContain('LOCK TABLE mainnet_financial_action_events IN ACCESS EXCLUSIVE MODE');
     expect(up).not.toContain('GRANT ');

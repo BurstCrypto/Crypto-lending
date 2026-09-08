@@ -6,6 +6,7 @@ import { Pool } from 'pg';
 import { DATABASE_TEST_SCHEMA_MIGRATION_LIST } from '../../src/infrastructure/database/migrations';
 import { createVerifiedMainnetSignedSubmissionProofTestSchemaMigrationV0039 } from '../../src/infrastructure/database/migrations/0039-persist-verified-mainnet-signed-submission-proof.migration';
 import { createMainnetFinancialActionWalletIdentityRotationRecoveryTestSchemaMigrationV0040 } from '../../src/infrastructure/database/migrations/0040-preserve-mainnet-financial-action-recovery-through-wallet-identity-key-rotation.migration';
+import { createRevokedWalletMetadataKeyRetirementTestSchemaMigrationV0041 } from '../../src/infrastructure/database/migrations/0041-preserve-revoked-wallet-metadata-key-retirement.migration';
 import { createMainnetFinancialActionDurableSchedulerTestSchemaMigrationV0042 } from '../../src/infrastructure/database/migrations/0042-create-mainnet-financial-action-durable-scheduler.migration';
 import type { DatabaseMigration } from '../../src/infrastructure/database/migrations/migration';
 
@@ -19,6 +20,7 @@ const MIGRATIONS_THROUGH_0042 = [
   ...DATABASE_TEST_SCHEMA_MIGRATION_LIST.filter(({ id }) => id <= '0038'),
   createVerifiedMainnetSignedSubmissionProofTestSchemaMigrationV0039,
   createMainnetFinancialActionWalletIdentityRotationRecoveryTestSchemaMigrationV0040,
+  createRevokedWalletMetadataKeyRetirementTestSchemaMigrationV0041,
   createMainnetFinancialActionDurableSchedulerTestSchemaMigrationV0042,
 ];
 const CLAIM_SQL = `SELECT * FROM claim_mainnet_financial_action_scheduler_job_v1(

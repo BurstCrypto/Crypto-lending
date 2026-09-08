@@ -4,7 +4,7 @@ import {
   type BalanceConsumerPrincipalNames,
   PRODUCTION_BALANCE_CONSUMER_PRINCIPALS,
 } from './0028-suspend-generic-worker-balance-authority.migration';
-import { createMainnetFinancialActionWalletIdentityRotationRecoveryMigration } from './0040-preserve-mainnet-financial-action-recovery-through-wallet-identity-key-rotation.migration';
+import { createRevokedWalletMetadataKeyRetirementMigration } from './0041-preserve-revoked-wallet-metadata-key-retirement.migration';
 import type { DatabaseMigration } from './migration';
 
 const SQL_IDENTIFIER = /^[a-z][a-z0-9_]{0,62}$/u;
@@ -165,7 +165,7 @@ function sourceSha256(value: string): string {
 function replaceExactlyOnce(source: string, target: string, replacement: string): string {
   const start = source.indexOf(target);
   if (start < 0 || source.indexOf(target, start + target.length) >= 0) {
-    throw new Error('Migration 0042 predecessor verifier anchor mismatch');
+    throw new Error('Migration 0042 expected its 0041 verifier anchor exactly once');
   }
   return `${source.slice(0, start)}${replacement}${source.slice(start + target.length)}`;
 }
@@ -1175,10 +1175,10 @@ function relationVerifier(
 }
 
 function createVerifierSql(names: BalanceConsumerPrincipalNames, cumulative: boolean): string {
-  const previous = createMainnetFinancialActionWalletIdentityRotationRecoveryMigration(names, {
+  const previous = createRevokedWalletMetadataKeyRetirementMigration(names, {
     cumulativePrincipalVerification: cumulative,
   });
-  if (!previous.verifySql) throw new Error('Migration 0040 must expose verification SQL');
+  if (!previous.verifySql) throw new Error('Migration 0041 must expose verification SQL');
   let prior = replaceExactlyOnce(
     previous.verifySql,
     `        ('mainnet_financial_action_events', 'mainnet_action_signed_submission_proof_after_event', 'validate_mainnet_financial_action_signed_submission_proof_v1()', 5, true, true)
@@ -1655,7 +1655,7 @@ export function createMainnetFinancialActionDurableSchedulerMigration(
     upSql: createUpSql(names),
     downSql: createDownSql(names),
     verifySql: createVerifierSql(names, cumulative),
-    supersedesVerificationOf: ['0040'],
+    supersedesVerificationOf: ['0041'],
   };
 }
 
