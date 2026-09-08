@@ -5,7 +5,9 @@ Crypto Lending platform. It is an npm workspace with a Next.js web application,
 a versioned NestJS API, and shared PostgreSQL, Redis, and SQS infrastructure.
 
 The [zero-cost repository audit](docs/zero-cost-repository-audit-2026-09-08.md)
-records the current local verification checkpoint and remaining external gates.
+records the completed local verification checkpoint and remaining external gates.
+The next engineering milestone starts with the
+[production network foundation](docs/production-network-foundation.md).
 
 ## Prerequisites
 

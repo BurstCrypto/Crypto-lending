@@ -92,6 +92,7 @@ jobs:
           npm run infra:test:credential-transition
           npm run infra:test:redis-operator-transition
           npm run infra:test:production-deployment-intent
+          npm run infra:test:production-network
           npm run infra:test:sqs
           npm run infra:test:redis-acl
           pwsh -NoProfile -File infra/aws/test-invoke-acm-dns-local.ps1
@@ -101,7 +102,7 @@ jobs:
           pwsh -NoProfile -File infra/aws/test-invoke-account-readonly-preflight.ps1
           pwsh -NoProfile -File infra/aws/test-invoke-account-guardrails.ps1
           pwsh -NoProfile -File infra/aws/test-invoke-application-baseline.ps1
-          python infra/aws/lint-cloudformation.py infra/aws/application-baseline.yaml infra/aws/application-workload-boundaries.yaml infra/aws/balance-consumer-deployment-envelope.yaml infra/aws/production-infrastructure-contract.yaml infra/aws/application-observability.yaml infra/aws/database-migration-task.yaml infra/aws/account-guardrails.yaml infra/aws/sqs-foundation.yaml
+          python infra/aws/lint-cloudformation.py infra/aws/application-baseline.yaml infra/aws/application-workload-boundaries.yaml infra/aws/balance-consumer-deployment-envelope.yaml infra/aws/production-infrastructure-contract.yaml infra/aws/production-network-foundation.json infra/aws/application-observability.yaml infra/aws/database-migration-task.yaml infra/aws/account-guardrails.yaml infra/aws/sqs-foundation.yaml
 
       - name: Check formatting
         run: npm run format:check

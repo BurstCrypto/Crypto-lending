@@ -192,6 +192,18 @@ export const RELEASE_COMPONENTS = Object.freeze([
     requiredFiles: Object.freeze(['.']),
   }),
   Object.freeze({
+    name: 'production-network-foundation-cloudformation',
+    path: 'infra/aws/production-network-foundation.json',
+    kind: 'file',
+    requiredFiles: Object.freeze(['.']),
+  }),
+  Object.freeze({
+    name: 'production-network-foundation-validator',
+    path: 'infra/aws/validate-production-network-foundation.mjs',
+    kind: 'file',
+    requiredFiles: Object.freeze(['.']),
+  }),
+  Object.freeze({
     name: 'production-deployment-target-validator',
     path: 'scripts/production-deployment-target.mjs',
     kind: 'file',

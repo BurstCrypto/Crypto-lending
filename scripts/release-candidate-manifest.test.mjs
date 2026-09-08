@@ -688,6 +688,34 @@ test('binds the inert production infrastructure contract as an exact release com
   assert.throws(() => verifyReleaseManifest(root, manifest), ReleaseManifestError);
 });
 
+test('binds the production network template and its policy to the release and rejects drift', () => {
+  for (const [name, path] of [
+    [
+      'production-network-foundation-cloudformation',
+      'infra/aws/production-network-foundation.json',
+    ],
+    [
+      'production-network-foundation-validator',
+      'infra/aws/validate-production-network-foundation.mjs',
+    ],
+  ]) {
+    const specification = RELEASE_COMPONENTS.find((component) => component.name === name);
+    assert.deepEqual(specification, { name, path, kind: 'file', requiredFiles: ['.'] });
+    const root = createWorkspace();
+    const candidatePath = resolve(root, path);
+    const candidateBytes = readFileSync(candidatePath);
+    const manifest = createReleaseManifest(root, SOURCE, BUILDER);
+    const component = manifest.components.find((component) => component.name === name);
+    assert.equal(
+      component.files[0].sha256,
+      createHash('sha256').update(candidateBytes).digest('hex'),
+    );
+    assert.doesNotThrow(() => verifyReleaseManifest(root, manifest));
+    appendFileSync(candidatePath, '\nUNREVIEWED_DRIFT\n', 'utf8');
+    assert.throws(() => verifyReleaseManifest(root, manifest), ReleaseManifestError);
+  }
+});
+
 test('binds the production deployment runtimes and inert intent example exactly', () => {
   const specifications = [
     {
