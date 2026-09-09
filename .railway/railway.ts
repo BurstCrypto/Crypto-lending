@@ -37,11 +37,17 @@ function publicDomain(): string {
 
 export default defineRailway((ctx) => {
   const production = ctx.environment === 'production';
+  const deploymentInterlock = `node -e "throw new Error('Railway runtime migration is not authorized')"`;
   const database = postgres('postgres');
   const cache = redis('redis');
 
   const api = service('api', {
     source: image(releaseImage('RAILWAY_API_IMAGE')),
+    // This topology is review-only until the AWS/SQS runtime has been replaced
+    // with the Railway Postgres outbox/worker contract and the signed launch
+    // authority gate is wired to an immutable apply artifact. Keep the image
+    // impossible to start if somebody runs `railway config apply` manually.
+    start: deploymentInterlock,
     healthcheck: '/api/v1/health',
     healthcheckTimeout: 120,
     replicas: production ? 2 : 1,
@@ -52,6 +58,7 @@ export default defineRailway((ctx) => {
       APP_ENV: 'staging',
       APP_VERSION: ctx.shared.APP_VERSION,
       APPLICATION_WORKLOAD: 'api',
+      AUTH_CLIENT_ADDRESS_MODE: 'trusted-single-proxy',
       AUTH_MODE: 'oidc',
       AUTH_PUBLIC_ORIGIN: ctx.shared.AUTH_PUBLIC_ORIGIN,
       DATABASE_RUNTIME_URL: database.env.DATABASE_URL,
@@ -77,11 +84,15 @@ export default defineRailway((ctx) => {
       AUTH_PREAUTH_SEAL_KEY: preserve(),
       AUTH_PREAUTH_SEAL_KEY_ID: preserve(),
       AUTH_SESSION_HMAC_KEY_RING_JSON: preserve(),
+      // The exact gateway peer ranges must be reviewed for the target Railway
+      // environment before the start-command interlock can be removed.
+      AUTH_TRUSTED_PROXY_CIDRS: preserve(),
     },
   });
 
   const web = service('web', {
     source: image(releaseImage('RAILWAY_WEB_IMAGE')),
+    start: deploymentInterlock,
     healthcheck: '/api/health',
     healthcheckTimeout: 120,
     replicas: production ? 2 : 1,
@@ -95,7 +106,7 @@ export default defineRailway((ctx) => {
 
   const gateway = service('gateway', {
     source: image(releaseImage('RAILWAY_GATEWAY_IMAGE')),
-    ...(production ? { domains: [{ domain: publicDomain(), port: 8080 }] } : {}),
+    start: deploymentInterlock,
     healthcheck: '/healthz',
     healthcheckTimeout: 30,
     replicas: production ? 2 : 1,
@@ -104,6 +115,7 @@ export default defineRailway((ctx) => {
       // A JavaScript template literal would stringify the reference object as
       // "[object Object]" and leave the gateway unable to reach either service.
       API_ORIGIN: { value: 'http://${{api.RAILWAY_PRIVATE_DOMAIN}}:3001' },
+      ...(production ? { PLANNED_PUBLIC_DOMAIN: publicDomain() } : {}),
       PORT: '8080',
       WEB_ORIGIN: { value: 'http://${{web.RAILWAY_PRIVATE_DOMAIN}}:3000' },
     },

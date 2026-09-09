@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 
 import { createRailwayContext, project, type ServiceNode } from 'railway/iac';
@@ -49,7 +50,7 @@ function serviceResource(configuration: Awaited<ReturnType<typeof compile>>, nam
 }
 
 describe('Railway production topology', () => {
-  it('pins images, ports, private origins, replicas, and the only public domain', async () => {
+  it('pins images, ports, private origins, replicas, and the planned domain', async () => {
     const configuration = await compile('production');
     const api = serviceResource(configuration, 'api');
     const web = serviceResource(configuration, 'web');
@@ -61,11 +62,10 @@ describe('Railway production topology', () => {
     assert.equal(api.deploy?.numReplicas, 2);
     assert.equal(web.deploy?.numReplicas, 2);
     assert.equal(gateway.deploy?.numReplicas, 2);
-    assert.deepEqual(gateway.networking?.customDomains, {
-      'app.example.com': { port: 8080 },
-    });
-    assert.equal(api.networking, undefined);
-    assert.equal(web.networking, undefined);
+    for (const candidate of [api, web, gateway]) {
+      assert.match(candidate.deploy?.startCommand ?? '', /migration is not authorized/u);
+      assert.equal(candidate.networking, undefined);
+    }
     assert.deepEqual(api.variables?.PORT, { type: 'literal', value: '3001' });
     assert.deepEqual(web.variables?.PORT, { type: 'literal', value: '3000' });
     assert.deepEqual(gateway.variables?.PORT, { type: 'literal', value: '8080' });
@@ -77,6 +77,17 @@ describe('Railway production topology', () => {
       type: 'raw',
       value: { value: 'http://${{web.RAILWAY_PRIVATE_DOMAIN}}:3000' },
     });
+    assert.deepEqual(gateway.variables?.PLANNED_PUBLIC_DOMAIN, {
+      type: 'literal',
+      value: 'app.example.com',
+    });
+  });
+
+  it('keeps CI plan-only while the signed production gate is not wired', async () => {
+    const workflow = await readFile('.github/workflows/railway-config.yml', 'utf8');
+    assert.match(workflow, /command: plan/u);
+    assert.doesNotMatch(workflow, /command: apply/u);
+    assert.doesNotMatch(workflow, /^\s{2}apply:/mu);
   });
 
   it('keeps non-production services single-replica and private', async () => {
