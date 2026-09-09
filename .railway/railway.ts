@@ -22,6 +22,19 @@ function releaseImage(name: 'RAILWAY_GATEWAY_IMAGE' | 'RAILWAY_WEB_IMAGE' | 'RAI
   return value;
 }
 
+function publicDomain(): string {
+  const value = process.env.RAILWAY_PUBLIC_DOMAIN?.trim();
+  if (
+    !value ||
+    value.length > 253 ||
+    value.endsWith('.') ||
+    !value.split('.').every((label) => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/u.test(label))
+  ) {
+    throw new Error('RAILWAY_PUBLIC_DOMAIN must be a lowercase DNS hostname');
+  }
+  return value;
+}
+
 export default defineRailway((ctx) => {
   const production = ctx.environment === 'production';
   const database = postgres('postgres');
@@ -42,6 +55,7 @@ export default defineRailway((ctx) => {
       AUTH_MODE: 'oidc',
       AUTH_PUBLIC_ORIGIN: ctx.shared.AUTH_PUBLIC_ORIGIN,
       DATABASE_RUNTIME_URL: database.env.DATABASE_URL,
+      PORT: '3001',
       OIDC_AUDIENCE: preserve(),
       OIDC_AUTHORIZATION_ENDPOINT: preserve(),
       OIDC_CLIENT_ID: preserve(),
@@ -75,18 +89,23 @@ export default defineRailway((ctx) => {
       APP_ENV: 'staging',
       APP_VERSION: ctx.shared.APP_VERSION,
       AUTH_PUBLIC_ORIGIN: ctx.shared.AUTH_PUBLIC_ORIGIN,
+      PORT: '3000',
     },
   });
 
   const gateway = service('gateway', {
     source: image(releaseImage('RAILWAY_GATEWAY_IMAGE')),
-    domains: production ? [ctx.shared.PUBLIC_DOMAIN] : [],
+    ...(production ? { domains: [{ domain: publicDomain(), port: 8080 }] } : {}),
     healthcheck: '/healthz',
     healthcheckTimeout: 30,
     replicas: production ? 2 : 1,
     env: {
-      API_ORIGIN: `http://${api.env.RAILWAY_PRIVATE_DOMAIN}:3001`,
-      WEB_ORIGIN: `http://${web.env.RAILWAY_PRIVATE_DOMAIN}:3000`,
+      // Railway expands reference expressions inside raw variable values.
+      // A JavaScript template literal would stringify the reference object as
+      // "[object Object]" and leave the gateway unable to reach either service.
+      API_ORIGIN: { value: 'http://${{api.RAILWAY_PRIVATE_DOMAIN}}:3001' },
+      PORT: '8080',
+      WEB_ORIGIN: { value: 'http://${{web.RAILWAY_PRIVATE_DOMAIN}}:3000' },
     },
   });
 
