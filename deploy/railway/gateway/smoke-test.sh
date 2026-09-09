@@ -19,7 +19,7 @@ test "$(docker run --rm --entrypoint id crypto-lending-gateway:ci -u)" != '0'
 docker network create "$network" >/dev/null
 docker run --detach --name "$api" --network "$network" --entrypoint node \
   crypto-lending-api:ci -e \
-  "require('node:http').createServer((request,response)=>response.end('api:'+request.url)).listen(3001,'0.0.0.0')" \
+  "require('node:http').createServer((request,response)=>response.end('api:'+request.url+'|xff:'+request.headers['x-forwarded-for']+'|xfp:'+request.headers['x-forwarded-proto'])).listen(3001,'0.0.0.0')" \
   >/dev/null
 docker run --detach --name "$web" --network "$network" --entrypoint node \
   crypto-lending-web:ci -e \
@@ -38,5 +38,8 @@ for _attempt in {1..30}; do
 done
 
 test "$(docker exec "$gateway" wget -qO- http://127.0.0.1:8080/healthz)" = 'ok'
-test "$(docker exec "$gateway" wget -qO- http://127.0.0.1:8080/api/v1/probe?asset=usdc)" = 'api:/api/v1/probe?asset=usdc'
+api_response="$(docker exec "$gateway" wget -qO- http://127.0.0.1:8080/api/v1/probe?asset=usdc)"
+test "${api_response%%|xff:*}" = 'api:/api/v1/probe?asset=usdc'
+spoofed_response="$(docker exec "$gateway" wget -qO- --header='X-Forwarded-For: 203.0.113.7' --header='X-Forwarded-Proto: https' http://127.0.0.1:8080/api/v1/probe)"
+test "${spoofed_response#*|xff:}" != '203.0.113.7|xfp:https'
 test "$(docker exec "$gateway" wget -qO- http://127.0.0.1:8080/platforms)" = 'web:/platforms'

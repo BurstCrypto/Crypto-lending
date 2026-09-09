@@ -24,3 +24,11 @@ outbox worker migration is complete, the gateway's exact trusted peer ranges
 are recorded, and the repository's signed production preflight verifies the
 merge SHA, image digests, Railway destination, evidence bundle, and seven-role
 public-launch decision.
+
+The current Caddy defaults replace untrusted incoming forwarding headers with
+the immediate peer, which prevents header spoofing but does not yet preserve a
+browser's address through Railway's edge. Before activation, record Railway's
+reviewed edge-header contract, configure Caddy's trusted proxies and client-IP
+headers from that contract, and prove with integration tests that distinct
+clients retain distinct rate-limit buckets while forged or list-valued headers
+fail closed.
