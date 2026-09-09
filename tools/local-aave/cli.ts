@@ -1,19 +1,29 @@
 import { LocalAaveReader, LocalAaveReadError } from './reader';
 import { createLocalAaveServer, LOCAL_PORT, LOCAL_URL } from './server';
+import { LocalSolanaReader, LocalSolanaReadError } from './solana-reader';
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
   if (
     process.env.NODE_ENV === 'production' ||
     args.length > 1 ||
-    (args[0] !== undefined && args[0] !== '--check')
+    (args[0] !== undefined && !['--check', '--check-solana', '--check-both'].includes(args[0]))
   ) {
-    throw new Error('Use npm run dev:aave:local, or npm run aave:local:check, in development.');
+    throw new Error('Use npm run dev:chains:local, or npm run chains:local:check, in development.');
   }
   if (args[0] === '--check') {
     console.log(
       JSON.stringify(await new LocalAaveReader().read(null, new AbortController().signal), null, 2),
     );
+    return;
+  }
+  if (args[0] === '--check-solana' || args[0] === '--check-both') {
+    const solana = await new LocalSolanaReader().read(null, new AbortController().signal);
+    const ethereum =
+      args[0] === '--check-both'
+        ? await new LocalAaveReader().read(null, new AbortController().signal)
+        : undefined;
+    console.log(JSON.stringify(ethereum ? { ethereum, solana } : solana, null, 2));
     return;
   }
   const server = createLocalAaveServer();
@@ -25,7 +35,7 @@ async function main(): Promise<void> {
   });
   server.listen(LOCAL_PORT, '127.0.0.1', () =>
     console.log(
-      `Local Aave: ${LOCAL_URL}\nReal Ethereum reads. No AWS, API key or wallet signature required. Ctrl+C to stop.`,
+      `Local Ethereum + Solana: ${LOCAL_URL}\nReal mainnet reads. No AWS, API key or wallet signature required. Ctrl+C to stop.`,
     ),
   );
   const stop = (): void => {
@@ -38,9 +48,9 @@ async function main(): Promise<void> {
 
 void main().catch((error: unknown) => {
   console.error(
-    error instanceof LocalAaveReadError
+    error instanceof LocalAaveReadError || error instanceof LocalSolanaReadError
       ? error.message
-      : 'Local Aave could not start. Run npm run dev:aave:local in development.',
+      : 'Local chains could not start. Run npm run dev:chains:local in development.',
   );
   process.exitCode = 1;
 });

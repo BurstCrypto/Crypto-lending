@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Crypto Lending | Local Aave</title>
+    <title>Crypto Lending | Ethereum + Solana</title>
     <link rel="stylesheet" href="/style.css" />
     <script src="/app.js" defer></script>
   </head>
@@ -14,13 +14,21 @@
         ><span class="pill">Local · Read only</span>
       </header>
       <section class="intro">
-        <p class="eyebrow">ETHEREUM MAINNET / AAVE V3</p>
-        <h1>Your local window<br />into Aave.</h1>
+        <p class="eyebrow">ETHEREUM + SOLANA / MAINNET DATA</p>
+        <h1>Your local window<br />into both chains.</h1>
         <p class="description">
-          Real USDC and USDT markets, read directly from Ethereum at a finalized block. Explore
-          rates and look up a wallet’s supplied assets and variable debt.
+          Explore real Aave and Kamino data. Switch networks to test wallet lookups and lending
+          reads locally, with finalized chain data and no transaction signing.
         </p>
       </section>
+      <div class="chain-picker" role="group" aria-label="Choose network">
+        <button type="button" data-chain="ethereum" aria-pressed="true">
+          Ethereum <span>Aave V3</span>
+        </button>
+        <button type="button" data-chain="solana" aria-pressed="false">
+          Solana <span>Kamino Lend</span>
+        </button>
+      </div>
       <form id="lookup">
         <label for="address">Wallet address <span>optional</span></label>
         <div class="input-row">
@@ -36,36 +44,42 @@
             Refresh live data <span aria-hidden="true">↗</span>
           </button>
         </div>
+        <button id="use-wallet" class="wallet-connect" type="button">
+          Use browser Ethereum wallet
+        </button>
         <p id="privacy" class="hint">
           A lookup sends this public address to PublicNode and dRPC. No signature or wallet
           ownership verification is involved.
         </p>
       </form>
       <div id="status" role="status" aria-live="polite">Connecting to Ethereum…</div>
-      <section id="results" aria-label="Aave market data" hidden>
+      <section id="results" aria-label="Chain and lending data" hidden>
         <div class="section-title">
-          <h2>Finalized market snapshot</h2>
-          <span class="matched">● Two endpoints agree</span>
+          <h2 id="snapshot-heading">Finalized market snapshot</h2>
+          <span id="agreement" class="matched">● Two endpoints agree</span>
         </div>
         <div id="markets" class="markets"></div>
+        <div id="wallet-balances" class="wallet-balances" hidden></div>
+        <div id="positions" class="markets" hidden></div>
         <div class="evidence">
           <div>
-            <span class="label">FINALIZED BLOCK</span><strong id="block-number"></strong
-            ><span id="block-time"></span>
+            <span class="label" id="block-label">FINALIZED BLOCK</span
+            ><strong id="block-number"></strong><span id="block-time"></span>
           </div>
           <div>
             <span class="label">OBSERVED</span><strong id="observed"></strong
-            ><span>PublicNode + dRPC</span>
+            ><span id="source-names">PublicNode + dRPC</span>
           </div>
         </div>
         <p id="wallet-note" class="hint"></p>
+        <p id="snapshot-note" class="hint"></p>
         <details>
           <summary>Block hash</summary>
           <code id="block-hash"></code>
         </details>
       </section>
       <footer>
-        Rates are variable APR, before compounding. This local view supports public data reads;
+        Aave rates are variable APR, before compounding. This local view supports public data reads;
         supplying, borrowing, repaying and withdrawals are not available here. Refresh to fetch a
         new snapshot.
       </footer>

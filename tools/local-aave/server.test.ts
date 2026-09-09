@@ -5,14 +5,21 @@ import test, { type TestContext } from 'node:test';
 
 import { LocalAaveReadError, type LocalAaveSnapshot } from './reader';
 import { createLocalAaveServer } from './server';
+import { LocalSolanaReadError, type LocalSolanaSnapshot } from './solana-reader';
 
 async function start(
   t: TestContext,
   read: (wallet: string | null, signal: AbortSignal) => Promise<LocalAaveSnapshot> = async () => {
     throw new LocalAaveReadError('UNAVAILABLE');
   },
+  solanaRead: (
+    wallet: string | null,
+    signal: AbortSignal,
+  ) => Promise<LocalSolanaSnapshot> = async () => {
+    throw new LocalSolanaReadError('UNAVAILABLE');
+  },
 ) {
-  const server = createLocalAaveServer({ read });
+  const server = createLocalAaveServer({ read }, { read: solanaRead });
   server.listen(0, '127.0.0.1');
   await once(server, 'listening');
   t.after(() => {
@@ -186,5 +193,92 @@ test('refuses production startup', () => {
   } finally {
     if (previous === undefined) delete process.env.NODE_ENV;
     else process.env.NODE_ENV = previous;
+  }
+});
+
+test('dispatches Solana addresses to its own reader and rejects Ethereum addresses there', async (t) => {
+  const seen: (string | null)[] = [];
+  const { url, headers } = await start(t, undefined, async (wallet) => {
+    seen.push(wallet);
+    throw new LocalSolanaReadError('UNAVAILABLE');
+  });
+  const wallet = 'EZC9wzVCvihCsCHEMGADYdsRhcpdRYWzSCZAVegSCfqY';
+  assert.equal(
+    (
+      await fetch(`${url}/api/solana/read`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ address: `0x${'ab'.repeat(20)}` }),
+      })
+    ).status,
+    400,
+  );
+  assert.equal(
+    (
+      await fetch(`${url}/api/solana/read`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ address: wallet }),
+      })
+    ).status,
+    503,
+  );
+  assert.deepEqual(seen, [wallet]);
+});
+
+test('applies origin and method checks to Solana without making RPC calls', async (t) => {
+  let reads = 0;
+  const { url, headers } = await start(t, undefined, async () => {
+    reads++;
+    throw new Error('unexpected');
+  });
+  assert.equal(
+    (
+      await fetch(`${url}/api/solana/read`, {
+        method: 'POST',
+        headers: { ...headers, Origin: 'https://attacker.example' },
+        body: '{"address":null}',
+      })
+    ).status,
+    403,
+  );
+  assert.equal((await fetch(`${url}/api/solana/read`)).status, 404);
+  assert.equal(reads, 0);
+});
+
+test('a pending Ethereum read does not block Solana testing', async (t) => {
+  let began!: () => void;
+  let finish!: () => void;
+  const started = new Promise<void>((resolve) => {
+    began = resolve;
+  });
+  const released = new Promise<void>((resolve) => {
+    finish = resolve;
+  });
+  let solanaReads = 0;
+  const { url, headers } = await start(
+    t,
+    async () => {
+      began();
+      await released;
+      throw new LocalAaveReadError('UNAVAILABLE');
+    },
+    async () => {
+      solanaReads++;
+      throw new LocalSolanaReadError('UNAVAILABLE');
+    },
+  );
+  const first = fetch(`${url}/api/read`, { method: 'POST', headers, body: '{"address":null}' });
+  await started;
+  try {
+    assert.equal(
+      (await fetch(`${url}/api/solana/read`, { method: 'POST', headers, body: '{"address":null}' }))
+        .status,
+      503,
+    );
+    assert.equal(solanaReads, 1);
+  } finally {
+    finish();
+    await first;
   }
 });

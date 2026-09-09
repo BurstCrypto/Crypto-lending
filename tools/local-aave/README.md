@@ -1,52 +1,68 @@
-# Local Aave on real Ethereum
+# Local Ethereum and Solana
 
 Run from the repository root with its Node/npm prerequisites and dependencies installed:
 
 ```powershell
 npm ci
-npm run dev:aave:local
+npm run dev:chains:local
 ```
 
 Open **http://127.0.0.1:3300**. Stop with Ctrl+C in the launcher terminal.
 The fixed port avoids the web application's default port 3000. If 3300 is
 already occupied, the launcher reports an error; it never stops another process.
 
-This is a standalone development view of Aave V3's Ethereum USDC/USDT reserves.
-It displays supply APR, variable borrow APR, total supplied, variable debt and
-available liquidity. An optional public Ethereum address adds its aToken and
-variable-debt balances. Blank input fetches markets only. Missing or conflicting
-data displays an error; explicit on-chain zero balances display as zero.
+Select **Ethereum** or **Solana**, then paste that chain's public address and
+click **Refresh live data**. Blank input reads market data. The browser wallet
+button can copy the public address from an injected Ethereum wallet or Phantom
+after its connection prompt. It does not request an ownership signature or
+transaction. Without an installed extension, use the address field.
+
+| Network  | Live local coverage                                                                                           |
+| -------- | ------------------------------------------------------------------------------------------------------------- |
+| Ethereum | Aave V3 USDC/USDT rates, liquidity, supply and variable-debt balances                                         |
+| Solana   | SOL/USDC/USDT wallet balances; Kamino main-market USDC reserve and the default standard/USDC lending accounts |
+
+Addresses stay separate per chain in page memory. Changing the chain or editing
+an address cancels the previous read; a late response cannot replace the new
+selection. Missing or conflicting evidence displays an error. Explicit on-chain
+zero balances display as zero; an absent Kamino account displays **not found**.
+This remains a partial protocol view: Kamino coverage excludes other account
+IDs, markets, assets, Multiply, fixed-rate products and vaults.
 
 No AWS login, RPC API key, Docker container, database, private key or wallet
-signature is needed. The tool reads through
+signature is needed. Ethereum reads use
 [PublicNode's Ethereum endpoint](https://ethereum-rpc.publicnode.com/) and the
 [dRPC public Ethereum endpoint](https://drpc.org/docs/ethereum-api).
+Solana reads use [PublicNode](https://solana.publicnode.com/) and the
+[Solana mainnet public RPC](https://solana.com/docs/references/clusters).
 Internet access is required; public services can throttle or become unavailable.
 A wallet lookup sends that public address to both services. The tool keeps no
 address history and does not log addresses or upstream response details.
 
 The page reads on load and on an explicit refresh. It does not poll in the
-background. One read runs at a time, with a five-second minimum between starts.
+background. One read runs at a time per chain, with a five-second minimum between
+starts on that chain. A pending Ethereum read does not block a Solana read.
 The displayed block time and observation time identify the snapshot; refresh
-to update it. Rates are APR, before compounding. Token quantities are rounded
+to update it. Aave rates are APR, before compounding. Token quantities are rounded
 for display, while the local JSON response retains exact decimal strings.
 
 ## Scope
 
 This public-address lookup does not establish account identity, wallet ownership,
 durable chain checkpoints, portfolio completeness, account health, liquidation
-risk or eligibility to borrow. Only USDC and USDT positions are included.
+risk or eligibility to borrow. Position coverage is limited to the table above.
 The application's ten planned providers remain disabled. No supplying,
 borrowing, repayment, withdrawal, approval or transaction signing is exposed.
 
 PublicNode/dRPC agreement is an endpoint comparison. It is not evidence of
 approved independent data provenance; dRPC can aggregate upstream providers.
+Both chains compare endpoint responses; this is not production source approval.
 The result always carries `LOCAL_READ_ONLY` and `mayAuthorizeFinancialAction: false`.
 It is not passed to production position admission, account APIs or workers.
 Production activation still requires the controls in the
 [Aave integration record](../../docs/aave-readonly-integration.md).
 
-## Read checks
+## Ethereum read checks
 
 Both endpoints must report Ethereum chain ID 1. If their finalized heights
 differ, the reader selects the lower height and verifies its block hash on the
@@ -84,12 +100,81 @@ are outside both production application build roots.
 npm run test:local-aave
 npm run typecheck:local-aave
 npm run lint:local-aave
-npm run aave:local:check
+npm run chains:local:check
 ```
 
 The first three commands are offline and included in the root test, typecheck
-and lint commands used by CI. The last command deliberately reads the public
-Ethereum endpoints once and prints a market snapshot; it is not run in CI.
+and lint commands used by CI. The last command deliberately reads both chains
+and prints their market snapshots; it is not run in CI. For one chain, use
+`npm run aave:local:check` or `npm run solana:local:check`. The earlier
+`npm run dev:aave:local` command remains an alias for the combined local server.
+
+## Solana read checks
+
+Both RPCs must report Solana's full mainnet genesis hash. Token discovery uses
+the Solana public RPC, because PublicNode's indexed queries require a personal
+token. Discovered USDC/USDT accounts, the wallet's SOL account, fixed mint and
+Kamino reserve accounts, and two derived default Kamino obligation addresses
+are read together through `getMultipleAccounts` on both endpoints. SPL accounts
+must have the expected mint, wallet owner, token program and binary layout.
+The reader sums every discovered account for each supported mint, including
+accounts other than the associated token account. It rejects duplicate lists
+or an account list that changes during the read.
+
+Account requests use `finalized` commitment. Their actual response context slots
+are retained and must be within 128 slots of the requested floor and each other.
+[`minContextSlot`](https://solana.com/docs/rpc/http/getmultipleaccounts) is a
+lower bound; the page never labels it as an exact requested snapshot slot.
+Both endpoints must return matching account bytes and metadata. One bounded
+retry handles an account refresh between responses; persistent disagreement
+fails the read. A matching JSON-RPC `-32016` response gets at most two 500-ms
+waits for a lagging node to reach the requested minimum slot. Those requests
+share the original deadline and byte budget; other failures are not retried.
+Both endpoints also verify the same block at the lower account
+context slot, with matching hash, parent and recent timestamp. Genesis is
+checked again at the end. Agreement at different slots means matching observed
+state, not a cryptographic proof that both responses came from one slot.
+
+Kamino decoding follows the repository's pinned
+[`klend-sdk` revision](https://github.com/Kamino-Finance/klend-sdk/tree/38845294447623f6de3afc9dec29875f959f6f48).
+It checks account sizes, discriminators, program owners, market/mint bindings,
+and obligation owner/tag. Supplied USDC is estimated from collateral shares and
+the reserve's recorded net liquidity, excluding protocol and referral fees.
+Borrowed USDC uses the recorded cumulative borrow index and rounds upward to
+atomic units. Interest since the reserve's last refresh is excluded. The page
+shows refresh slots; these amounts are not payoff quotes or health assessments.
+
+The Solana reader has a thirty-second deadline, a one-MiB HTTP body budget per
+endpoint, and at most 100 accounts in the combined request. Each mint's discovery
+list is capped at 64 accounts; exceeding any limit fails rather than truncates.
+Both accepted RPC operations are cancelled and drained on failure or browser
+disconnect. No production transport method or activation rule was expanded.
+
+## Solana integration verification, September 9
+
+All 62 local reader, server and browser tests passed, as did local lint and type
+checks. The tests include positive supplied/debt calculations, multiple token
+accounts, single-lamport formatting, mixed-chain address rejection, chain-switch
+races, account mismatch, byte limits, cancellation and connection without signing.
+
+A live lookup of the public example address in
+[Kamino's developer guide](https://kamino.com/docs/build/developers/borrow)
+returned 0.050443138 SOL in the browser at finalized slot 445,669,971, observed
+at 17:39:56 UTC.
+Its standard obligation existed with zero USDC exposure; its default USDC lending
+account was absent. This was a documentation example, not the user's wallet.
+Live market reads also succeeded on both chains. No wallet secret, signature,
+transaction, cloud deployment or paid RPC credential was used. Logs are under
+`.local-validation/solana-local-20260909/`. User-specific wallet testing still
+requires that user's public address; browser extension prompts were tested with
+mock providers, not an installed Phantom extension.
+
+Production-preflight tests passed 136 tests with one Windows filesystem skip.
+The combined live CLI check, provider inventory validation, formatting and the
+repository secret scan passed. The production API source snapshot is unchanged
+from the earlier Ethereum checkpoint below.
+
+## Earlier Ethereum verification checkpoint
 
 On September 9, 2026, the live market read and browser rendering succeeded on
 this Windows workstation. The browser displayed matching USDC/USDT data at

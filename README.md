@@ -17,17 +17,18 @@ The next engineering milestone starts with the
 
 ## Start locally
 
-For a live Aave USDC/USDT market view with optional public wallet lookup, run:
+For live Ethereum/Aave and Solana/Kamino views with public wallet lookups, run:
 
 ```powershell
 npm ci
-npm run dev:aave:local
+npm run dev:chains:local
 ```
 
 Open `http://127.0.0.1:3300`. This read-only local tool needs internet access but
 no AWS account, RPC API key, database, or wallet signature. It does not enable
-transactions or the production provider directory. See the
-[local Aave runbook](tools/local-aave/README.md) for checks and limitations.
+transactions or the production provider directory. Select Ethereum or Solana in
+the page, then paste a public address or use the browser wallet button. See the
+[local chain runbook](tools/local-aave/README.md) for checks and coverage limits.
 
 For the full web/API foundation and its local infrastructure:
 

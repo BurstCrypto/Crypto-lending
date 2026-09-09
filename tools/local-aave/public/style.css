@@ -269,7 +269,58 @@ footer {
   font-size: 12px;
   line-height: 1.7;
 }
+.chain-picker {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+.chain-picker button {
+  flex: 1;
+  background: #17281d;
+  color: #b4c9bc;
+  border: 1px solid #43594a;
+}
+.chain-picker button[aria-pressed='true'] {
+  background: #b9f4ce;
+  color: #12311d;
+}
+.chain-picker span {
+  font-weight: 400;
+}
+.wallet-connect {
+  margin-top: 13px;
+  background: transparent;
+  color: #b9f4ce;
+  border: 1px solid #43594a;
+  padding: 9px 13px;
+}
+.wallet-connect:hover {
+  background: #2a4031;
+}
+.wallet-balances {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 20px;
+  margin: 22px 0;
+  padding: 25px;
+  border: 1px solid #334539;
+  border-radius: 14px;
+}
+.wallet-balances .prominent strong {
+  font-size: 24px;
+  overflow-wrap: anywhere;
+}
+#positions {
+  margin-top: 20px;
+}
 @media (max-width: 640px) {
+  .chain-picker button {
+    flex-direction: column;
+    gap: 5px;
+  }
+  .wallet-balances {
+    grid-template-columns: 1fr;
+  }
   main {
     padding: 0 20px;
   }

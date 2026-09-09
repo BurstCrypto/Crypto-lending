@@ -3,6 +3,7 @@ import { createServer, type ServerResponse, type IncomingMessage, type Server } 
 import { join } from 'node:path';
 
 import { LocalAaveReader, LocalAaveReadError, walletAddress } from './reader';
+import { LocalSolanaReader, LocalSolanaReadError, solanaWalletAddress } from './solana-reader';
 
 export const LOCAL_PORT = 3300;
 export const LOCAL_URL = `http://127.0.0.1:${LOCAL_PORT}`;
@@ -16,7 +17,10 @@ function send(res: ServerResponse, status: number, value: unknown): void {
   }
 }
 
-async function input(req: IncomingMessage): Promise<string | null> {
+async function input(
+  req: IncomingMessage,
+  validate: (value: unknown) => string | null,
+): Promise<string | null> {
   const chunks: Buffer[] = [];
   let bytes = 0;
   for await (const chunk of req) {
@@ -34,12 +38,13 @@ async function input(req: IncomingMessage): Promise<string | null> {
     !Object.hasOwn(value, 'address')
   )
     throw new Error('Invalid body');
-  return walletAddress((value as Record<string, unknown>).address);
+  return validate((value as Record<string, unknown>).address);
 }
 
 /** Loopback-only development UI. Never registers a production provider or accepts transactions. */
 export function createLocalAaveServer(
   reader: Pick<LocalAaveReader, 'read'> = new LocalAaveReader(),
+  solanaReader: Pick<LocalSolanaReader, 'read'> = new LocalSolanaReader(),
 ): Server {
   if (process.env.NODE_ENV === 'production') throw new Error('Local Aave is a development tool.');
   const assets = new Map(
@@ -52,8 +57,8 @@ export function createLocalAaveServer(
       { body: readFileSync(join(__dirname, 'public', file!)), type },
     ]),
   );
-  let active: AbortController | null = null;
-  let nextReadAt = 0;
+  const active = new Map<string, AbortController>();
+  const nextReadAt = new Map<string, number>();
   const server = createServer(
     {
       maxHeaderSize: 8192,
@@ -92,7 +97,7 @@ export function createLocalAaveServer(
         send(res, 200, { status: 'running', mode: 'LOCAL_READ_ONLY' });
         return;
       }
-      if (req.method !== 'POST' || req.url !== '/api/read') {
+      if (req.method !== 'POST' || !['/api/read', '/api/solana/read'].includes(req.url ?? '')) {
         send(res, 404, { error: 'Not found.' });
         return;
       }
@@ -110,7 +115,8 @@ export function createLocalAaveServer(
         send(res, 400, { error: 'Send a small JSON object containing only address.' });
         return;
       }
-      if (active || Date.now() < nextReadAt) {
+      const chain = req.url === '/api/solana/read' ? 'solana' : 'ethereum';
+      if (active.has(chain) || Date.now() < (nextReadAt.get(chain) ?? 0)) {
         res.setHeader('Retry-After', '5');
         send(res, 429, {
           error: 'A read is running or was just requested. Please wait five seconds.',
@@ -118,43 +124,49 @@ export function createLocalAaveServer(
         return;
       }
       const controller = new AbortController();
-      active = controller;
+      active.set(chain, controller);
       const cancel = (): void => controller.abort();
       req.once('aborted', cancel);
       res.once('close', cancel);
       void (async () => {
         let wallet: string | null;
         try {
-          wallet = await input(req);
+          wallet = await input(req, chain === 'solana' ? solanaWalletAddress : walletAddress);
         } catch (error) {
           send(res, 400, {
             error:
-              error instanceof LocalAaveReadError
+              error instanceof LocalAaveReadError || error instanceof LocalSolanaReadError
                 ? error.message
                 : 'Send a small JSON object containing only address.',
           });
           return;
         }
         if (controller.signal.aborted) return;
-        nextReadAt = Date.now() + COOLDOWN_MS;
+        nextReadAt.set(chain, Date.now() + COOLDOWN_MS);
         try {
-          send(res, 200, await reader.read(wallet, controller.signal));
+          send(
+            res,
+            200,
+            await (chain === 'solana' ? solanaReader : reader).read(wallet, controller.signal),
+          );
         } catch (error) {
           send(res, 503, {
             error:
-              error instanceof LocalAaveReadError
+              error instanceof LocalAaveReadError || error instanceof LocalSolanaReadError
                 ? error.message
-                : 'Live Aave data is temporarily unavailable. Please try again.',
+                : `Live ${chain === 'solana' ? 'Solana' : 'Aave'} data is temporarily unavailable. Please try again.`,
           });
         }
       })().finally(() => {
         req.removeListener('aborted', cancel);
         res.removeListener('close', cancel);
-        active = null;
+        active.delete(chain);
       });
     },
   );
   server.maxConnections = 16;
-  server.on('close', () => active?.abort());
+  server.on('close', () => {
+    for (const controller of active.values()) controller.abort();
+  });
   return server;
 }
