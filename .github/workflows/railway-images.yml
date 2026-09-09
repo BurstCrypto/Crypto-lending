@@ -1,0 +1,62 @@
+name: Railway release images
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: railway-images-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      REGISTRY: ghcr.io
+    steps:
+      - name: Check out release revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Log in to GitHub Container Registry
+        run: echo "${{ github.token }}" | docker login "$REGISTRY" --username "${{ github.actor }}" --password-stdin
+
+      - name: Build and publish immutable release images
+        env:
+          REVISION: ${{ github.sha }}
+        run: |
+          IMAGE_PREFIX="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/crypto-lending"
+          SOURCE_EPOCH="$(git show -s --format=%ct "$REVISION")"
+          SOURCE_CREATED="$(date -u -d "@$SOURCE_EPOCH" +%Y-%m-%dT%H:%M:%SZ)"
+          for TARGET in api web; do
+            docker build --provenance=false --file "Dockerfile.$TARGET" \
+              --build-arg "OCI_SOURCE=https://github.com/Trey-Gleason/Crypto-lending" \
+              --build-arg "OCI_REVISION=$REVISION" \
+              --build-arg "OCI_CREATED=$SOURCE_CREATED" \
+              --tag "$IMAGE_PREFIX-$TARGET:$REVISION" .
+            docker push "$IMAGE_PREFIX-$TARGET:$REVISION"
+          done
+          docker build --file deploy/railway/gateway/Dockerfile \
+            --tag "$IMAGE_PREFIX-gateway:$REVISION" deploy/railway/gateway
+          docker push "$IMAGE_PREFIX-gateway:$REVISION"
+
+      - name: Report immutable image digests
+        env:
+          REVISION: ${{ github.sha }}
+        run: |
+          IMAGE_PREFIX="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/crypto-lending"
+          for TARGET in gateway web api; do
+            DIGEST="$(docker buildx imagetools inspect "$IMAGE_PREFIX-$TARGET:$REVISION" --format '{{json .Manifest.Digest}}' | tr -d '\"')"
+            test "${DIGEST#sha256:}" != "$DIGEST"
+            printf '%s=ghcr.io/%s/crypto-lending-%s@%s\n' \
+              "$(printf '%s' "$TARGET" | tr '[:lower:]' '[:upper:]')_IMAGE" \
+              "${GITHUB_REPOSITORY_OWNER,,}" "$TARGET" "$DIGEST" >> "$GITHUB_STEP_SUMMARY"
+          done

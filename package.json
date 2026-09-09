@@ -112,6 +112,7 @@
     "ajv": "8.20.0",
     "hardhat": "3.14.0",
     "prettier": "^3.9.6",
+    "railway": "^3.11.0",
     "typescript": "^5.9.3"
   },
   "scarfSettings": {
