@@ -14,6 +14,8 @@ cleanup() {
 }
 trap cleanup EXIT
 
+test "$(docker run --rm --entrypoint id crypto-lending-gateway:ci -u)" != '0'
+
 docker network create "$network" >/dev/null
 docker run --detach --name "$api" --network "$network" --entrypoint node \
   crypto-lending-api:ci -e \
