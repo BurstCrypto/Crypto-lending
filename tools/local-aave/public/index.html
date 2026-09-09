@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Crypto Lending | Local Aave</title>
+    <link rel="stylesheet" href="/style.css" />
+    <script src="/app.js" defer></script>
+  </head>
+  <body>
+    <main>
+      <header>
+        <a class="brand" href="/">◈ <span>Crypto Lending</span></a
+        ><span class="pill">Local · Read only</span>
+      </header>
+      <section class="intro">
+        <p class="eyebrow">ETHEREUM MAINNET / AAVE V3</p>
+        <h1>Your local window<br />into Aave.</h1>
+        <p class="description">
+          Real USDC and USDT markets, read directly from Ethereum at a finalized block. Explore
+          rates and look up a wallet’s supplied assets and variable debt.
+        </p>
+      </section>
+      <form id="lookup">
+        <label for="address">Wallet address <span>optional</span></label>
+        <div class="input-row">
+          <input
+            id="address"
+            name="address"
+            placeholder="0x… or leave blank for markets"
+            autocomplete="off"
+            spellcheck="false"
+            maxlength="42"
+            aria-describedby="privacy"
+          /><button id="refresh" type="submit">
+            Refresh live data <span aria-hidden="true">↗</span>
+          </button>
+        </div>
+        <p id="privacy" class="hint">
+          A lookup sends this public address to PublicNode and dRPC. No signature or wallet
+          ownership verification is involved.
+        </p>
+      </form>
+      <div id="status" role="status" aria-live="polite">Connecting to Ethereum…</div>
+      <section id="results" aria-label="Aave market data" hidden>
+        <div class="section-title">
+          <h2>Finalized market snapshot</h2>
+          <span class="matched">● Two endpoints agree</span>
+        </div>
+        <div id="markets" class="markets"></div>
+        <div class="evidence">
+          <div>
+            <span class="label">FINALIZED BLOCK</span><strong id="block-number"></strong
+            ><span id="block-time"></span>
+          </div>
+          <div>
+            <span class="label">OBSERVED</span><strong id="observed"></strong
+            ><span>PublicNode + dRPC</span>
+          </div>
+        </div>
+        <p id="wallet-note" class="hint"></p>
+        <details>
+          <summary>Block hash</summary>
+          <code id="block-hash"></code>
+        </details>
+      </section>
+      <footer>
+        Rates are variable APR, before compounding. This local view supports public data reads;
+        supplying, borrowing, repaying and withdrawals are not available here. Refresh to fetch a
+        new snapshot.
+      </footer>
+    </main>
+  </body>
+</html>

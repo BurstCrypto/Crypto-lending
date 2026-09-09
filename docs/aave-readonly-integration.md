@@ -1,5 +1,13 @@
 # Aave V3 Ethereum read-only connection
 
+Update, 2026-09-09: the [local Aave browser tool](../tools/local-aave/README.md)
+now reads real finalized Ethereum USDC/USDT markets and public wallet balances
+through two public RPC endpoints. It runs on `http://127.0.0.1:3300` without AWS,
+RPC credentials or a database. This is a development lookup, separate from the
+account-owned production position path described below. Production provider
+activation and transactions remain outstanding. The validation record below
+describes the September 8 checkpoint; the local tool runbook records the update.
+
 Status, 2026-09-08: private connection code implemented and tested locally.
 Aave is not live in the application. The directory still has ten planned
 providers, zero providers with live-read evidence, and zero with transaction

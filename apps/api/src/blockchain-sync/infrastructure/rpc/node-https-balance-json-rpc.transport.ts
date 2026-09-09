@@ -628,10 +628,20 @@ function resolvePublicAddresses(
   };
 
   try {
-    resolver.resolve4(hostname, (error, addresses) => finishFamily(4, error, addresses));
-    if (!completed) {
-      resolver.resolve6(hostname, (error, addresses) => finishFamily(6, error, addresses));
-    }
+    // Some local DNS forwarders drop a second simultaneous query from the same
+    // resolver socket. Sequence the families within the shared connection
+    // deadline, and still validate every A/AAAA answer before opening HTTPS.
+    resolver.resolve4(hostname, (error, addresses) => {
+      finishFamily(4, error, addresses);
+      if (completed) return;
+      try {
+        resolver.resolve6(hostname, (error, addresses) => finishFamily(6, error, addresses));
+      } catch {
+        completed = true;
+        cancelResolver(resolver);
+        callback(null);
+      }
+    });
   } catch {
     completed = true;
     cancelResolver(resolver);

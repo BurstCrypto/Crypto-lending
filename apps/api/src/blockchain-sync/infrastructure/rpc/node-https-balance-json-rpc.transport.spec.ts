@@ -251,6 +251,33 @@ afterEach(() => {
 });
 
 describe('Node HTTPS balance JSON-RPC transport response limits', () => {
+  it('sequences DNS families and waits for both before opening HTTPS', async () => {
+    let finishIpv4: ResolverCallback | undefined;
+    let finishIpv6: ResolverCallback | undefined;
+    resolverBehavior = (_resolver, family, _hostname, callback) => {
+      if (family === 4) finishIpv4 = callback;
+      else finishIpv6 = callback;
+    };
+    const pending = new NodeHttpsBalanceJsonRpcTransport(config()).exchangeBounded(
+      rpc(),
+      new AbortController().signal,
+      64,
+    );
+    expect(finishIpv4).toBeDefined();
+    expect(finishIpv6).toBeUndefined();
+    expect(requestMock).not.toHaveBeenCalled();
+    finishIpv4!(null, [PUBLIC_IPV4]);
+    expect(finishIpv6).toBeDefined();
+    expect(requestMock).not.toHaveBeenCalled();
+    finishIpv6!(null, []);
+    const call = httpsCalls[0]!;
+    secure(call);
+    const body = Buffer.from('{"result":"0x1"}');
+    deliver(call, jsonResponse(200, body), [body]);
+    call.request.emit('close');
+    await expect(pending).resolves.toMatchObject({ value: { result: '0x1' } });
+  });
+
   it.each(['content-length', 'chunked'] as const)(
     'retains exact body bytes for %s responses',
     async (framing) => {

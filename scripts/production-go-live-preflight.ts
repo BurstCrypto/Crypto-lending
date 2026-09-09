@@ -923,7 +923,7 @@ const REVIEWED_BALANCE_CONSUMER_ARTIFACT_SHA256 = Object.freeze({
     '1565ac2215fd495359ad128c0945ea0b170a1c546ce27469a1c828da24c3d4d2',
   balanceJsonRpcSource: 'f8fdf7f1e292824a8041e37455022103b6e54720dde125bcf6e055285d1bec75',
   nodeHttpsBalanceJsonRpcTransportSource:
-    '27d3d7cd9e2caa57010e5024c989253eab6f3e659152f4989060c3b9d3ce99ff',
+    '93884248a6e603b378166e84422b8b222b53ddca3fb8d3b5c4caae2e132b4879',
   ethereumBalanceIndexerSource: 'd5fb11f282817206bbdb7e054962f1830f4a0f6122ffa3786094a65e7c4cb353',
   solanaBalanceIndexerSource: '1958e16a9878b0df9328d912a7bc855b102cda643818cb97d52d5ee521387d9e',
   ethereumMainnetBalanceDeploymentManifestSource:
@@ -974,7 +974,7 @@ const REVIEWED_BALANCE_CONSUMER_ARTIFACT_SHA256 = Object.freeze({
   sqsModuleSource: 'dc958100bd372500a9428c28cc6219a4cb00db61314a63478368d0b0cf95221b',
   sqsTokensSource: REVIEWED_SQS_TOKENS_SOURCE_SHA256,
   apiPackageSource: 'c911e7171be6ff64908d1c15fc1d240f51ace8e8b90d6bcad4c605c994439774',
-  rootPackageSource: '8b445f07340c4d3316aea27b153c8a7ddd356b0551364501445b4d081ca7c535',
+  rootPackageSource: 'a9f9c67f1dda2472e8c8322808e2e59673904c1dd12bd960614540caf4b0627d',
   rootPackageLockSource: 'bc34899fd5992398c426fee6999d84fe828877f984222d396d7f6836671d9035',
   applicationTemplateSource: '58b040eea3858661d45ab0f1334457c0b937cfb8179bad665aa3bb649171807c',
   applicationValidatorSource: '3da9441a8d3c5de0b47b88fd0c11d489c940234702f768ea9774279f7fab3e00',
@@ -9647,7 +9647,7 @@ const API_RUNTIME_PINNED_INPUT_PATHS = Object.freeze([
   'tsconfig.json',
 ]);
 const REVIEWED_API_RUNTIME_REPOSITORY_SNAPSHOT_SHA256 =
-  '05be95196a5266d9889b025c6a589386e63a10755be6b63387e9a6ceae9fb4ff';
+  'ddbce511af4eca3706b2e21fa95c1c66640c1a711a10af35f355ed63f189b094';
 const API_RUNTIME_OWNED_DEPLOYMENT_IDENTITY_PATHS = new Set([
   'blockchain-sync/infrastructure/rpc/ethereum-mainnet-balance-deployment-identity.verifier.ts',
   'blockchain-sync/infrastructure/rpc/ethereum-mainnet-balance-deployment.manifest.ts',
@@ -12080,7 +12080,8 @@ function hasDormantNodeHttpsBalanceRpcTransportContract(
     'maxTimeout: CONNECT_TIMEOUT_MS,',
     'timeout: CONNECT_TIMEOUT_MS,',
     'tries: 1,',
-    'resolver.resolve4(hostname, (error, addresses) => finishFamily(4, error, addresses));',
+    'resolver.resolve4(hostname, (error, addresses) => {',
+    'finishFamily(4, error, addresses);',
     'resolver.resolve6(hostname, (error, addresses) => finishFamily(6, error, addresses));',
     'resolver.cancel();',
     'const clientRequest = https.request(',
