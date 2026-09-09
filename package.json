@@ -50,7 +50,8 @@
     "lint:production:artifacts": "eslint \"infra/containers/*.mjs\" infra/aws/validate-account-guardrails.mjs infra/aws/validate-account-guardrails.test.mjs infra/aws/validate-application-observability.mjs infra/aws/validate-application-observability.test.mjs infra/aws/validate-auth-wallet-secret-version-transition.mjs infra/aws/validate-auth-wallet-secret-version-transition.test.mjs infra/aws/validate-balance-consumer-deployment-envelope.mjs infra/aws/validate-balance-consumer-deployment-envelope.test.mjs infra/aws/validate-balance-consumer-metadata-secret-version-transition.mjs infra/aws/validate-balance-consumer-metadata-secret-version-transition.test.mjs infra/aws/validate-fixed-slot-credential-transition.mjs infra/aws/validate-fixed-slot-credential-transition.test.mjs infra/aws/validate-production-deployment-intent.mjs infra/aws/validate-production-deployment-intent.test.mjs infra/aws/validate-redis-operator-secret-version-transition.mjs infra/aws/validate-redis-operator-secret-version-transition.test.mjs infra/egress/validate-egress-policy.mjs infra/egress/validate-egress-policy.test.mjs infra/postgres/validate-bootstrap-principals.mjs infra/postgres/validate-bootstrap-principals.test.mjs infra/providers/validate-kan-62-provider-decision.mjs infra/providers/validate-kan-62-provider-decision.test.mjs infra/providers/validate-active-provider-research-captures.mjs infra/providers/validate-active-provider-research-captures.test.mjs infra/providers/validate-dormant-provider-inventory.mjs infra/providers/validate-dormant-provider-inventory.test.mjs infra/providers/dormant-mainnet-action-recovery-inventory.mjs infra/providers/validate-dormant-mainnet-action-boundary.mjs infra/providers/validate-dormant-mainnet-action-boundary.test.mjs \"infra/security/*.mjs\" infra/shared/parse-strict-json.mjs infra/shared/read-secure-local-file.mjs infra/shared/validate-ed25519-public-key.mjs infra/shared/validate-ed25519-public-key.test.mjs \"infra/valuation/*.mjs\" --config scripts/eslint.config.mjs --global Buffer --global console --global process --global structuredClone --global TextDecoder --global URL",
     "lint": "npm run lint --workspaces --if-present && npm run lint:production:preflight && npm run lint:release && npm run lint:production:sbom && npm run lint:production:artifacts",
     "typecheck": "npm run typecheck --workspaces --if-present && npm run typecheck:production:preflight",
-    "test": "npm run test --workspaces --if-present && npm run test:production:preflight && npm run test:release && npm run test:production:sbom",
+    "test": "npm run test --workspaces --if-present && npm run test:production:preflight && npm run test:release && npm run test:production:sbom && npm run test:railway",
+    "test:railway": "tsx --test .railway/railway.test.ts",
     "test:local-demo": "node --test tools/local-demo/*.test.mjs && npm run demo:local:preflight",
     "test:local-evm": "node --test tools/local-evm/*.test.mjs",
     "test:integration": "npm run test:integration --workspace @crypto-lending/api",
@@ -112,6 +113,7 @@
     "ajv": "8.20.0",
     "hardhat": "3.14.0",
     "prettier": "^3.9.6",
+    "railway": "^3.11.0",
     "typescript": "^5.9.3"
   },
   "scarfSettings": {

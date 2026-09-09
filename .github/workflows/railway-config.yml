@@ -1,0 +1,29 @@
+name: Railway infrastructure review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths: ['.railway/**']
+
+permissions:
+  actions: read
+  contents: read
+  pull-requests: write
+
+jobs:
+  plan:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    environment: production-plan
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: railwayapp/config@9e17d413dbe219f19d62538d9c06b5dbb5e9abf8 # v1
+        with:
+          cli-version: 5.42.1
+          command: plan
+          railway-token: ${{ secrets.RAILWAY_TOKEN }}
+        env:
+          RAILWAY_API_IMAGE: ${{ vars.RAILWAY_API_IMAGE }}
+          RAILWAY_GATEWAY_IMAGE: ${{ vars.RAILWAY_GATEWAY_IMAGE }}
+          RAILWAY_PUBLIC_DOMAIN: ${{ vars.RAILWAY_PUBLIC_DOMAIN }}
+          RAILWAY_WEB_IMAGE: ${{ vars.RAILWAY_WEB_IMAGE }}
