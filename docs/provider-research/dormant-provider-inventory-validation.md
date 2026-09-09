@@ -14,6 +14,14 @@ Gearbox also has one separately bounded, pure account-position transcript evalua
 
 Runtime source files are scanned for every exact adapter class/import stem and every inventoried semantics symbol/import stem. A reference outside the reviewed artifact itself fails validation, as does a Nest registration decorator. This intentionally prevents the static inventory from becoming runtime wiring through a module, barrel, CLI, controller, or other production source.
 
+The [Aave read-only connection](../aave-readonly-integration.md) adds two exact,
+separately byte-pinned private connection artifacts and their specifications:
+the PostgreSQL wallet/checkpoint context reader and the bounded HTTPS RPC
+transcript reader. Only those reviewed files may compose these components.
+Missing or modified artifacts and references from any other compiled runtime
+file fail validation. This exception supplies no endpoint configuration,
+runtime registration, source approval, or live evidence.
+
 Passing this validator proves only local artifact completeness and dormancy. It does not approve a provider, market, asset, endpoint, source pair, risk decision, recommendation, transaction, or production activation. Six provider-position sources are complete only as dormant local source artifacts; Gearbox remains an incomplete unauthenticated transcript boundary rather than source seven. All ten providers remain unavailable, with `liveReadEvidenceBound` and `transactionEvidenceBound` both 0 of 10.
 
 The offline production preflight invokes both bounded validators and keeps their

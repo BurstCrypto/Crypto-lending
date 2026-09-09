@@ -742,7 +742,7 @@ const REVIEWED_PROVIDER_POSITION_READ_ARTIFACT_SHA256 = Object.freeze({
   providerPositionChainAnchorCandidateFinalityFinalizerSource:
     '581c7c17dac3ca3a09a29ac9757efda55b02cb17ea882fc6788aa3d6cf6c33d8',
   providerPositionAaveV3EthereumSource:
-    '7bb670f1435d2a5dbd6ad707a3cfcef80b4ef3452433653a7f49a045440eaba5',
+    '346f2e23b73ab4ee13423b0c3f50b669c721abd16e430c16587f2a378acdeb88',
   providerPositionKaminoSource: 'eacdafa7fcd5fa5574183d0f0e2beb6a02c270cd8ecd71be6b7a120ca60355a6',
   providerPositionCompoundIIIEthereumSource:
     'f70dee0b5af6a5a0d137d5b580e1fcca95565c40141f96f0de79a9316e40569a',
@@ -923,7 +923,7 @@ const REVIEWED_BALANCE_CONSUMER_ARTIFACT_SHA256 = Object.freeze({
     '1565ac2215fd495359ad128c0945ea0b170a1c546ce27469a1c828da24c3d4d2',
   balanceJsonRpcSource: 'f8fdf7f1e292824a8041e37455022103b6e54720dde125bcf6e055285d1bec75',
   nodeHttpsBalanceJsonRpcTransportSource:
-    '429f008baa77c7e6791171d7cfd300e795c093d9c7eebb12d0bdd15e6301741f',
+    '27d3d7cd9e2caa57010e5024c989253eab6f3e659152f4989060c3b9d3ce99ff',
   ethereumBalanceIndexerSource: 'd5fb11f282817206bbdb7e054962f1830f4a0f6122ffa3786094a65e7c4cb353',
   solanaBalanceIndexerSource: '1958e16a9878b0df9328d912a7bc855b102cda643818cb97d52d5ee521387d9e',
   ethereumMainnetBalanceDeploymentManifestSource:
@@ -974,8 +974,8 @@ const REVIEWED_BALANCE_CONSUMER_ARTIFACT_SHA256 = Object.freeze({
   sqsModuleSource: 'dc958100bd372500a9428c28cc6219a4cb00db61314a63478368d0b0cf95221b',
   sqsTokensSource: REVIEWED_SQS_TOKENS_SOURCE_SHA256,
   apiPackageSource: 'c911e7171be6ff64908d1c15fc1d240f51ace8e8b90d6bcad4c605c994439774',
-  rootPackageSource: 'ed4223c0bea6eeaf054abb894298b7f7684efe24a724a81a47394e60090343b0',
-  rootPackageLockSource: 'ac745baf70f2e70b3ba779612f0a3cc2b10692860a47c54c927a1e4805b2e6a6',
+  rootPackageSource: '8b445f07340c4d3316aea27b153c8a7ddd356b0551364501445b4d081ca7c535',
+  rootPackageLockSource: 'bc34899fd5992398c426fee6999d84fe828877f984222d396d7f6836671d9035',
   applicationTemplateSource: '58b040eea3858661d45ab0f1334457c0b937cfb8179bad665aa3bb649171807c',
   applicationValidatorSource: '3da9441a8d3c5de0b47b88fd0c11d489c940234702f768ea9774279f7fab3e00',
   workloadTemplateSource: '4c74c98e73635df30570dfe1e726b41cb6f62832f0bfc2e43dcd087d384b78de',
@@ -9647,7 +9647,7 @@ const API_RUNTIME_PINNED_INPUT_PATHS = Object.freeze([
   'tsconfig.json',
 ]);
 const REVIEWED_API_RUNTIME_REPOSITORY_SNAPSHOT_SHA256 =
-  '251c92bbcda6bbf18494e6f59e38b927fee85de20cc40adfb5006c139ea5a92d';
+  '05be95196a5266d9889b025c6a589386e63a10755be6b63387e9a6ceae9fb4ff';
 const API_RUNTIME_OWNED_DEPLOYMENT_IDENTITY_PATHS = new Set([
   'blockchain-sync/infrastructure/rpc/ethereum-mainnet-balance-deployment-identity.verifier.ts',
   'blockchain-sync/infrastructure/rpc/ethereum-mainnet-balance-deployment.manifest.ts',
@@ -12069,6 +12069,11 @@ function hasDormantNodeHttpsBalanceRpcTransportContract(
     'export interface NodeHttpsBalanceJsonRpcTransportConfig {',
     'export class NodeHttpsBalanceJsonRpcTransport implements BalanceJsonRpcTransport {',
     'exchange(request: BalanceJsonRpcRequest, signal: AbortSignal): Promise<unknown> {',
+    'return exchangeWithLimit(this, request, signal, MAX_JSON_BYTES).then(({ value }) => value);',
+    'return exchangeWithLimit(this, request, signal, maximumResponseBytes);',
+    '!Number.isSafeInteger(maximumResponseBytes) ||',
+    'maximumResponseBytes < 1 ||',
+    'maximumResponseBytes > MAX_JSON_BYTES',
     "AbortSignal.prototype.addEventListener.call(signal, 'abort', onAbort, { once: true });",
     "AbortSignal.prototype.removeEventListener.call(signal, 'abort', state.abortListener);",
     'resolver = new dns.Resolver({',
@@ -12105,13 +12110,15 @@ function hasDormantNodeHttpsBalanceRpcTransportContract(
     "if (contentLengths?.length !== 1 || !/^(?:[1-9][0-9]{0,6})$/u.test(rawContentLength ?? '')) {",
     'if (!Number.isSafeInteger(contentLength) || contentLength > MAX_JSON_BYTES) return null;',
     "return Object.freeze({ framing: 'CONTENT_LENGTH' as const, contentLength });",
-    "metadata.framing === 'CONTENT_LENGTH' ? metadata.contentLength : MAX_JSON_BYTES;",
+    "(metadata.framing === 'CONTENT_LENGTH' && metadata.contentLength > bodyByteLimit)",
+    "metadata.framing === 'CONTENT_LENGTH' ? metadata.contentLength : bodyByteLimit;",
     'chunks.length >= MAX_RESPONSE_CHUNKS ||',
     'receivedBytes > maximumResponseBytes - buffer.length',
     '!response.complete ||',
     "(metadata.framing === 'CONTENT_LENGTH' && receivedBytes !== metadata.contentLength)",
     'if (!hasNoResponseTrailers(response.rawTrailers)) {',
     'return Array.isArray(rawTrailers) && rawTrailers.length === 0;',
+    'settleSuccess(Object.freeze({ value: parseStrictJson(text), bodyBytes: receivedBytes }));',
     'const awaitRequestClose = state.request !== undefined && !state.requestClosed;',
     'const awaitResponseClose = state.response !== undefined && !state.responseClosed;',
     'state.closeTimer = scheduleTimer(finishFailure, IO_CLOSE_TIMEOUT_MS);',

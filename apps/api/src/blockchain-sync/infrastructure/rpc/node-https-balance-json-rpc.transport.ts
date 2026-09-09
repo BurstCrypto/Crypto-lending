@@ -53,6 +53,20 @@ export interface NodeHttpsBalanceJsonRpcTransportConfig {
   readonly credential: NodeHttpsBalanceRpcCredential;
 }
 
+export interface BoundedBalanceJsonRpcResponse {
+  readonly value: unknown;
+  /** Actual decoded HTTP body bytes, including JSON whitespace. */
+  readonly bodyBytes: number;
+}
+
+export interface BoundedBalanceJsonRpcTransport {
+  exchangeBounded(
+    request: BalanceJsonRpcRequest,
+    signal: AbortSignal,
+    maximumResponseBytes: number,
+  ): Promise<BoundedBalanceJsonRpcResponse>;
+}
+
 interface ReviewedConfig {
   readonly networkId: NodeHttpsBalanceRpcNetworkId;
   readonly hostname: string;
@@ -96,164 +110,185 @@ export class NodeHttpsBalanceJsonRpcTransport implements BalanceJsonRpcTransport
   }
 
   exchange(request: BalanceJsonRpcRequest, signal: AbortSignal): Promise<unknown> {
-    const config = CONFIGS.get(this);
-    if (config === undefined) return Promise.reject(permanentFailure());
+    return exchangeWithLimit(this, request, signal, MAX_JSON_BYTES).then(({ value }) => value);
+  }
 
-    let reviewedRequest: BalanceJsonRpcRequest;
-    try {
-      reviewedRequest = reviewRequest(request, config.networkId);
-      if (readSignalAborted(signal)) return Promise.reject(unavailableFailure());
-    } catch (error) {
-      return Promise.reject(isFailure(error) ? error : permanentFailure());
-    }
+  exchangeBounded(
+    request: BalanceJsonRpcRequest,
+    signal: AbortSignal,
+    maximumResponseBytes: number,
+  ): Promise<BoundedBalanceJsonRpcResponse> {
+    return exchangeWithLimit(this, request, signal, maximumResponseBytes);
+  }
+}
 
-    let body: string;
-    try {
-      body = JSON.stringify(reviewedRequest);
-      if (Buffer.byteLength(body, 'utf8') > MAX_JSON_BYTES) throw new Error('oversized request');
-    } catch {
-      return Promise.reject(permanentFailure());
-    }
+function exchangeWithLimit(
+  transport: NodeHttpsBalanceJsonRpcTransport,
+  request: BalanceJsonRpcRequest,
+  signal: AbortSignal,
+  maximumResponseBytes: number,
+): Promise<BoundedBalanceJsonRpcResponse> {
+  const config = CONFIGS.get(transport);
+  if (config === undefined) return Promise.reject(permanentFailure());
+  if (
+    !Number.isSafeInteger(maximumResponseBytes) ||
+    maximumResponseBytes < 1 ||
+    maximumResponseBytes > MAX_JSON_BYTES
+  )
+    return Promise.reject(permanentFailure());
 
-    return new Promise((resolve, reject) => {
-      const state: ExchangeState = {
-        settled: false,
-        request: undefined,
-        response: undefined,
-        totalTimer: undefined,
-        connectTimer: undefined,
-        closeTimer: undefined,
-        abortListener: undefined,
-        resolver: undefined,
-        requestClosed: false,
-        responseClosed: false,
-        onRequestClose: undefined,
-        onResponseClose: undefined,
+  let reviewedRequest: BalanceJsonRpcRequest;
+  try {
+    reviewedRequest = reviewRequest(request, config.networkId);
+    if (readSignalAborted(signal)) return Promise.reject(unavailableFailure());
+  } catch (error) {
+    return Promise.reject(isFailure(error) ? error : permanentFailure());
+  }
+
+  let body: string;
+  try {
+    body = JSON.stringify(reviewedRequest);
+    if (Buffer.byteLength(body, 'utf8') > MAX_JSON_BYTES) throw new Error('oversized request');
+  } catch {
+    return Promise.reject(permanentFailure());
+  }
+
+  return new Promise((resolve, reject) => {
+    const state: ExchangeState = {
+      settled: false,
+      request: undefined,
+      response: undefined,
+      totalTimer: undefined,
+      connectTimer: undefined,
+      closeTimer: undefined,
+      abortListener: undefined,
+      resolver: undefined,
+      requestClosed: false,
+      responseClosed: false,
+      onRequestClose: undefined,
+      onResponseClose: undefined,
+    };
+
+    const cleanup = (): void => {
+      clearTimer(state.totalTimer);
+      clearTimer(state.connectTimer);
+      state.totalTimer = undefined;
+      state.connectTimer = undefined;
+      if (state.abortListener !== undefined) {
+        try {
+          AbortSignal.prototype.removeEventListener.call(signal, 'abort', state.abortListener);
+        } catch {
+          // A genuine AbortSignal should not fail removal. Cleanup stays best effort.
+        }
+        state.abortListener = undefined;
+      }
+    };
+
+    const settleFailure = (failure: BalanceJsonRpcTransportFailure): void => {
+      if (state.settled) return;
+      state.settled = true;
+      cleanup();
+      cancelResolver(state.resolver);
+      state.resolver = undefined;
+      let failureFinished = false;
+      const finishFailure = (): void => {
+        if (failureFinished) return;
+        failureFinished = true;
+        clearTimer(state.closeTimer);
+        state.closeTimer = undefined;
+        state.onRequestClose = undefined;
+        state.onResponseClose = undefined;
+        reject(failure);
       };
-
-      const cleanup = (): void => {
-        clearTimer(state.totalTimer);
-        clearTimer(state.connectTimer);
-        state.totalTimer = undefined;
-        state.connectTimer = undefined;
-        if (state.abortListener !== undefined) {
-          try {
-            AbortSignal.prototype.removeEventListener.call(signal, 'abort', state.abortListener);
-          } catch {
-            // A genuine AbortSignal should not fail removal. Cleanup stays best effort.
-          }
-          state.abortListener = undefined;
+      const awaitRequestClose = state.request !== undefined && !state.requestClosed;
+      const awaitResponseClose = state.response !== undefined && !state.responseClosed;
+      const finishWhenClosed = (): void => {
+        if (
+          (state.request === undefined || state.requestClosed) &&
+          (state.response === undefined || state.responseClosed)
+        ) {
+          finishFailure();
         }
       };
-
-      const settleFailure = (failure: BalanceJsonRpcTransportFailure): void => {
-        if (state.settled) return;
-        state.settled = true;
-        cleanup();
-        cancelResolver(state.resolver);
-        state.resolver = undefined;
-        let failureFinished = false;
-        const finishFailure = (): void => {
-          if (failureFinished) return;
-          failureFinished = true;
-          clearTimer(state.closeTimer);
-          state.closeTimer = undefined;
+      if (awaitRequestClose || awaitResponseClose) {
+        state.onRequestClose = finishWhenClosed;
+        state.onResponseClose = finishWhenClosed;
+        try {
+          state.closeTimer = scheduleTimer(finishFailure, IO_CLOSE_TIMEOUT_MS);
+        } catch {
           state.onRequestClose = undefined;
           state.onResponseClose = undefined;
-          reject(failure);
-        };
-        const awaitRequestClose = state.request !== undefined && !state.requestClosed;
-        const awaitResponseClose = state.response !== undefined && !state.responseClosed;
-        const finishWhenClosed = (): void => {
-          if (
-            (state.request === undefined || state.requestClosed) &&
-            (state.response === undefined || state.responseClosed)
-          ) {
-            finishFailure();
-          }
-        };
-        if (awaitRequestClose || awaitResponseClose) {
-          state.onRequestClose = finishWhenClosed;
-          state.onResponseClose = finishWhenClosed;
-          try {
-            state.closeTimer = scheduleTimer(finishFailure, IO_CLOSE_TIMEOUT_MS);
-          } catch {
-            state.onRequestClose = undefined;
-            state.onResponseClose = undefined;
-          }
         }
-        destroyResponse(state.response);
-        destroyRequest(state.request);
-        if (state.closeTimer === undefined) finishFailure();
-        else finishWhenClosed();
-      };
+      }
+      destroyResponse(state.response);
+      destroyRequest(state.request);
+      if (state.closeTimer === undefined) finishFailure();
+      else finishWhenClosed();
+    };
 
-      const settleSuccess = (value: unknown): void => {
-        if (state.settled) return;
-        state.settled = true;
-        cleanup();
-        resolve(value);
-      };
+    const settleSuccess = (value: BoundedBalanceJsonRpcResponse): void => {
+      if (state.settled) return;
+      state.settled = true;
+      cleanup();
+      resolve(value);
+    };
 
-      const onAbort = (): void => settleFailure(unavailableFailure());
-      state.abortListener = onAbort;
+    const onAbort = (): void => settleFailure(unavailableFailure());
+    state.abortListener = onAbort;
 
-      try {
-        AbortSignal.prototype.addEventListener.call(signal, 'abort', onAbort, { once: true });
-        if (readSignalAborted(signal)) {
-          onAbort();
-          return;
-        }
-        state.totalTimer = scheduleTimer(() => settleFailure(timeoutFailure()), TOTAL_TIMEOUT_MS);
-        state.connectTimer = scheduleTimer(
-          () => settleFailure(timeoutFailure()),
-          CONNECT_TIMEOUT_MS,
-        );
-      } catch {
-        settleFailure(permanentFailure());
+    try {
+      AbortSignal.prototype.addEventListener.call(signal, 'abort', onAbort, { once: true });
+      if (readSignalAborted(signal)) {
+        onAbort();
+        return;
+      }
+      state.totalTimer = scheduleTimer(() => settleFailure(timeoutFailure()), TOTAL_TIMEOUT_MS);
+      state.connectTimer = scheduleTimer(() => settleFailure(timeoutFailure()), CONNECT_TIMEOUT_MS);
+    } catch {
+      settleFailure(permanentFailure());
+      return;
+    }
+
+    const resolver = resolvePublicAddresses(config.hostname, (addresses) => {
+      state.resolver = undefined;
+      if (state.settled) return;
+      if (addresses === null) {
+        settleFailure(unavailableFailure());
+        return;
+      }
+      if (readSignalAbortedSafely(signal)) {
+        onAbort();
         return;
       }
 
-      const resolver = resolvePublicAddresses(config.hostname, (addresses) => {
-        state.resolver = undefined;
-        if (state.settled) return;
-        if (addresses === null) {
-          settleFailure(unavailableFailure());
-          return;
-        }
-        if (readSignalAbortedSafely(signal)) {
-          onAbort();
-          return;
-        }
+      const selected = addresses[0];
+      if (selected === undefined) {
+        settleFailure(unavailableFailure());
+        return;
+      }
 
-        const selected = addresses[0];
-        if (selected === undefined) {
-          settleFailure(unavailableFailure());
-          return;
-        }
-
-        try {
-          const openedRequest = openRequest(
-            config,
-            selected,
-            body,
-            state,
-            settleFailure,
-            settleSuccess,
-          );
-          state.request = openedRequest;
-          if (state.settled) destroyRequest(openedRequest);
-        } catch {
-          settleFailure(unavailableFailure());
-        }
-      });
-      state.resolver = resolver ?? undefined;
-      if (state.settled) {
-        cancelResolver(state.resolver);
-        state.resolver = undefined;
+      try {
+        const openedRequest = openRequest(
+          config,
+          selected,
+          body,
+          state,
+          settleFailure,
+          settleSuccess,
+          maximumResponseBytes,
+        );
+        state.request = openedRequest;
+        if (state.settled) destroyRequest(openedRequest);
+      } catch {
+        settleFailure(unavailableFailure());
       }
     });
-  }
+    state.resolver = resolver ?? undefined;
+    if (state.settled) {
+      cancelResolver(state.resolver);
+      state.resolver = undefined;
+    }
+  });
 }
 
 function openRequest(
@@ -262,7 +297,8 @@ function openRequest(
   body: string,
   state: ExchangeState,
   settleFailure: (failure: BalanceJsonRpcTransportFailure) => void,
-  settleSuccess: (value: unknown) => void,
+  settleSuccess: (value: BoundedBalanceJsonRpcResponse) => void,
+  maximumResponseBytes: number,
 ): ClientRequest {
   const headers: Record<string, string | number> = {
     accept: 'application/json',
@@ -279,7 +315,7 @@ function openRequest(
   let secure = false;
   let bodySent = false;
   let responseParsed = false;
-  let parsedResponse: unknown;
+  let parsedResponse: BoundedBalanceJsonRpcResponse | undefined;
   let requestClosed = false;
   const clientRequest = https.request(
     {
@@ -308,7 +344,7 @@ function openRequest(
       response.once('close', () => {
         state.responseClosed = true;
         state.onResponseClose?.();
-        if (!state.settled && responseParsed && requestClosed) {
+        if (!state.settled && responseParsed && requestClosed && parsedResponse !== undefined) {
           settleSuccess(parsedResponse);
         }
       });
@@ -320,7 +356,7 @@ function openRequest(
         settleFailure(permanentFailure());
         return;
       }
-      consumeResponse(response, settleFailure, (value) => {
+      consumeResponse(response, maximumResponseBytes, settleFailure, (value) => {
         responseParsed = true;
         parsedResponse = value;
         if (requestClosed && state.responseClosed) settleSuccess(value);
@@ -335,7 +371,7 @@ function openRequest(
     state.onRequestClose?.();
     if (state.settled) return;
     if (responseParsed) {
-      if (state.responseClosed) settleSuccess(parsedResponse);
+      if (state.responseClosed && parsedResponse !== undefined) settleSuccess(parsedResponse);
       return;
     }
     settleFailure(unavailableFailure());
@@ -367,8 +403,9 @@ function openRequest(
 
 function consumeResponse(
   response: IncomingMessage,
+  bodyByteLimit: number,
   settleFailure: (failure: BalanceJsonRpcTransportFailure) => void,
-  settleSuccess: (value: unknown) => void,
+  settleSuccess: (value: BoundedBalanceJsonRpcResponse) => void,
 ): void {
   const statusCode = response.statusCode;
   if (statusCode === 429) {
@@ -397,7 +434,10 @@ function consumeResponse(
     response.httpVersionMajor,
     response.httpVersionMinor,
   );
-  if (metadata === null) {
+  if (
+    metadata === null ||
+    (metadata.framing === 'CONTENT_LENGTH' && metadata.contentLength > bodyByteLimit)
+  ) {
     settleFailure(permanentFailure());
     return;
   }
@@ -406,7 +446,7 @@ function consumeResponse(
   let receivedBytes = 0;
   let ended = false;
   const maximumResponseBytes =
-    metadata.framing === 'CONTENT_LENGTH' ? metadata.contentLength : MAX_JSON_BYTES;
+    metadata.framing === 'CONTENT_LENGTH' ? metadata.contentLength : bodyByteLimit;
 
   response.on('data', (chunk: unknown) => {
     if (ended) return;
@@ -454,7 +494,7 @@ function consumeResponse(
     }
     try {
       const text = new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(chunks));
-      settleSuccess(parseStrictJson(text));
+      settleSuccess(Object.freeze({ value: parseStrictJson(text), bodyBytes: receivedBytes }));
     } catch {
       settleFailure(permanentFailure());
     }

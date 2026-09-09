@@ -62,6 +62,11 @@ corroboration, aggregate market corroboration, and read-only round-trip bridge
 quotes. A fail-closed composition boundary is wired with unavailable defaults;
 none of these pieces activates a provider or a mainnet transaction path.
 
+The first [Aave read-only connection](docs/aave-readonly-integration.md) now has
+private PostgreSQL wallet/checkpoint and bounded HTTPS RPC implementations,
+tested through two-source position admission. Runtime composition, restricted
+staging deployment, and live evidence remain outstanding.
+
 ## Isolated regression harness (not product runtime)
 
 KAN-253 adds a guarded, loopback-only composition for exercising the real web,

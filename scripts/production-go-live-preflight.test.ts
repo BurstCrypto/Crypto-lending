@@ -6264,7 +6264,7 @@ test('balance-consumer inspection pins the dormant Node HTTPS transport without 
       'if (!Number.isSafeInteger(contentLength)) return null;',
     ],
     [
-      "metadata.framing === 'CONTENT_LENGTH' ? metadata.contentLength : MAX_JSON_BYTES;",
+      "metadata.framing === 'CONTENT_LENGTH' ? metadata.contentLength : bodyByteLimit;",
       "metadata.framing === 'CONTENT_LENGTH' ? metadata.contentLength : Number.MAX_SAFE_INTEGER;",
     ],
     ['chunks.length >= MAX_RESPONSE_CHUNKS ||', 'false ||'],
@@ -6844,14 +6844,14 @@ test('repository loader brands the bounded full API runtime absence attestation'
   assert.equal(Object.isFrozen(attestation), true);
   assert.deepEqual(attestation, {
     inspected: true,
-    sourceFileCount: 424,
-    sourceBytes: 7448497,
+    sourceFileCount: 426,
+    sourceBytes: 7484942,
     repositorySnapshotSha256: attestation?.repositorySnapshotSha256,
     concreteDeploymentIdentityRegistration: 'ABSENT',
   });
   assert.equal(
     attestation?.repositorySnapshotSha256,
-    '251c92bbcda6bbf18494e6f59e38b927fee85de20cc40adfb5006c139ea5a92d',
+    '05be95196a5266d9889b025c6a589386e63a10755be6b63387e9a6ceae9fb4ff',
   );
 });
 

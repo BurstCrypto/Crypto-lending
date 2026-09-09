@@ -110,11 +110,19 @@
     "infra:validate:production-network": "node infra/aws/validate-production-network-foundation.mjs",
     "infra:test:production-network": "node --test infra/aws/validate-production-network-foundation.test.mjs"
   },
+  "dependencies": {
+    "@nestjs/platform-express": "11.2.1"
+  },
   "devDependencies": {
     "ajv": "8.20.0",
     "hardhat": "3.14.0",
     "prettier": "^3.9.6",
     "typescript": "^5.9.3"
+  },
+  "overrides": {
+    "@nestjs/platform-express": {
+      "multer": "2.3.0"
+    }
   },
   "scarfSettings": {
     "enabled": false

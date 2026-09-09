@@ -13,6 +13,7 @@ import { dirname, join } from 'node:path';
 import test from 'node:test';
 
 import {
+  AAVE_POSITION_CONNECTION_ARTIFACTS,
   ADDITIONAL_DORMANT_PROVIDER_ARTIFACTS,
   DORMANT_ACCOUNT_POSITION_TRANSCRIPTS,
   DORMANT_ACCOUNT_POSITION_SEMANTICS,
@@ -28,6 +29,32 @@ import {
 } from './validate-dormant-provider-inventory.mjs';
 
 const baseline = loadDormantProviderInventorySnapshot();
+
+test('Aave connection source and regression evidence are pinned without registering the connection', () => {
+  assert.equal(AAVE_POSITION_CONNECTION_ARTIFACTS.length, 2);
+  for (const artifact of AAVE_POSITION_CONNECTION_ARTIFACTS) {
+    for (const path of [artifact.path, artifact.specPath]) {
+      assert.ok(baseline.artifacts.has(path));
+      assertMutationRejected('missing connection artifact', (changed) =>
+        changed.artifacts.delete(path),
+      );
+      assertMutationRejected('modified connection artifact', (changed) =>
+        changed.artifacts.set(path, `${changed.artifacts.get(path)}\n// drift\n`),
+      );
+    }
+    assertMutationRejected('connection injected as runtime', (changed) =>
+      changed.runtimeSources.set(artifact.path, changed.artifacts.get(artifact.path)),
+    );
+    for (const symbol of artifact.symbols) {
+      assertMutationRejected('unreviewed runtime connection import', (changed) =>
+        changed.runtimeSources.set(
+          'apps/api/src/mainnet-platforms/activation.ts',
+          `export { ${symbol} } from './${artifact.path.split('/').at(-1).replace(/\.ts$/u, '')}';`,
+        ),
+      );
+    }
+  }
+});
 
 function snapshot() {
   return {

@@ -24,6 +24,14 @@ pair, owner-authorized workload/principal/credential, populated evidence,
 production migration execution, runtime activation, deployment, or live proof
 exists.
 
+The [Aave connection milestone](aave-readonly-integration.md) adds a private
+PostgreSQL wallet/checkpoint context reader and a bounded HTTPS RPC transcript
+implementation around the existing endpoint-free Aave source. Local component
+tests now reach two-source admission and reject conflicting balances. The new
+factory remains unregistered; no live connection or populated staging evidence
+has been established. Its current source snapshot and validation results are
+recorded in that milestone rather than the historical counts below.
+
 Gearbox commit `5fcc7ca` adds a pure evaluator for an already decoded,
 caller-asserted exhaustive manager/account transcript that matches the caller-
 supplied approval list; inventory commit `040e93a` byte-pins it and its hostile-
