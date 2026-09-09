@@ -146,6 +146,11 @@ jobs:
             --build-arg "OCI_REVISION=$GITHUB_SHA" \
             --build-arg "OCI_CREATED=$SOURCE_CREATED" \
             --tag crypto-lending-web:ci .
+          docker build --file deploy/railway/gateway/Dockerfile \
+            --tag crypto-lending-gateway:ci deploy/railway/gateway
+
+      - name: Validate Railway gateway routing
+        run: deploy/railway/gateway/smoke-test.sh
 
       - name: Verify hardened production container runtime boundaries
         run: |

@@ -64,6 +64,8 @@ describe('Railway production topology', () => {
     assert.deepEqual(gateway.networking?.customDomains, {
       'app.example.com': { port: 8080 },
     });
+    assert.equal(api.networking, undefined);
+    assert.equal(web.networking, undefined);
     assert.deepEqual(api.variables?.PORT, { type: 'literal', value: '3001' });
     assert.deepEqual(web.variables?.PORT, { type: 'literal', value: '3000' });
     assert.deepEqual(gateway.variables?.PORT, { type: 'literal', value: '8080' });
