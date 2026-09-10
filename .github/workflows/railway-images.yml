@@ -48,7 +48,7 @@ jobs:
             --build-arg "OCI_SOURCE=https://github.com/BurstCrypto/Crypto-lending" \
             --build-arg "OCI_REVISION=$REVISION" \
             --build-arg "OCI_CREATED=$SOURCE_CREATED" \
-            --tag "$IMAGE_PREFIX-gateway:$REVISION" deploy/railway/gateway
+            --tag "$IMAGE_PREFIX-gateway:$REVISION" .
           docker push "$IMAGE_PREFIX-gateway:$REVISION"
 
       - name: Make Railway release packages anonymously pullable
