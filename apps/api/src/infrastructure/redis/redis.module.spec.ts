@@ -40,6 +40,7 @@ describe('createRedisClient', () => {
     const client = createRedisClient(apiConfig());
     try {
       expect(client.options).toMatchObject({
+        family: 0,
         lazyConnect: true,
         enableReadyCheck: false,
         disableClientInfo: true,
