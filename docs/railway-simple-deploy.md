@@ -63,6 +63,12 @@ Dockerfile (`Dockerfile.api`, `Dockerfile.web`,
    Set `RAILWAY_PUBLIC_DOMAIN` to it (step 2) so cookies, the OIDC redirect, and
    the same-origin contract point at the real host.
 
+> **Remove any stray Railpack service.** If Railway auto-created a service pointed at the
+> repo root (it builds via Railpack and fails with `No start command detected` — the root is
+> a two-package npm workspace with no root start command), **delete it** (or repoint it to a
+> Dockerfile). It is not part of this topology and will keep failing alongside the real
+> services.
+
 ## Verify
 
 - All four services build green.

@@ -151,7 +151,7 @@ jobs:
             --build-arg "OCI_SOURCE=https://github.com/BurstCrypto/Crypto-lending" \
             --build-arg "OCI_REVISION=$GITHUB_SHA" \
             --build-arg "OCI_CREATED=$SOURCE_CREATED" \
-            --tag crypto-lending-gateway:ci deploy/railway/gateway
+            --tag crypto-lending-gateway:ci .
 
       - name: Validate Railway gateway routing
         run: deploy/railway/gateway/smoke-test.sh

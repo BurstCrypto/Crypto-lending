@@ -20,7 +20,7 @@ RUN addgroup -S caddy \
     && adduser -S -D -H -G caddy caddy \
     && chown -R caddy:caddy /config /data /etc/caddy
 
-COPY Caddyfile /etc/caddy/Caddyfile
+COPY deploy/railway/gateway/Caddyfile /etc/caddy/Caddyfile
 
 USER caddy
 
