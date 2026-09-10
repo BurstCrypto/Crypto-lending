@@ -116,6 +116,11 @@
     "railway": "^3.11.0",
     "typescript": "^5.9.3"
   },
+  "overrides": {
+    "@nestjs/platform-express": {
+      "multer": "2.3.0"
+    }
+  },
   "scarfSettings": {
     "enabled": false
   }
