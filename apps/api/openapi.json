@@ -929,7 +929,7 @@
             "description": "Session revoked or already absent",
             "headers": {
               "X-Authentication-Provider-Logout": {
-                "description": "Bounded Cognito logout navigation URL, present only after confirmed local revocation",
+                "description": "Bounded managed-provider logout URL, present only after confirmed local revocation",
                 "schema": {
                   "format": "uri",
                   "maxLength": 4096,
