@@ -91,7 +91,7 @@ $originalEnvironment = @{
     FAKE_AWS_OBSERVABILITY_ARTIFACT_OBJECT_SOURCE = $env:FAKE_AWS_OBSERVABILITY_ARTIFACT_OBJECT_SOURCE
     FAKE_AWS_MANAGED_PREFIX_LIST_RESPONSE = $env:FAKE_AWS_MANAGED_PREFIX_LIST_RESPONSE
     FAKE_REAL_NODE = $env:FAKE_REAL_NODE
-    FAKE_NODE_RUNS_OUT_OF_PROCESS = $env:FAKE_NODE_RUNS_OUT_OF_PROCESS
+    FAKE_COMMANDS_RUN_OUT_OF_PROCESS = $env:FAKE_COMMANDS_RUN_OUT_OF_PROCESS
     FAKE_AUTH_WALLET_VALIDATOR_MARKER = $env:FAKE_AUTH_WALLET_VALIDATOR_MARKER
     FAKE_AUTH_WALLET_VALIDATOR_VARIANT = $env:FAKE_AUTH_WALLET_VALIDATOR_VARIANT
     FAKE_AUTH_WALLET_CANONICAL_SHA256 = $env:FAKE_AUTH_WALLET_CANONICAL_SHA256
@@ -901,6 +901,9 @@ function Write-ResponseFile {
 }
 
 if ($AwsArguments.Count -lt 2) {
+    if ($env:FAKE_COMMANDS_RUN_OUT_OF_PROCESS -ceq 'true') {
+        exit 98
+    }
     $global:LASTEXITCODE = 98
     return
 }
@@ -995,6 +998,9 @@ if ($service -eq 'cloudformation' -and $operation -eq 'describe-stack-resource')
         $global:LASTEXITCODE = 0
         return
     }
+    if ($env:FAKE_COMMANDS_RUN_OUT_OF_PROCESS -ceq 'true') {
+        exit 96
+    }
     $global:LASTEXITCODE = 96
     return
 }
@@ -1071,6 +1077,9 @@ if ($service -eq 'cloudformation' -and $operation -eq 'describe-change-set') {
         $requestedChangeSet -ne 'kan34-application-20260819' -and
         $requestedChangeSet -ne $rootChangeSetId
     ) {
+        if ($env:FAKE_COMMANDS_RUN_OUT_OF_PROCESS -ceq 'true') {
+            exit 97
+        }
         $global:LASTEXITCODE = 97
         return
     }
@@ -1082,6 +1091,9 @@ if ($service -eq 'cloudformation' -and $operation -eq 'execute-change-set') {
     Write-Output -NoEnumerate '{}'
     $global:LASTEXITCODE = 0
     return
+}
+if ($env:FAKE_COMMANDS_RUN_OUT_OF_PROCESS -ceq 'true') {
+    exit 99
 }
 $global:LASTEXITCODE = 99
 return
@@ -1117,6 +1129,9 @@ if ($NodeArguments.Count -eq 1 -and $NodeArguments[0] -match '\s--') {
 $validatorLeaf = if ($NodeArguments.Count -eq 0) { '' } else { Split-Path -Leaf $NodeArguments[0] }
 if ($validatorLeaf -cnotin @('validate-auth-wallet-secret-version-transition.mjs', 'validate-redis-operator-secret-version-transition.mjs')) {
     & $env:FAKE_REAL_NODE @NodeArguments
+    if ($env:FAKE_COMMANDS_RUN_OUT_OF_PROCESS -ceq 'true') {
+        exit $LASTEXITCODE
+    }
     return
 }
 
@@ -1138,7 +1153,7 @@ if ($validatorLeaf -ceq 'validate-redis-operator-secret-version-transition.mjs')
     $callCount = @(Get-Content -LiteralPath $env:FAKE_REDIS_OPERATOR_VALIDATOR_MARKER).Count
     $variant = [string] $env:FAKE_REDIS_OPERATOR_VALIDATOR_VARIANT
     if ($variant -ceq 'FAIL_ALWAYS' -or ($variant -ceq 'FAIL_FRESH' -and $callCount -gt 2)) {
-        if ($env:FAKE_NODE_RUNS_OUT_OF_PROCESS -ceq 'true') {
+        if ($env:FAKE_COMMANDS_RUN_OUT_OF_PROCESS -ceq 'true') {
             exit 1
         }
         $global:LASTEXITCODE = 1
@@ -1282,7 +1297,7 @@ Add-Content -LiteralPath $env:FAKE_AUTH_WALLET_VALIDATOR_MARKER -Value "mode=$mo
 $callCount = @(Get-Content -LiteralPath $env:FAKE_AUTH_WALLET_VALIDATOR_MARKER).Count
 $variant = [string] $env:FAKE_AUTH_WALLET_VALIDATOR_VARIANT
 if ($variant -ceq 'FAIL_ALWAYS' -or ($variant -ceq 'FAIL_FRESH' -and $callCount -gt 2)) {
-    if ($env:FAKE_NODE_RUNS_OUT_OF_PROCESS -ceq 'true') {
+    if ($env:FAKE_COMMANDS_RUN_OUT_OF_PROCESS -ceq 'true') {
         exit 1
     }
     $global:LASTEXITCODE = 1
@@ -1373,7 +1388,7 @@ exec pwsh -NoProfile -File "$script_directory/node.ps1" "$@"
 
 $env:PATH = $fakeAwsDirectory + [System.IO.Path]::PathSeparator + $originalEnvironment.PATH
 $env:FAKE_REAL_NODE = $realNodeCommand.Source
-$env:FAKE_NODE_RUNS_OUT_OF_PROCESS = if ($isWindowsPlatform) { 'false' } else { 'true' }
+$env:FAKE_COMMANDS_RUN_OUT_OF_PROCESS = if ($isWindowsPlatform) { 'false' } else { 'true' }
 $env:FAKE_AUTH_WALLET_VALIDATOR_MARKER = $authWalletValidatorMarkerPath
 $env:FAKE_AUTH_WALLET_VALIDATOR_VARIANT = ''
 $env:FAKE_REDIS_OPERATOR_VALIDATOR_MARKER = $redisOperatorValidatorMarkerPath
@@ -5346,7 +5361,7 @@ finally {
     $env:FAKE_AWS_OBSERVABILITY_ARTIFACT_OBJECT_SOURCE = $originalEnvironment.FAKE_AWS_OBSERVABILITY_ARTIFACT_OBJECT_SOURCE
     $env:FAKE_AWS_MANAGED_PREFIX_LIST_RESPONSE = $originalEnvironment.FAKE_AWS_MANAGED_PREFIX_LIST_RESPONSE
     $env:FAKE_REAL_NODE = $originalEnvironment.FAKE_REAL_NODE
-    $env:FAKE_NODE_RUNS_OUT_OF_PROCESS = $originalEnvironment.FAKE_NODE_RUNS_OUT_OF_PROCESS
+    $env:FAKE_COMMANDS_RUN_OUT_OF_PROCESS = $originalEnvironment.FAKE_COMMANDS_RUN_OUT_OF_PROCESS
     $env:FAKE_AUTH_WALLET_VALIDATOR_MARKER = $originalEnvironment.FAKE_AUTH_WALLET_VALIDATOR_MARKER
     $env:FAKE_AUTH_WALLET_VALIDATOR_VARIANT = $originalEnvironment.FAKE_AUTH_WALLET_VALIDATOR_VARIANT
     $env:FAKE_AUTH_WALLET_CANONICAL_SHA256 = $originalEnvironment.FAKE_AUTH_WALLET_CANONICAL_SHA256
