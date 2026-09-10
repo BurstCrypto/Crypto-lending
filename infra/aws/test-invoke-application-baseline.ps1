@@ -356,6 +356,38 @@ function Invoke-FocusedTest {
         [scriptblock] $Body
     )
 
+    # This suite deliberately exercises hundreds of separate PowerShell
+    # processes on non-Windows runners. Refresh caller-supplied validation
+    # instants before each case so runner speed cannot make otherwise valid
+    # fixtures expire during the reviewed five-minute window.
+    $freshValidationAt = [DateTime]::UtcNow.AddMinutes(-1).ToString(
+        'yyyy-MM-ddTHH:mm:ssZ',
+        [System.Globalization.CultureInfo]::InvariantCulture
+    )
+    $script:transitionValidationAt = $freshValidationAt
+    $script:authWalletValidationAt = $freshValidationAt
+    foreach ($argumentMapName in @(
+            'updateArguments',
+            'authWalletAdoptionArguments',
+            'authWalletTransitionArguments',
+            'redisOperatorAdoptionArguments',
+            'redisOperatorTransitionArguments'
+        )) {
+        $argumentMap = Get-Variable -Name $argumentMapName -Scope Script -ValueOnly -ErrorAction SilentlyContinue
+        if ($argumentMap -isnot [System.Collections.IDictionary]) {
+            continue
+        }
+        if ($argumentMap.Contains('FixedSlotCredentialTransitionValidationAt')) {
+            $argumentMap.FixedSlotCredentialTransitionValidationAt = $freshValidationAt
+        }
+        if ($argumentMap.Contains('AuthWalletTransitionValidationAt')) {
+            $argumentMap.AuthWalletTransitionValidationAt = $freshValidationAt
+        }
+        if ($argumentMap.Contains('RedisOperatorTransitionValidationAt')) {
+            $argumentMap.RedisOperatorTransitionValidationAt = $freshValidationAt
+        }
+    }
+
     & $Body
     $script:passed++
     Write-Host "PASS: $Name"
