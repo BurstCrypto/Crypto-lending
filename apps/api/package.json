@@ -41,7 +41,7 @@
   },
   "dependencies": {
     "@aws-sdk/client-sqs": "^3.1113.0",
-    "@aws-sdk/credential-provider-http": "3.972.71",
+    "@aws-sdk/credential-provider-http": "3.972.72",
     "@nestjs/common": "^11.2.1",
     "@nestjs/core": "^11.2.1",
     "@nestjs/platform-express": "^11.2.1",
