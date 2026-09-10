@@ -541,7 +541,7 @@ function syftBindingDocument(kind, mutate) {
         })),
         manifest: material.manifestBytes.toString('base64'),
         config: material.configBytes.toString('base64'),
-        repoDigests: [`${material.imageName}@${imageId}`],
+        repoDigests: [],
         architecture: 'amd64',
         os: 'linux',
         labels: material.labels,
@@ -598,10 +598,10 @@ function replaceNativeConfig(document, configBytes) {
   return configDigest;
 }
 
-function claimNativeImageId(document, imageId, kind = 'api') {
+function claimNativeImageId(document, imageId) {
   document.source.version = imageId.slice('sha256:'.length);
   document.source.metadata.userInput = imageId;
-  document.source.metadata.repoDigests = [`crypto-lending-${kind}@${imageId}`];
+  document.source.metadata.repoDigests = [];
 }
 
 function writeBindingPair(
@@ -1053,7 +1053,7 @@ describe('actual-image SPDX validation', () => {
       [
         'SYFT_IMAGE_INPUT_BINDING_INVALID',
         (document) => {
-          document.source.metadata.repoDigests[0] = `crypto-lending-api@sha256:${'f'.repeat(64)}`;
+          document.source.metadata.repoDigests = [`crypto-lending-api@sha256:${'f'.repeat(64)}`];
         },
       ],
       [

@@ -1713,7 +1713,7 @@ export function validateProductionSyftBindingBytes(
     JSON.stringify(validateStringArray(metadata.tags, 8, 512, 'SYFT_SOURCE_INVALID')) !==
       JSON.stringify([expectedTag]) ||
     JSON.stringify(validateStringArray(metadata.repoDigests, 8, 512, 'SYFT_SOURCE_INVALID')) !==
-      JSON.stringify([`${expectation.imageName}@${expectedImageId}`])
+      JSON.stringify([])
   ) {
     return fail('SYFT_IMAGE_INPUT_BINDING_INVALID');
   }
