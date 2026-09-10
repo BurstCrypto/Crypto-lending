@@ -7,7 +7,7 @@ import { bootstrapRailwayDatabase } from '../../src/infrastructure/database/rail
 import { RAILWAY_DATABASE_MIGRATION_LIST } from '../../src/infrastructure/database/railway-migrations';
 import { postgresStartupOptions } from '../../src/infrastructure/database/postgres-startup-options';
 
-const adminUrl = process.env.TEST_DATABASE_URL;
+const adminUrl = process.env.RAILWAY_TEST_DATABASE_URL;
 const enabled = process.env.RUN_INFRASTRUCTURE_INTEGRATION === '1' && adminUrl;
 const describeWithPostgres = enabled ? describe : describe.skip;
 

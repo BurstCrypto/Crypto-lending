@@ -82,7 +82,7 @@ export const RECOVERY_SCHEDULER_ARTIFACT_SHA256 = Object.freeze({
   'apps/api/test/infrastructure/0041-preserve-revoked-wallet-metadata-key-retirement.integration-spec.ts':
     'c2c67dbc574922139985580002c4b56a1ba9607192d06b66e72cc4ec87fb50b5',
   'apps/api/test/infrastructure/mainnet-financial-action-durable-scheduler.integration-spec.ts':
-    'ad74c24c3800a6ed681b12ed3b102e1ffcfea7dd5673e225f1290de8b4e73cbc',
+    'd0944aa106c5fe0dfa745166ee228862234c962389eef7bfc74bc4db44d33627',
   'apps/api/test/infrastructure/mainnet-signed-submission-proof.integration-spec.ts':
     '2f78809ba80cad8adbcb8fca0dac273280fae91ad57b55ccaf6b987692e122d2',
 });
