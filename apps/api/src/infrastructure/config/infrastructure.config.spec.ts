@@ -61,6 +61,15 @@ function baseEnvironment(overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
   };
 }
 
+function credentialUrl(
+  scheme: 'postgresql' | 'redis' | 'rediss',
+  username: string,
+  password: string,
+  authorityAndPath: string,
+): string {
+  return `${scheme}://${username}:${password}@${authorityAndPath}`;
+}
+
 function balanceConsumerEnvironment(overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
   return baseEnvironment({
     NODE_ENV: 'production',
@@ -80,6 +89,103 @@ function balanceConsumerEnvironment(overrides: NodeJS.ProcessEnv = {}): NodeJS.P
 }
 
 describe('loadInfrastructureConfig', () => {
+  it('loads Railway private PostgreSQL/Redis without any AWS or SQS dependency', () => {
+    const config = loadInfrastructureConfig({
+      NODE_ENV: 'production',
+      APP_ENV: 'staging',
+      APPLICATION_WORKLOAD: 'api',
+      DEPLOYMENT_TARGET: 'railway',
+      DATABASE_RUNTIME_HOST: 'postgres.railway.internal',
+      DATABASE_RUNTIME_PORT: '5432',
+      DATABASE_RUNTIME_NAME: 'railway',
+      DATABASE_RUNTIME_USERNAME: 'crypto_api_login_railway',
+      DATABASE_RUNTIME_PASSWORD: 'not-exported',
+      DATABASE_RUNTIME_SSL_MODE: 'disable',
+      REDIS_URL: credentialUrl('redis', 'default', 'not-exported', 'redis.railway.internal:6379'),
+    });
+
+    expect(config.database).toMatchObject({
+      connectionString: credentialUrl(
+        'postgresql',
+        'crypto_api_login_railway',
+        'not-exported',
+        'postgres.railway.internal:5432/railway',
+      ),
+      sessionRole: 'crypto_api_runtime',
+      ssl: false,
+    });
+    expect(config.redis?.url).toBe(
+      credentialUrl('redis', 'default', 'not-exported', 'redis.railway.internal:6379'),
+    );
+    expect(config.sqs.region).toBe('railway-postgres');
+  });
+
+  it('rejects public data URLs and AWS/SQS variables in a Railway production runtime', () => {
+    const railway = {
+      NODE_ENV: 'production',
+      APP_ENV: 'staging',
+      APPLICATION_WORKLOAD: 'api',
+      DEPLOYMENT_TARGET: 'railway',
+      DATABASE_RUNTIME_HOST: 'postgres.railway.internal',
+      DATABASE_RUNTIME_PORT: '5432',
+      DATABASE_RUNTIME_NAME: 'railway',
+      DATABASE_RUNTIME_USERNAME: 'crypto_api_login_railway',
+      DATABASE_RUNTIME_PASSWORD: 'not-exported',
+      DATABASE_RUNTIME_SSL_MODE: 'disable',
+      REDIS_URL: credentialUrl('redis', 'default', 'not-exported', 'redis.railway.internal:6379'),
+    };
+    expect(() => loadInfrastructureConfig({ ...railway, AWS_REGION: 'us-east-1' })).toThrow(
+      'Railway runtime must not receive AWS or SQS configuration',
+    );
+    expect(() =>
+      loadInfrastructureConfig({
+        ...railway,
+        DATABASE_RUNTIME_HOST: 'public.example',
+      }),
+    ).toThrow('Railway private-network URL');
+    expect(() =>
+      loadInfrastructureConfig({
+        ...railway,
+        DATABASE_RUNTIME_URL: credentialUrl(
+          'postgresql',
+          'crypto_api_login_railway',
+          'secret',
+          'postgres.railway.internal:5432/railway',
+        ),
+      }),
+    ).toThrow('not DATABASE_RUNTIME_URL');
+    expect(() =>
+      loadInfrastructureConfig({
+        ...railway,
+        REDIS_URL: credentialUrl('rediss', 'default', 'secret', 'redis.railway.internal:6379'),
+      }),
+    ).toThrow('Railway private-network URL');
+  });
+
+  it('loads the Railway owner migration connection only from private DNS', () => {
+    const migration = loadMigrationDatabaseConfig({
+      NODE_ENV: 'production',
+      DEPLOYMENT_TARGET: 'railway',
+      MIGRATION_DATABASE_URL: credentialUrl(
+        'postgresql',
+        'postgres',
+        'not-exported',
+        'postgres.railway.internal:5432/railway',
+      ),
+    });
+    expect(migration).toMatchObject({
+      connectionString: credentialUrl(
+        'postgresql',
+        'postgres',
+        'not-exported',
+        'postgres.railway.internal:5432/railway',
+      ),
+      poolMax: 1,
+      sessionRole: 'crypto_schema_owner',
+      ssl: false,
+    });
+  });
+
   it('retains explicit local connection URLs', () => {
     const config = loadInfrastructureConfig(
       baseEnvironment({ SQS_ENDPOINT: 'http://127.0.0.1:4566' }),

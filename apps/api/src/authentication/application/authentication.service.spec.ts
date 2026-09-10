@@ -132,11 +132,12 @@ function harness(config: OidcAuthenticationConfig = authenticationConfig()): Har
       return url;
     }),
     exchangeAuthorizationCode: jest.fn().mockResolvedValue({
-      providerKey: parseOidcProviderKey('primary'),
+      providerKey: parseOidcProviderKey(config.providerKey),
       issuer: config.issuer,
       subject: parseOidcSubject('CaseSensitiveSubject'),
       issuedAtEpochSeconds: 1_800_000_000,
       expiresAtEpochSeconds: 1_800_000_300,
+      ...(config.providerKey === 'auth0' ? { verifiedEmail: 'person@example.test' } : {}),
     }),
   };
   return {
@@ -295,6 +296,50 @@ describe('AuthenticationService', () => {
       codeVerifier: payload.codeVerifier,
       expectedNonce: payload.nonce,
     });
+  });
+
+  it('rejects Auth0 registration when its verified email does not match the requested profile', async () => {
+    const fixture = harness(
+      authenticationConfig({
+        OIDC_PROVIDER_KEY: 'auth0',
+        OIDC_END_SESSION_ENDPOINT: 'https://identity.example.test/v2/logout',
+        OIDC_POST_LOGOUT_REDIRECT_URI: 'https://app.example.test/login',
+      }),
+    );
+    const { transactionCookie, payload } = await startedRegistration(fixture);
+    const begun = fixture.repository.beginTransaction.mock.calls[0]?.[0];
+    if (!begun) throw new Error('Expected begin transaction call');
+    fixture.repository.claimTransaction.mockResolvedValue({
+      status: 'claimed',
+      flow: 'registration',
+      issuer: fixture.config.issuer,
+      nonceDigest: begun.nonceDigest,
+    });
+    fixture.oidc.exchangeAuthorizationCode.mockResolvedValue({
+      providerKey: parseOidcProviderKey('auth0'),
+      issuer: fixture.config.issuer,
+      subject: parseOidcSubject('CaseSensitiveSubject'),
+      issuedAtEpochSeconds: 1_800_000_000,
+      expiresAtEpochSeconds: 1_800_000_300,
+      verifiedEmail: 'different@example.test',
+    });
+
+    await expect(
+      fixture.service.completeCallback({
+        callback: {
+          kind: 'success',
+          code: 'one-time-code',
+          state: payload.state,
+          issuer: fixture.config.issuer,
+        },
+        transactionCookie,
+        sourceAddress: '198.51.100.10',
+      }),
+    ).rejects.toMatchObject({ code: 'AUTHENTICATION_REJECTED' });
+    expect(fixture.repository.completeLogin).not.toHaveBeenCalled();
+    expect(fixture.repository.rejectClaimedTransaction).toHaveBeenCalledWith(
+      expect.objectContaining({ reason: 'IDENTITY_INVALID' }),
+    );
   });
 
   it('reads every accepted HMAC version while all new identity, session, and CSRF writes use the active version', async () => {

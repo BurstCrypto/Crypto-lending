@@ -80,6 +80,6 @@ COPY --chown=0:0 infra/containers/aws-rds-global-bundle.crt /etc/ssl/certs/aws-r
 USER 10001:10001
 EXPOSE 3001
 STOPSIGNAL SIGTERM
-HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 CMD ["node", "-e", "require('node:http').get('http://127.0.0.1:3001/api/v1/health',r=>{r.resume();process.exitCode=r.statusCode===200?0:1}).on('error',()=>process.exit(1))"]
+HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 CMD ["node", "-e", "require('node:http').get('http://127.0.0.1:3001/api/v1/internal/health/dependencies',r=>{r.resume();process.exitCode=r.statusCode===200?0:1}).on('error',()=>process.exit(1))"]
 ENTRYPOINT []
 CMD ["node", "dist/main.js"]

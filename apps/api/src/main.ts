@@ -8,6 +8,7 @@ import { NestFactory } from '@nestjs/core';
 import { configureApplication } from './application';
 import { loadApplicationRootModule } from './application-root';
 import { bindExecutableWorkload } from './infrastructure/config/application-workload';
+import { applyRailwaySimpleProfileDefaults } from './infrastructure/config/railway-simple-profile';
 import {
   installFatalProcessBoundary,
   LOG_EVENTS,
@@ -16,6 +17,7 @@ import {
 import { applyHttpServerLimits, loadHttpServerOptions } from './server-options';
 
 async function bootstrap(): Promise<void> {
+  applyRailwaySimpleProfileDefaults(process.env);
   bindExecutableWorkload(process.env, 'api');
   installFatalProcessBoundary(structuredLogger);
   const rootModule = await loadApplicationRootModule(process.env);

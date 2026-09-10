@@ -7,6 +7,7 @@ import { installFatalProcessBoundary, LOG_EVENTS, StructuredLogger } from '../lo
 import { enforceMigrationCliMode } from './migration-cli-mode';
 import { createMigrationPool } from './migration-pool';
 import { MigrationRunner } from './migration-runner.service';
+import { databaseMigrationsForDeployment } from './deployment-migrations';
 import { DATABASE_MIGRATION_LIST } from './migrations';
 
 const migrationLogger = new StructuredLogger({ workload: 'migration' });
@@ -43,7 +44,10 @@ async function main(): Promise<void> {
   const cliArguments = enforceMigrationCliMode(process.argv.slice(2), process.env);
   const config = loadMigrationDatabaseConfig();
   const pool = createMigrationPool(config);
-  const runner = new MigrationRunner(pool, DATABASE_MIGRATION_LIST);
+  const runner = new MigrationRunner(
+    pool,
+    databaseMigrationsForDeployment(process.env, DATABASE_MIGRATION_LIST),
+  );
   const [command = 'up', rawSteps = '1'] = cliArguments;
   const startedAt = performance.now();
   let emitCompletion: (() => void) | undefined;

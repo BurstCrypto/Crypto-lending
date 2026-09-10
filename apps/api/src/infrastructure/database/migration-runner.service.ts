@@ -273,6 +273,27 @@ export class MigrationRunner {
 
   /** Read-only readiness check; migrations remain an explicit deployment step. */
   async assertUpToDate(signal?: AbortSignal): Promise<void> {
+    await this.withReadinessExecutor(signal, (executor) =>
+      this.assertUpToDateWithExecutor(executor),
+    );
+  }
+
+  /**
+   * Runtime-role readiness check. Deployment migrations perform the full SQL
+   * verification with the schema-owner role; application roles intentionally
+   * cannot execute every privileged verifier. This still fails closed when a
+   * migration is missing or its immutable checksum differs from the image.
+   */
+  async assertMigrationRecordsUpToDate(signal?: AbortSignal): Promise<void> {
+    await this.withReadinessExecutor(signal, (executor) =>
+      this.assertMigrationRecordsUpToDateWithExecutor(executor),
+    );
+  }
+
+  private async withReadinessExecutor<T>(
+    signal: AbortSignal | undefined,
+    check: (executor: MigrationQueryExecutor) => Promise<T>,
+  ): Promise<T> {
     if (signal !== undefined) {
       const postgres = this.postgres;
       if (postgres === undefined) {
@@ -285,19 +306,30 @@ export class MigrationRunner {
         ): Promise<QueryResult<Row>> =>
           postgres.queryWithCancellation<Row>(queryTextOrConfig, values, signal),
       };
-      await this.assertUpToDateWithExecutor(executor);
-      return;
+      return check(executor);
     }
 
     const client = await this.pool.connect();
     try {
-      await this.assertUpToDateWithExecutor(client);
+      return await check(client);
     } finally {
       client.release();
     }
   }
 
   private async assertUpToDateWithExecutor(executor: MigrationQueryExecutor): Promise<void> {
+    const appliedById = await this.assertMigrationRecordsUpToDateWithExecutor(executor);
+    const supersededVerificationIds = this.supersededVerificationIds(appliedById);
+    for (const migration of this.migrations) {
+      if (!supersededVerificationIds.has(migration.id)) {
+        await this.assertMigrationVerified(executor, migration);
+      }
+    }
+  }
+
+  private async assertMigrationRecordsUpToDateWithExecutor(
+    executor: MigrationQueryExecutor,
+  ): Promise<ReadonlyMap<string, string>> {
     const table = await executor.query<MigrationTableLookup>(
       "SELECT to_regclass('schema_migrations')::text AS table_name",
     );
@@ -320,12 +352,7 @@ export class MigrationRunner {
         throw new Error(`Database migration ${migration.id} checksum does not match`);
       }
     }
-    const supersededVerificationIds = this.supersededVerificationIds(appliedById);
-    for (const migration of this.migrations) {
-      if (!supersededVerificationIds.has(migration.id)) {
-        await this.assertMigrationVerified(executor, migration);
-      }
-    }
+    return appliedById;
   }
 
   private async withMigrationLock<T>(work: (client: PoolClient) => Promise<T>): Promise<T> {

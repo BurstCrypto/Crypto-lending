@@ -218,6 +218,24 @@ describe('authentication configuration', () => {
     });
   });
 
+  it('accepts Auth0 only with its exact v2 logout contract', () => {
+    const environment = oidcEnvironment();
+    environment.OIDC_PROVIDER_KEY = 'auth0';
+    environment.OIDC_END_SESSION_ENDPOINT = 'https://identity.example.test/v2/logout';
+    environment.OIDC_POST_LOGOUT_REDIRECT_URI = 'https://app.example.test/login';
+
+    expect(loadAuthenticationConfig(environment)).toMatchObject({
+      providerKey: 'auth0',
+      endSessionEndpoint: 'https://identity.example.test/v2/logout',
+      postLogoutRedirectUri: 'https://app.example.test/login',
+    });
+
+    environment.OIDC_END_SESSION_ENDPOINT = 'https://identity.example.test/logout';
+    expect(() => loadAuthenticationConfig(environment)).toThrow(
+      expect.objectContaining({ field: 'OIDC_END_SESSION_ENDPOINT' }),
+    );
+  });
+
   it.each([
     ['OIDC_AUTHORIZATION_ENDPOINT', 'https://identity.example.test/authorize'],
     ['OIDC_TOKEN_ENDPOINT', 'https://identity.example.test/token'],

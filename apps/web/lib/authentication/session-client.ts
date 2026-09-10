@@ -67,21 +67,24 @@ function providerLogoutUrl(response: Response): string | null {
 
   try {
     const parsed = new URL(value);
+    const cognito = parsed.pathname === '/logout';
+    const auth0 = parsed.pathname === '/v2/logout';
     if (
       parsed.protocol !== 'https:' ||
       parsed.username !== '' ||
       parsed.password !== '' ||
-      parsed.pathname !== '/logout' ||
+      (!cognito && !auth0) ||
       parsed.hash !== ''
     ) {
       return null;
     }
 
     const entries = [...parsed.searchParams.entries()];
+    const redirectParameter = auth0 ? 'returnTo' : 'logout_uri';
     if (
       entries.length !== 2 ||
       entries[0]?.[0] !== 'client_id' ||
-      entries[1]?.[0] !== 'logout_uri'
+      entries[1]?.[0] !== redirectParameter
     ) {
       return null;
     }
@@ -90,9 +93,9 @@ function providerLogoutUrl(response: Response): string | null {
     const expectedLogoutUri = new URL('/login', window.location.origin).href;
     if (!/^[\x21-\x7e]{1,256}$/u.test(clientId) || logoutUri !== expectedLogoutUri) return null;
 
-    const canonical = new URL('/logout', parsed.origin);
+    const canonical = new URL(auth0 ? '/v2/logout' : '/logout', parsed.origin);
     canonical.searchParams.set('client_id', clientId);
-    canonical.searchParams.set('logout_uri', logoutUri);
+    canonical.searchParams.set(redirectParameter, logoutUri);
     return canonical.href === value ? value : null;
   } catch {
     return null;

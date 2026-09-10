@@ -915,6 +915,28 @@ describe('MigrationRunner', () => {
     );
   });
 
+  it('lets runtime readiness verify immutable records without privileged verifier SQL', async () => {
+    const database = new InMemoryMigrationDatabase();
+    const runner = new MigrationRunner(database.pool, IN_MEMORY_DATABASE_MIGRATION_LIST);
+    await runner.up();
+
+    database.indexes.set(
+      'job_outbox_published_retention_idx',
+      "CREATE INDEX CONCURRENTLY job_outbox_published_retention_idx ON job_outbox (id) WHERE status = 'published'",
+    );
+    await expect(runner.assertMigrationRecordsUpToDate()).resolves.toBeUndefined();
+    await expect(runner.assertUpToDate()).rejects.toThrow(
+      'Database migration 0002 schema verification failed',
+    );
+
+    const stored = database.applied.get('0002');
+    expect(stored).toBeDefined();
+    database.applied.set('0002', { ...stored!, checksum: '0'.repeat(64) });
+    await expect(runner.assertMigrationRecordsUpToDate()).rejects.toThrow(
+      'Database migration 0002 checksum does not match',
+    );
+  });
+
   it('includes non-transactional execution policy in the immutable checksum', async () => {
     const database = new InMemoryMigrationDatabase();
     await new MigrationRunner(database.pool, IN_MEMORY_DATABASE_MIGRATION_LIST).up();

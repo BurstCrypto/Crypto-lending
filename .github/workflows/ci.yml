@@ -20,6 +20,7 @@ env:
   DATABASE_RUNTIME_URL: postgresql://crypto_api_login_a:local_api_database_a@127.0.0.1:5432/crypto_lending
   MIGRATION_DATABASE_URL: postgresql://crypto_migration:local_migration_only@127.0.0.1:5432/crypto_lending
   TEST_DATABASE_URL: postgresql://crypto_admin:local_admin_only@127.0.0.1:5432/crypto_lending
+  RAILWAY_TEST_DATABASE_URL: postgresql://crypto_admin:local_admin_only@127.0.0.1:5433/railway
   DATABASE_RUNTIME_SSL_MODE: disable
   DATABASE_LOCK_TIMEOUT_MS: '5000'
   MIGRATION_DATABASE_SSL_MODE: disable
@@ -137,16 +138,19 @@ jobs:
           SOURCE_EPOCH="$(git show -s --format=%ct "$GITHUB_SHA")"
           SOURCE_CREATED="$(date -u -d "@$SOURCE_EPOCH" +%Y-%m-%dT%H:%M:%SZ)"
           docker build --provenance=false --file Dockerfile.api \
-            --build-arg "OCI_SOURCE=https://github.com/Trey-Gleason/Crypto-lending" \
+            --build-arg "OCI_SOURCE=https://github.com/BurstCrypto/Crypto-lending" \
             --build-arg "OCI_REVISION=$GITHUB_SHA" \
             --build-arg "OCI_CREATED=$SOURCE_CREATED" \
             --tag crypto-lending-api:ci .
           docker build --provenance=false --file Dockerfile.web \
-            --build-arg "OCI_SOURCE=https://github.com/Trey-Gleason/Crypto-lending" \
+            --build-arg "OCI_SOURCE=https://github.com/BurstCrypto/Crypto-lending" \
             --build-arg "OCI_REVISION=$GITHUB_SHA" \
             --build-arg "OCI_CREATED=$SOURCE_CREATED" \
             --tag crypto-lending-web:ci .
-          docker build --file deploy/railway/gateway/Dockerfile \
+          docker build --provenance=false --file deploy/railway/gateway/Dockerfile \
+            --build-arg "OCI_SOURCE=https://github.com/BurstCrypto/Crypto-lending" \
+            --build-arg "OCI_REVISION=$GITHUB_SHA" \
+            --build-arg "OCI_CREATED=$SOURCE_CREATED" \
             --tag crypto-lending-gateway:ci deploy/railway/gateway
 
       - name: Validate Railway gateway routing

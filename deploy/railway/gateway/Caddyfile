@@ -10,8 +10,20 @@
 		respond "ok" 200
 	}
 
+	# Railway probes this path over private service networking. Never expose
+	# dependency details or turn it into a public database/cache oracle.
+	handle /api/v1/internal/* {
+		respond "not found" 404
+	}
+
 	handle /api/v1/* {
-		reverse_proxy {$API_ORIGIN}
+		reverse_proxy {$API_ORIGIN} {
+			# Railway's public edge overwrites X-Real-IP with the client address.
+			# Replace, rather than append to, user-controlled forwarding headers.
+			header_up X-Forwarded-For {http.request.header.X-Real-IP}
+			header_up X-Forwarded-Proto {http.request.header.X-Forwarded-Proto}
+			header_up -X-Real-IP
+		}
 	}
 
 	handle {

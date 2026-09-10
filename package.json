@@ -43,9 +43,9 @@
     "test:production:sbom": "node --test scripts/production-sboms.test.mjs",
     "production:preflight": "tsx scripts/production-go-live-preflight.ts",
     "production:preflight:json": "tsx scripts/production-go-live-preflight.ts --json",
-    "lint:production:preflight": "eslint scripts/job-envelope-rollout-preflight.ts scripts/job-envelope-rollout-preflight.test.ts scripts/production-deployment-target.mjs scripts/production-evidence-bundle.ts scripts/production-evidence-bundle.test.ts scripts/production-go-live-preflight.ts scripts/production-go-live-preflight.test.ts scripts/public-launch-authority-decision.ts scripts/public-launch-authority-decision.test.ts --config scripts/eslint.config.mjs --global URL",
+    "lint:production:preflight": "eslint scripts/job-envelope-rollout-preflight.ts scripts/job-envelope-rollout-preflight.test.ts scripts/production-deployment-target.mjs scripts/production-evidence-bundle.ts scripts/production-evidence-bundle.test.ts scripts/production-go-live-preflight.ts scripts/production-go-live-preflight.test.ts scripts/public-launch-authority-decision.ts scripts/public-launch-authority-decision.test.ts scripts/verify-railway-deployment-approval.ts scripts/verify-railway-deployment-approval.test.ts --config scripts/eslint.config.mjs --global URL",
     "typecheck:production:preflight": "tsc --noEmit -p tsconfig.production-preflight.json",
-    "test:production:preflight": "tsx --test scripts/job-envelope-rollout-preflight.test.ts scripts/production-evidence-bundle.test.ts scripts/production-go-live-preflight.test.ts scripts/public-launch-authority-decision.test.ts",
+    "test:production:preflight": "tsx --test scripts/job-envelope-rollout-preflight.test.ts scripts/production-evidence-bundle.test.ts scripts/production-go-live-preflight.test.ts scripts/public-launch-authority-decision.test.ts scripts/verify-railway-deployment-approval.test.ts",
     "build": "npm run build --workspaces --if-present",
     "lint:production:artifacts": "eslint \"infra/containers/*.mjs\" infra/aws/validate-account-guardrails.mjs infra/aws/validate-account-guardrails.test.mjs infra/aws/validate-application-observability.mjs infra/aws/validate-application-observability.test.mjs infra/aws/validate-auth-wallet-secret-version-transition.mjs infra/aws/validate-auth-wallet-secret-version-transition.test.mjs infra/aws/validate-balance-consumer-deployment-envelope.mjs infra/aws/validate-balance-consumer-deployment-envelope.test.mjs infra/aws/validate-balance-consumer-metadata-secret-version-transition.mjs infra/aws/validate-balance-consumer-metadata-secret-version-transition.test.mjs infra/aws/validate-fixed-slot-credential-transition.mjs infra/aws/validate-fixed-slot-credential-transition.test.mjs infra/aws/validate-production-deployment-intent.mjs infra/aws/validate-production-deployment-intent.test.mjs infra/aws/validate-redis-operator-secret-version-transition.mjs infra/aws/validate-redis-operator-secret-version-transition.test.mjs infra/egress/validate-egress-policy.mjs infra/egress/validate-egress-policy.test.mjs infra/postgres/validate-bootstrap-principals.mjs infra/postgres/validate-bootstrap-principals.test.mjs infra/providers/validate-kan-62-provider-decision.mjs infra/providers/validate-kan-62-provider-decision.test.mjs infra/providers/validate-active-provider-research-captures.mjs infra/providers/validate-active-provider-research-captures.test.mjs infra/providers/validate-dormant-provider-inventory.mjs infra/providers/validate-dormant-provider-inventory.test.mjs infra/providers/dormant-mainnet-action-recovery-inventory.mjs infra/providers/validate-dormant-mainnet-action-boundary.mjs infra/providers/validate-dormant-mainnet-action-boundary.test.mjs \"infra/security/*.mjs\" infra/shared/parse-strict-json.mjs infra/shared/read-secure-local-file.mjs infra/shared/validate-ed25519-public-key.mjs infra/shared/validate-ed25519-public-key.test.mjs \"infra/valuation/*.mjs\" --config scripts/eslint.config.mjs --global Buffer --global console --global process --global structuredClone --global TextDecoder --global URL",
     "lint": "npm run lint --workspaces --if-present && npm run lint:production:preflight && npm run lint:release && npm run lint:production:sbom && npm run lint:production:artifacts",
@@ -115,6 +115,11 @@
     "prettier": "^3.9.6",
     "railway": "^3.11.0",
     "typescript": "^5.9.3"
+  },
+  "overrides": {
+    "@nestjs/platform-express": {
+      "multer": "2.3.0"
+    }
   },
   "scarfSettings": {
     "enabled": false

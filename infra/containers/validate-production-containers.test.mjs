@@ -16,7 +16,10 @@ import process from 'node:process';
 import test from 'node:test';
 import { fileURLToPath, URL } from 'node:url';
 
-import { validateOciBuildMetadata } from './validate-oci-build-metadata.mjs';
+import {
+  isUnattestedNativeBuild,
+  validateOciBuildMetadata,
+} from './validate-oci-build-metadata.mjs';
 import {
   MAX_PRODUCTION_CONTAINER_SOURCE_BYTES,
   NODE_BASE_IMAGE,
@@ -345,7 +348,7 @@ test('rejects image timestamp normalization drift', () => {
       source,
       'apiDockerfile',
       'ARG OCI_SOURCE=\n',
-      'ARG OCI_SOURCE=https://github.com/Trey-Gleason/Crypto-lending\n',
+      'ARG OCI_SOURCE=https://github.com/BurstCrypto/Crypto-lending\n',
     ),
     /fail-closed metadata defaults/u,
   );
@@ -664,7 +667,7 @@ test('OCI metadata validation rejects unsafe defaults and malformed values', () 
   const valid = {
     OCI_CREATED: '2026-09-04T12:00:00Z',
     OCI_REVISION: '1'.repeat(40),
-    OCI_SOURCE: 'https://github.com/Trey-Gleason/Crypto-lending',
+    OCI_SOURCE: 'https://github.com/BurstCrypto/Crypto-lending',
     SOURCE_DATE_EPOCH: '0',
   };
   assert.deepEqual(validateOciBuildMetadata(valid), []);
@@ -683,6 +686,38 @@ test('OCI metadata validation rejects unsafe defaults and malformed values', () 
   assert.match(
     validateOciBuildMetadata({ ...valid, SOURCE_DATE_EPOCH: '1' }).join(),
     /SOURCE_DATE_EPOCH/u,
+  );
+});
+
+test('OCI metadata validation allows an unattested native build with no provenance args', () => {
+  // Railway's native builder (and a plain `docker build`) supplies none of the
+  // OCI provenance arguments, so the Dockerfile defaults apply: empty OCI_SOURCE
+  // and the all-zero revision. That is an unattested build, not an invalid one.
+  assert.equal(isUnattestedNativeBuild({}), true);
+  assert.deepEqual(validateOciBuildMetadata({}), []);
+  assert.equal(
+    isUnattestedNativeBuild({
+      OCI_SOURCE: '',
+      OCI_REVISION: '0'.repeat(40),
+      SOURCE_DATE_EPOCH: '0',
+    }),
+    true,
+  );
+  assert.deepEqual(validateOciBuildMetadata({ OCI_SOURCE: '', OCI_REVISION: '0'.repeat(40) }), []);
+  // As soon as any attestation is supplied (a real source), the strict contract
+  // re-engages and an all-zero revision is rejected.
+  assert.equal(
+    isUnattestedNativeBuild({ OCI_SOURCE: 'https://github.com/BurstCrypto/Crypto-lending' }),
+    false,
+  );
+  assert.match(
+    validateOciBuildMetadata({
+      OCI_SOURCE: 'https://github.com/BurstCrypto/Crypto-lending',
+      OCI_REVISION: '0'.repeat(40),
+      OCI_CREATED: '2026-09-04T12:00:00Z',
+      SOURCE_DATE_EPOCH: '0',
+    }).join(),
+    /explicit nonzero/u,
   );
 });
 

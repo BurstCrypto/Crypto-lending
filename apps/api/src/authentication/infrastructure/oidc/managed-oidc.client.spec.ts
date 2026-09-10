@@ -75,6 +75,16 @@ function cognitoConfig(): OidcAuthenticationConfig {
   return config;
 }
 
+function auth0Config(): OidcAuthenticationConfig {
+  const environment = configEnvironment();
+  environment.OIDC_PROVIDER_KEY = 'auth0';
+  environment.OIDC_END_SESSION_ENDPOINT = 'https://identity.example.test/v2/logout';
+  environment.OIDC_POST_LOGOUT_REDIRECT_URI = 'https://app.example.test/login';
+  const config = loadAuthenticationConfig(environment);
+  if (config.mode !== 'oidc') throw new Error('Expected OIDC config');
+  return config;
+}
+
 interface Fixture {
   readonly privateKey: CryptoKey;
   readonly jwks: { readonly keys: readonly Record<string, unknown>[] };
@@ -168,6 +178,50 @@ describe('managed OIDC client', () => {
       code_challenge: createPkceS256Challenge(verifier),
       code_challenge_method: 'S256',
     });
+  });
+
+  it('requests and requires a verified email claim for Auth0', async () => {
+    const config = auth0Config();
+    const keys = await fixture();
+    const nonce = generateOpaqueAuthenticationSecret('oidc-nonce');
+    const client = new ManagedOidcClient(config, jest.fn() as OidcFetch, {
+      load: () => Promise.resolve({ keys: [] }),
+    });
+    const url = client.createAuthorizationUrl({
+      state: generateOpaqueAuthenticationSecret('oidc-state'),
+      nonce,
+      codeChallenge: createPkceS256Challenge(generatePkceVerifier()),
+    });
+    expect(url.searchParams.get('scope')).toBe('openid email');
+
+    const token = await idToken(keys.privateKey, nonce, {
+      email: 'Person@Example.Test',
+      email_verified: true,
+    });
+    await expect(
+      clientWithResponses(config, token, keys.jwks).exchangeAuthorizationCode({
+        code: 'authorization-code',
+        codeVerifier: generatePkceVerifier(),
+        expectedNonce: nonce,
+      }),
+    ).resolves.toMatchObject({
+      providerKey: 'auth0',
+      verifiedEmail: 'person@example.test',
+    });
+
+    for (const claims of [
+      { email: 'person@example.test', email_verified: false },
+      { email: undefined, email_verified: true },
+    ]) {
+      const invalidToken = await idToken(keys.privateKey, nonce, claims);
+      await expect(
+        clientWithResponses(config, invalidToken, keys.jwks).exchangeAuthorizationCode({
+          code: 'authorization-code',
+          codeVerifier: generatePkceVerifier(),
+          expectedNonce: nonce,
+        }),
+      ).rejects.toMatchObject({ code: 'OIDC_ID_TOKEN_INVALID' });
+    }
   });
 
   it('posts a bounded exact token request and verifies a pinned-key ID token', async () => {
