@@ -1,7 +1,4 @@
-import {
-  DATABASE_OWNER_COMPATIBLE_MIGRATION_LIST,
-  type DatabaseMigration,
-} from './migrations';
+import { DATABASE_OWNER_COMPATIBLE_MIGRATION_LIST, type DatabaseMigration } from './migrations';
 import { enforceRailwayDatabasePrincipalBoundariesMigration } from './migrations/9000-enforce-railway-database-principal-boundaries.migration';
 import { createRailwayJobQueueMigration } from './migrations/9001-create-railway-job-queue.migration';
 

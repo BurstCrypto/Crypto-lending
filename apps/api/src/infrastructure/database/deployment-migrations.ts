@@ -7,7 +7,5 @@ export function databaseMigrationsForDeployment(
   environment: Readonly<NodeJS.ProcessEnv> = process.env,
   defaultMigrations: readonly DatabaseMigration[] = DATABASE_MIGRATION_LIST,
 ): readonly DatabaseMigration[] {
-  return isRailwayDeployment(environment)
-    ? RAILWAY_DATABASE_MIGRATION_LIST
-    : defaultMigrations;
+  return isRailwayDeployment(environment) ? RAILWAY_DATABASE_MIGRATION_LIST : defaultMigrations;
 }

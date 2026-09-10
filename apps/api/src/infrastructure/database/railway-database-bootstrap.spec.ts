@@ -6,10 +6,11 @@ describe('bootstrapRailwayDatabase', () => {
   it('creates only fixed capability roles and commits atomically', async () => {
     const query = jest.fn().mockResolvedValue({ rows: [], rowCount: 0 });
 
-    await bootstrapRailwayDatabase(
-      { query } as unknown as Pick<Pool, 'query'>,
-      { workload: 'api', username: 'crypto_api_login_railway', password: 'test-secret' },
-    );
+    await bootstrapRailwayDatabase({ query } as unknown as Pick<Pool, 'query'>, {
+      workload: 'api',
+      username: 'crypto_api_login_railway',
+      password: 'test-secret',
+    });
 
     expect(query.mock.calls.map(([sql]) => sql)).toEqual([
       'BEGIN',
@@ -43,10 +44,11 @@ describe('bootstrapRailwayDatabase', () => {
       .mockResolvedValueOnce({ rows: [], rowCount: 0 });
 
     await expect(
-      bootstrapRailwayDatabase(
-        { query } as unknown as Pick<Pool, 'query'>,
-        { workload: 'worker', username: 'crypto_worker_login_railway', password: 'secret' },
-      ),
+      bootstrapRailwayDatabase({ query } as unknown as Pick<Pool, 'query'>, {
+        workload: 'worker',
+        username: 'crypto_worker_login_railway',
+        password: 'secret',
+      }),
     ).rejects.toBe(failure);
     expect(query.mock.calls.map(([sql]) => sql)).toEqual(['BEGIN', expect.any(String), 'ROLLBACK']);
   });
@@ -54,10 +56,11 @@ describe('bootstrapRailwayDatabase', () => {
   it('rejects a login that does not exactly match its workload before querying', async () => {
     const query = jest.fn();
     await expect(
-      bootstrapRailwayDatabase(
-        { query } as unknown as Pick<Pool, 'query'>,
-        { workload: 'api', username: 'crypto_worker_login_railway', password: 'secret' },
-      ),
+      bootstrapRailwayDatabase({ query } as unknown as Pick<Pool, 'query'>, {
+        workload: 'api',
+        username: 'crypto_worker_login_railway',
+        password: 'secret',
+      }),
     ).rejects.toThrow('fixed login');
     expect(query).not.toHaveBeenCalled();
   });

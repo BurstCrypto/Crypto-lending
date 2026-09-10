@@ -9647,7 +9647,7 @@ const API_RUNTIME_PINNED_INPUT_PATHS = Object.freeze([
   'tsconfig.json',
 ]);
 const REVIEWED_API_RUNTIME_REPOSITORY_SNAPSHOT_SHA256 =
-  '2a22d11f01fe2e9bb76d405535a6108a93ed3f55114d70e93113491ba817dc22';
+  'ba194885a41c7ad98a9c5be7256ccb9fa638c5d17704edb4656ef397ba43056d';
 const API_RUNTIME_OWNED_DEPLOYMENT_IDENTITY_PATHS = new Set([
   'blockchain-sync/infrastructure/rpc/ethereum-mainnet-balance-deployment-identity.verifier.ts',
   'blockchain-sync/infrastructure/rpc/ethereum-mainnet-balance-deployment.manifest.ts',
