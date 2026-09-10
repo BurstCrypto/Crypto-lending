@@ -86,6 +86,9 @@ describe('Railway production topology', () => {
   it('keeps CI plan-only while the signed production gate is not wired', async () => {
     const workflow = await readFile('.github/workflows/railway-config.yml', 'utf8');
     assert.match(workflow, /command: plan/u);
+    assert.match(workflow, /cli-version: 5\.51\.0/u);
+    assert.match(workflow, /if: steps\.readiness\.outputs\.ready == 'true'/u);
+    assert.match(workflow, /Railway plan skipped/u);
     assert.doesNotMatch(workflow, /command: apply/u);
     assert.doesNotMatch(workflow, /^\s{2}apply:/mu);
   });
