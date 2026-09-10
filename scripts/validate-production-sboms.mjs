@@ -1694,6 +1694,10 @@ export function validateProductionSyftBindingBytes(
   const imageConfigDigest = boundedString(metadata.imageID, 71, 'SYFT_SOURCE_INVALID');
   const expectedDigest = expectedImageId.slice('sha256:'.length);
   const expectedTag = `${expectation.imageName}:${expectation.imageTag}`;
+  const repoDigests = validateStringArray(metadata.repoDigests, 8, 512, 'SYFT_SOURCE_INVALID');
+  const repoDigestIdentityValid =
+    repoDigests.length === 0 ||
+    (repoDigests.length === 1 && repoDigests[0] === `${expectation.imageName}@${expectedImageId}`);
   if (
     !/^[0-9a-f]{64}$/u.test(sourceId) ||
     sourceId !== manifestDigest.slice('sha256:'.length) ||
@@ -1712,8 +1716,7 @@ export function validateProductionSyftBindingBytes(
     ].includes(metadata.mediaType) ||
     JSON.stringify(validateStringArray(metadata.tags, 8, 512, 'SYFT_SOURCE_INVALID')) !==
       JSON.stringify([expectedTag]) ||
-    JSON.stringify(validateStringArray(metadata.repoDigests, 8, 512, 'SYFT_SOURCE_INVALID')) !==
-      JSON.stringify([])
+    !repoDigestIdentityValid
   ) {
     return fail('SYFT_IMAGE_INPUT_BINDING_INVALID');
   }

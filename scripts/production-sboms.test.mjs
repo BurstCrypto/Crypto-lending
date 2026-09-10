@@ -1014,6 +1014,18 @@ describe('actual-image SPDX validation', () => {
     assert.match(accepted.imageManifestDigest, /^sha256:[0-9a-f]{64}$/u);
     assert.notEqual(accepted.imageConfigDigest, accepted.imageManifestDigest);
 
+    const acceptedWithRepoDigest = validateProductionSyftBindingBytes(
+      syftBindingDocument('api', (document) => {
+        document.source.metadata.repoDigests = [`crypto-lending-api@${API_IMAGE_ID}`];
+      }),
+      'api',
+      expectations,
+      API_IMAGE_ID,
+      SOURCE_REVISION,
+      apiImageBinding,
+    );
+    assert.equal(acceptedWithRepoDigest.image, `docker:${API_IMAGE_ID}`);
+
     assertCode(
       () =>
         validateProductionSyftBindingBytes(
