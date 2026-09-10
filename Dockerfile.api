@@ -3,7 +3,7 @@ ARG OCI_REVISION=0000000000000000000000000000000000000000
 ARG OCI_CREATED=1970-01-01T00:00:00Z
 ARG SOURCE_DATE_EPOCH=0
 
-FROM node:24.20.0-bookworm-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e AS metadata
+FROM node:26.8-bookworm-slim@sha256:cd9f682fa2885cd1056e830424764158570061c59736a1da836bc3d73df095ae AS metadata
 
 ARG OCI_SOURCE
 ARG OCI_REVISION
@@ -19,7 +19,7 @@ COPY infra/containers/validate-oci-build-metadata.mjs ./infra/containers/validat
 RUN ["node", "infra/containers/validate-oci-build-metadata.mjs"]
 RUN ["node", "-e", "require('node:fs').writeFileSync('/oci-metadata.validated','validated\\n',{encoding:'utf8',flag:'wx',mode:0o444})"]
 
-FROM node:24.20.0-bookworm-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e AS build
+FROM node:26.8-bookworm-slim@sha256:cd9f682fa2885cd1056e830424764158570061c59736a1da836bc3d73df095ae AS build
 
 ENV NPM_CONFIG_AUDIT=false \
     NPM_CONFIG_FUND=false \
@@ -45,7 +45,7 @@ RUN ["node", "-e", "require('node:fs').mkdirSync('apps/api/node_modules',{recurs
 COPY infra/containers/validate-built-runtime.mjs ./infra/containers/validate-built-runtime.mjs
 RUN ["node", "infra/containers/validate-built-runtime.mjs", "api", "apps/api"]
 
-FROM node:24.20.0-bookworm-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e AS runtime
+FROM node:26.8-bookworm-slim@sha256:cd9f682fa2885cd1056e830424764158570061c59736a1da836bc3d73df095ae AS runtime
 
 ARG OCI_SOURCE
 ARG OCI_REVISION
