@@ -38,15 +38,29 @@ jobs:
           SOURCE_CREATED="$(date -u -d "@$SOURCE_EPOCH" +%Y-%m-%dT%H:%M:%SZ)"
           for TARGET in api web; do
             docker build --provenance=false --file "Dockerfile.$TARGET" \
-              --build-arg "OCI_SOURCE=https://github.com/Trey-Gleason/Crypto-lending" \
+              --build-arg "OCI_SOURCE=https://github.com/BurstCrypto/Crypto-lending" \
               --build-arg "OCI_REVISION=$REVISION" \
               --build-arg "OCI_CREATED=$SOURCE_CREATED" \
               --tag "$IMAGE_PREFIX-$TARGET:$REVISION" .
             docker push "$IMAGE_PREFIX-$TARGET:$REVISION"
           done
-          docker build --file deploy/railway/gateway/Dockerfile \
+          docker build --provenance=false --file deploy/railway/gateway/Dockerfile \
+            --build-arg "OCI_SOURCE=https://github.com/BurstCrypto/Crypto-lending" \
+            --build-arg "OCI_REVISION=$REVISION" \
+            --build-arg "OCI_CREATED=$SOURCE_CREATED" \
             --tag "$IMAGE_PREFIX-gateway:$REVISION" deploy/railway/gateway
           docker push "$IMAGE_PREFIX-gateway:$REVISION"
+
+      - name: Make Railway release packages anonymously pullable
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          for TARGET in api web gateway; do
+            gh api --method PATCH \
+              "/orgs/${GITHUB_REPOSITORY_OWNER}/packages/container/crypto-lending-${TARGET}/visibility" \
+              --field visibility=public >/dev/null
+          done
 
       - name: Report immutable image digests
         env:

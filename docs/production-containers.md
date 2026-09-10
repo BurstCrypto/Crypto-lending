@@ -2,8 +2,12 @@
 
 The repository now has separate, reproducible production image definitions:
 
-- Dockerfile.api builds the Nest API image. The same image is used with the ECS
-  command overrides for the outbox worker and one-off database migration.
+- Dockerfile.api builds the Nest API image. The same image is used with command
+  overrides for the outbox worker and one-off database migration on ECS or
+  Railway. Its embedded healthcheck probes the internal dependency-readiness
+  endpoint exposed by both API and worker workloads; a failed database, Redis,
+  migration-record, or selected queue check makes the relevant container
+  unhealthy.
 - Dockerfile.web builds only the Next.js standalone server and static assets.
 
 Both final images run as UID/GID 10001:10001, clear the shell entrypoint
@@ -15,7 +19,7 @@ platform may mount a small noexec,nosuid,nodev tmpfs at /tmp if future
 instrumentation needs temporary files.
 
 No secret or application configuration is a build argument. Authentication,
-database, Redis, queue, RPC, and wallet values remain runtime-only ECS
+database, Redis, queue, RPC, and wallet values remain runtime-only platform
 injections.
 
 ## Pinned inputs
@@ -39,7 +43,7 @@ timestamp cannot invalidate dependency/build layers. Defaults are deliberately
 fail-closed: an all-zero revision and the 1970 timestamp are rejected. Every
 build must explicitly supply:
 
-- OCI_SOURCE=https://github.com/Trey-Gleason/Crypto-lending;
+- OCI_SOURCE=https://github.com/BurstCrypto/Crypto-lending;
 - a lowercase, nonzero, 40-character OCI_REVISION; and
 - an exact whole-second UTC OCI_CREATED, such as 2026-09-04T12:00:00Z.
 
@@ -90,8 +94,8 @@ and entry limits.
 
 For a local single-platform build, use explicit non-production metadata:
 
-    docker build --file Dockerfile.api --tag crypto-lending-api:container-validation --build-arg OCI_SOURCE=https://github.com/Trey-Gleason/Crypto-lending --build-arg OCI_REVISION=1111111111111111111111111111111111111111 --build-arg OCI_CREATED=2026-09-04T12:00:00Z .
-    docker build --file Dockerfile.web --tag crypto-lending-web:container-validation --build-arg OCI_SOURCE=https://github.com/Trey-Gleason/Crypto-lending --build-arg OCI_REVISION=1111111111111111111111111111111111111111 --build-arg OCI_CREATED=2026-09-04T12:00:00Z .
+    docker build --file Dockerfile.api --tag crypto-lending-api:container-validation --build-arg OCI_SOURCE=https://github.com/BurstCrypto/Crypto-lending --build-arg OCI_REVISION=1111111111111111111111111111111111111111 --build-arg OCI_CREATED=2026-09-04T12:00:00Z .
+    docker build --file Dockerfile.web --tag crypto-lending-web:container-validation --build-arg OCI_SOURCE=https://github.com/BurstCrypto/Crypto-lending --build-arg OCI_REVISION=1111111111111111111111111111111111111111 --build-arg OCI_CREATED=2026-09-04T12:00:00Z .
 
 The API build removes local-demo and public-testnet compiled modules, prunes
 development dependencies, then loads the compiled production AppModule. It
@@ -104,8 +108,9 @@ treated as SDK code.
 Local runtime acceptance uses --network none, --read-only, --cap-drop ALL, and
 --security-opt no-new-privileges:true. Probe the health endpoint from a second
 Node process inside the container over loopback; do not publish a host port.
-The API smoke still needs syntactically valid production runtime configuration,
-but no dependency endpoint is contacted by its process-health route.
+The isolated validator checks startup and route shape; Railway deployment smoke
+must additionally attach PostgreSQL and Redis and require a 200 response from
+`/api/v1/internal/health/dependencies` for both API and worker workloads.
 
 ## Controlled multi-platform release handoff
 

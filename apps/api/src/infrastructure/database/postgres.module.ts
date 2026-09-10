@@ -5,6 +5,7 @@ import {
   InfrastructureConfigModule,
 } from '../config/infrastructure-config.module';
 import { MigrationRunner } from './migration-runner.service';
+import { databaseMigrationsForDeployment } from './deployment-migrations';
 import { DATABASE_MIGRATION_LIST } from './migrations';
 import { PostgresService } from './postgres.service';
 import { DATABASE_MIGRATIONS, POSTGRES_POOL } from './postgres.tokens';
@@ -20,7 +21,7 @@ import { createPostgresPool } from './runtime-postgres-pool';
     },
     {
       provide: DATABASE_MIGRATIONS,
-      useValue: DATABASE_MIGRATION_LIST,
+      useFactory: () => databaseMigrationsForDeployment(process.env, DATABASE_MIGRATION_LIST),
     },
     PostgresService,
     MigrationRunner,

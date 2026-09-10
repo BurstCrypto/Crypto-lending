@@ -345,7 +345,7 @@ test('rejects image timestamp normalization drift', () => {
       source,
       'apiDockerfile',
       'ARG OCI_SOURCE=\n',
-      'ARG OCI_SOURCE=https://github.com/Trey-Gleason/Crypto-lending\n',
+      'ARG OCI_SOURCE=https://github.com/BurstCrypto/Crypto-lending\n',
     ),
     /fail-closed metadata defaults/u,
   );
@@ -664,7 +664,7 @@ test('OCI metadata validation rejects unsafe defaults and malformed values', () 
   const valid = {
     OCI_CREATED: '2026-09-04T12:00:00Z',
     OCI_REVISION: '1'.repeat(40),
-    OCI_SOURCE: 'https://github.com/Trey-Gleason/Crypto-lending',
+    OCI_SOURCE: 'https://github.com/BurstCrypto/Crypto-lending',
     SOURCE_DATE_EPOCH: '0',
   };
   assert.deepEqual(validateOciBuildMetadata(valid), []);

@@ -43,7 +43,7 @@ import {
 } from './validate-production-sboms.mjs';
 
 const SOURCE_REVISION = 'c'.repeat(40);
-const OCI_SOURCE = 'https://github.com/Trey-Gleason/Crypto-lending';
+const OCI_SOURCE = 'https://github.com/BurstCrypto/Crypto-lending';
 const API_IMAGE_ID = imageMaterial('api').manifestDigest;
 const WEB_IMAGE_ID = imageMaterial('web').manifestDigest;
 const temporaryDirectories = [];
@@ -1547,7 +1547,7 @@ describe('SBOM CI integration policy', () => {
       workflow.replace(SBOM_ACTION_COMMIT, 'f'.repeat(40)),
       workflow.replace('upload-artifact: false', 'upload-artifact: true'),
       workflow.replace(
-        '--build-arg "OCI_SOURCE=https://github.com/Trey-Gleason/Crypto-lending"',
+        '--build-arg "OCI_SOURCE=https://github.com/BurstCrypto/Crypto-lending"',
         '--build-arg "OCI_SOURCE=https://example.invalid/repository"',
       ),
       workflow.replace(

@@ -43,7 +43,7 @@ const MAX_RELATIONSHIPS = 200_000;
 const MAX_LICENSES = 20_000;
 const MAX_NATIVE_RELATIONSHIPS = 200_000;
 const SYFT_JSON_SCHEMA_VERSION = '16.1.10';
-const CANONICAL_OCI_SOURCE = 'https://github.com/Trey-Gleason/Crypto-lending';
+const CANONICAL_OCI_SOURCE = 'https://github.com/BurstCrypto/Crypto-lending';
 const SPDX_ID = /^SPDXRef-[A-Za-z0-9.-]{1,255}$/u;
 const LICENSE_ID = /^LicenseRef-[A-Za-z0-9.-]{1,255}$/u;
 const VERSION = /^[0-9A-Za-z][0-9A-Za-z.+_~-]{0,255}$/u;
@@ -1986,11 +1986,11 @@ export function validateProductionSbomWorkflowText(input) {
   const action = `uses: anchore/sbom-action@${SBOM_ACTION_COMMIT} # v0.24.2 (2026-08-28)`;
   if (
     occurrences(text, action) !== 4 ||
-    occurrences(text, '--build-arg "OCI_SOURCE=https://github.com/Trey-Gleason/Crypto-lending"') !==
-      2 ||
+    occurrences(text, '--build-arg "OCI_SOURCE=https://github.com/BurstCrypto/Crypto-lending"') !==
+      3 ||
     occurrences(text, 'docker build --provenance=false --file Dockerfile.api') !== 1 ||
     occurrences(text, 'docker build --provenance=false --file Dockerfile.web') !== 1 ||
-    occurrences(text, '--provenance=false') !== 2
+    occurrences(text, '--provenance=false') !== 3
   ) {
     return fail('CI_SBOM_CONFIGURATION_INVALID');
   }

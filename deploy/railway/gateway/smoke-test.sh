@@ -40,6 +40,15 @@ done
 test "$(docker exec "$gateway" wget -qO- http://127.0.0.1:8080/healthz)" = 'ok'
 api_response="$(docker exec "$gateway" wget -qO- http://127.0.0.1:8080/api/v1/probe?asset=usdc)"
 test "${api_response%%|xff:*}" = 'api:/api/v1/probe?asset=usdc'
-spoofed_response="$(docker exec "$gateway" wget -qO- --header='X-Forwarded-For: 203.0.113.7' --header='X-Forwarded-Proto: https' http://127.0.0.1:8080/api/v1/probe)"
-test "${spoofed_response#*|xff:}" != '203.0.113.7|xfp:https'
+forwarded_response="$(docker exec "$gateway" wget -qO- \
+  --header='X-Real-IP: 198.51.100.4' \
+  --header='X-Forwarded-For: 203.0.113.7, 203.0.113.8' \
+  --header='X-Forwarded-Proto: https' \
+  http://127.0.0.1:8080/api/v1/probe)"
+test "${forwarded_response#*|xff:}" = '198.51.100.4|xfp:https'
+if docker exec "$gateway" wget -qO- \
+  http://127.0.0.1:8080/api/v1/internal/health/dependencies >/dev/null 2>&1; then
+  echo 'gateway exposed the private API readiness endpoint' >&2
+  exit 1
+fi
 test "$(docker exec "$gateway" wget -qO- http://127.0.0.1:8080/platforms)" = 'web:/platforms'

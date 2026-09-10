@@ -2,7 +2,7 @@ import { resolve } from 'node:path';
 import process from 'node:process';
 import { pathToFileURL } from 'node:url';
 
-const EXPECTED_SOURCE = 'https://github.com/Trey-Gleason/Crypto-lending';
+const EXPECTED_SOURCE = 'https://github.com/BurstCrypto/Crypto-lending';
 const LOWERCASE_GIT_REVISION = /^[0-9a-f]{40}$/u;
 const CANONICAL_UTC_SECOND =
   /^(20[2-9][0-9]|21[0-9]{2})-(0[1-9]|1[0-2])-([0-2][0-9]|3[01])T([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]Z$/u;

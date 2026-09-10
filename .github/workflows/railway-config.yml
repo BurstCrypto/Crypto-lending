@@ -20,6 +20,11 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      - name: Validate Railway topology offline
+        run: |
+          npm ci --ignore-scripts
+          npm run test:railway
+
       - name: Check Railway plan configuration
         id: readiness
         env:
@@ -37,7 +42,7 @@ jobs:
             fi
           done
           if [ "${#missing[@]}" -gt 0 ]; then
-            printf '::notice::Railway plan skipped; production-plan is missing: %s\n' "${missing[*]}"
+            printf '::notice::Live Railway plan unavailable; offline topology validation passed, but production-plan is missing: %s\n' "${missing[*]}"
             echo 'ready=false' >> "$GITHUB_OUTPUT"
           else
             echo 'ready=true' >> "$GITHUB_OUTPUT"
