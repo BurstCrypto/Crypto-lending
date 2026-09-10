@@ -471,7 +471,7 @@ function validateClassicManifest(entries, metadata, imageReference, configBlob, 
     const candidate = record(value, 'ARCHIVE_DOCKER_MANIFEST_INVALID');
     exactKeys(
       candidate,
-      new Set(['Config', 'Layers', 'RepoTags']),
+      new Set(['Config', 'Layers', 'RepoTags', 'LayerSources']),
       ['Config', 'Layers', 'RepoTags'],
       'ARCHIVE_DOCKER_MANIFEST_INVALID',
     );
@@ -503,6 +503,47 @@ function validateClassicManifest(entries, metadata, imageReference, configBlob, 
       layerPath.split('/').some((segment) => segment === '' || segment === '.' || segment === '..')
     ) {
       return fail('ARCHIVE_DOCKER_LAYER_BINDING_INVALID');
+    }
+  }
+  if (manifest.LayerSources !== undefined) {
+    const code = 'ARCHIVE_DOCKER_LAYER_SOURCE_INVALID';
+    const sources = record(manifest.LayerSources, code);
+    const sourceKeys = Reflect.ownKeys(sources);
+    const expectedDigests = new Set(
+      layerPaths.map((layerPath) => `sha256:${layerPath.slice('blobs/sha256/'.length)}`),
+    );
+    if (
+      sourceKeys.length !== expectedDigests.size ||
+      sourceKeys.some(
+        (key) => typeof key !== 'string' || !SHA256.test(key) || !expectedDigests.has(key),
+      )
+    ) {
+      return fail(code);
+    }
+    for (const digest of expectedDigests) {
+      const source = record(sources[digest], code);
+      exactKeys(
+        source,
+        new Set(['mediaType', 'size', 'digest']),
+        ['mediaType', 'size', 'digest'],
+        code,
+      );
+      if (
+        source.mediaType !== 'application/vnd.oci.image.layer.v1.tar' ||
+        source.digest !== digest ||
+        integer(source.size, MAX_DOCKER_SAVE_ARCHIVE_BYTES, code) === 0
+      ) {
+        return fail(code);
+      }
+      const layerPath = `blobs/sha256/${digest.slice('sha256:'.length)}`;
+      const archiveEntry = metadata.get(layerPath);
+      if (
+        archiveEntry?.type !== '0' ||
+        archiveEntry.digest !== digest ||
+        archiveEntry.size !== source.size
+      ) {
+        return fail(code);
+      }
     }
   }
   for (let index = 0; index < layers.length; index += 1) {

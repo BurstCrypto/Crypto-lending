@@ -94,28 +94,47 @@ function tarArchive(entries) {
   ]);
 }
 
-function classicDockerArchive(kind, includeLayers = true) {
+function classicDockerArchive(kind, includeLayers = true, includeLayerSources = false, mutate) {
   const base = imageMaterial(kind);
-  const layerEntries = [
-    { contents: Buffer.from(`${kind}-first-layer\n`), pathname: 'first/layer.tar' },
-    { contents: Buffer.from(`${kind}-second-layer\n`), pathname: 'second/layer.tar' },
-  ];
-  const config = JSON.parse(base.configBytes.toString('utf8'));
-  config.rootfs.diff_ids = layerEntries.map(
-    ({ contents }) => `sha256:${createHash('sha256').update(contents).digest('hex')}`,
+  const layerEntries = [`${kind}-first-layer\n`, `${kind}-second-layer\n`].map(
+    (contents, index) => {
+      const bytes = Buffer.from(contents);
+      const digest = `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
+      return {
+        contents: bytes,
+        digest,
+        pathname: includeLayerSources
+          ? `blobs/sha256/${digest.slice('sha256:'.length)}`
+          : `${index === 0 ? 'first' : 'second'}/layer.tar`,
+      };
+    },
   );
+  const config = JSON.parse(base.configBytes.toString('utf8'));
+  config.rootfs.diff_ids = layerEntries.map(({ digest }) => digest);
   const configBytes = Buffer.from(JSON.stringify(config));
   const imageId = `sha256:${createHash('sha256').update(configBytes).digest('hex')}`;
   const configPath = `${imageId.slice('sha256:'.length)}.json`;
-  const manifestBytes = Buffer.from(
-    JSON.stringify([
-      {
-        Config: configPath,
-        Layers: layerEntries.map(({ pathname }) => pathname),
-        RepoTags: [`crypto-lending-${kind}:ci`],
-      },
-    ]),
-  );
+  const manifest = {
+    Config: configPath,
+    Layers: layerEntries.map(({ pathname }) => pathname),
+    RepoTags: [`crypto-lending-${kind}:ci`],
+    ...(includeLayerSources
+      ? {
+          LayerSources: Object.fromEntries(
+            layerEntries.map(({ contents, digest }) => [
+              digest,
+              {
+                mediaType: 'application/vnd.oci.image.layer.v1.tar',
+                size: contents.length,
+                digest,
+              },
+            ]),
+          ),
+        }
+      : {}),
+  };
+  mutate?.(manifest);
+  const manifestBytes = Buffer.from(JSON.stringify([manifest]));
   return Object.freeze({
     bytes: tarArchive([
       { contents: configBytes, pathname: configPath },
@@ -790,6 +809,57 @@ describe('local Docker image archive capture boundaries', () => {
     assert.equal(evidence.archiveFormat, 'docker');
     assert.equal(evidence.chainType, 'config');
     assert.equal(existsSync(outputPath), true);
+  });
+
+  it('captures Docker 28 classic archives with exact content-bound layer sources', () => {
+    const outputDirectory = path.join(fixtureRoot, '.local-validation', 'production-sbom');
+    mkdirSync(outputDirectory, { recursive: true });
+    const archive = classicDockerArchive('api', true, true);
+    const outputPath = path.join(outputDirectory, 'api-image.binding.json');
+
+    const evidence = captureProductionImageBinding({
+      workspaceKind: 'api',
+      imageReference: 'crypto-lending-api:ci',
+      expectedImageId: archive.imageId,
+      outputPath,
+      repoRoot: fixtureRoot,
+      inspect() {
+        return archive.imageId;
+      },
+      save(_docker, _image, archivePath) {
+        writeFileSync(archivePath, archive.bytes);
+      },
+    });
+
+    assert.equal(evidence.archiveFormat, 'docker');
+    assert.equal(existsSync(outputPath), true);
+  });
+
+  it('rejects Docker 28 layer sources that are not bound to the saved layer bytes', () => {
+    const outputDirectory = path.join(fixtureRoot, '.local-validation', 'production-sbom');
+    mkdirSync(outputDirectory, { recursive: true });
+    const archive = classicDockerArchive('api', true, true, (manifest) => {
+      const [digest] = Object.keys(manifest.LayerSources);
+      manifest.LayerSources[digest].size += 1;
+    });
+
+    assertCaptureCode(
+      () =>
+        captureProductionImageBinding({
+          workspaceKind: 'api',
+          imageReference: 'crypto-lending-api:ci',
+          expectedImageId: archive.imageId,
+          outputPath: path.join(outputDirectory, 'api-image.binding.json'),
+          repoRoot: fixtureRoot,
+          inspect() {
+            return archive.imageId;
+          },
+          save(_docker, _image, archivePath) {
+            writeFileSync(archivePath, archive.bytes);
+          },
+        }),
+      'ARCHIVE_DOCKER_LAYER_SOURCE_INVALID',
+    );
   });
 
   it('rejects omitted classic layer payloads before writing binding evidence', () => {
