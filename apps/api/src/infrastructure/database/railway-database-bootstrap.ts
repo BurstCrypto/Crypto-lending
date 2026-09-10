@@ -1,5 +1,26 @@
 import type { Pool } from 'pg';
 
+/**
+ * The bootstrap runs inside the API service, whose environment carries the
+ * runtime database and Redis credentials. loadMigrationDatabaseConfig is the
+ * privileged migration principal and fails closed if it sees any
+ * APPLICATION_WORKLOAD, DATABASE_RUNTIME_*, or REDIS_* variable, so strip them
+ * before loading it. (The migration.cli step already drops these via `env -u`;
+ * the bootstrap must do the same or it crashes the API preDeploy.)
+ */
+export function sanitizeBootstrapMigrationEnvironment(
+  source: Readonly<NodeJS.ProcessEnv>,
+): NodeJS.ProcessEnv {
+  const migrationEnvironment = { ...source };
+  delete migrationEnvironment.APPLICATION_WORKLOAD;
+  for (const name of Object.keys(migrationEnvironment)) {
+    if (name.startsWith('DATABASE_RUNTIME_') || name.startsWith('REDIS_')) {
+      delete migrationEnvironment[name];
+    }
+  }
+  return migrationEnvironment;
+}
+
 export type RailwayDatabaseWorkload = 'api' | 'worker';
 
 export interface RailwayRuntimeDatabasePrincipal {

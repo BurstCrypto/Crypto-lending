@@ -1,6 +1,10 @@
 import type { Pool } from 'pg';
 
-import { bootstrapRailwayDatabase } from './railway-database-bootstrap';
+import { loadMigrationDatabaseConfig } from '../config/infrastructure.config';
+import {
+  bootstrapRailwayDatabase,
+  sanitizeBootstrapMigrationEnvironment,
+} from './railway-database-bootstrap';
 
 describe('bootstrapRailwayDatabase', () => {
   it('creates only fixed capability roles and commits atomically', async () => {
@@ -63,5 +67,61 @@ describe('bootstrapRailwayDatabase', () => {
       }),
     ).rejects.toThrow('fixed login');
     expect(query).not.toHaveBeenCalled();
+  });
+});
+
+describe('sanitizeBootstrapMigrationEnvironment', () => {
+  function apiServiceEnvironment(): NodeJS.ProcessEnv {
+    // The environment the API service carries when it runs the bootstrap
+    // preDeploy: runtime DB + Redis credentials alongside the migration URL.
+    return {
+      NODE_ENV: 'production',
+      APP_ENV: 'staging',
+      DEPLOYMENT_TARGET: 'railway',
+      APPLICATION_WORKLOAD: 'api',
+      MIGRATION_DATABASE_URL: 'postgresql://postgres:pw@postgres.railway.internal:5432/railway',
+      DATABASE_RUNTIME_HOST: 'postgres.railway.internal',
+      DATABASE_RUNTIME_PORT: '5432',
+      DATABASE_RUNTIME_NAME: 'railway',
+      DATABASE_RUNTIME_USERNAME: 'crypto_api_login_railway',
+      DATABASE_RUNTIME_PASSWORD: 'railway-simple',
+      DATABASE_RUNTIME_SSL_MODE: 'disable',
+      REDIS_URL: 'redis://default:pw@redis.railway.internal:6379',
+    };
+  }
+
+  it('strips the runtime workload, database, and Redis variables', () => {
+    const sanitized = sanitizeBootstrapMigrationEnvironment(apiServiceEnvironment());
+    expect(sanitized.APPLICATION_WORKLOAD).toBeUndefined();
+    expect(sanitized.REDIS_URL).toBeUndefined();
+    expect(Object.keys(sanitized).filter((name) => name.startsWith('DATABASE_RUNTIME_'))).toEqual(
+      [],
+    );
+    expect(sanitized.MIGRATION_DATABASE_URL).toBe(
+      'postgresql://postgres:pw@postgres.railway.internal:5432/railway',
+    );
+  });
+
+  it('yields an environment the privileged migration loader accepts', () => {
+    // Regression: the old CLI stripped APPLICATION_WORKLOAD and DATABASE_RUNTIME_*
+    // but left REDIS_URL, so loadMigrationDatabaseConfig threw "must not receive
+    // Redis configuration" and crashed the API bootstrap on every deploy.
+    const raw = apiServiceEnvironment();
+    const legacyStrip = { ...raw };
+    delete legacyStrip.APPLICATION_WORKLOAD;
+    for (const name of Object.keys(legacyStrip)) {
+      if (name.startsWith('DATABASE_RUNTIME_')) delete legacyStrip[name];
+    }
+    expect(() => loadMigrationDatabaseConfig(legacyStrip)).toThrow(/Redis/u);
+
+    const sanitized = sanitizeBootstrapMigrationEnvironment(raw);
+    expect(loadMigrationDatabaseConfig(sanitized).sessionRole).toBe('crypto_schema_owner');
+  });
+
+  it('does not mutate the source environment', () => {
+    const raw = apiServiceEnvironment();
+    sanitizeBootstrapMigrationEnvironment(raw);
+    expect(raw.REDIS_URL).toBe('redis://default:pw@redis.railway.internal:6379');
+    expect(raw.APPLICATION_WORKLOAD).toBe('api');
   });
 });

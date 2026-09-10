@@ -205,3 +205,72 @@ describe('Railway production topology', () => {
     await assert.rejects(compile('production'), /RAILWAY_PUBLIC_DOMAIN/);
   });
 });
+
+describe('Railway simple profile (build from source)', () => {
+  const SIMPLE_ENV_NAMES = [
+    'RAILWAY_SIMPLE_PROFILE',
+    'RAILWAY_SOURCE_REPO',
+    'RAILWAY_PUBLIC_DOMAIN',
+    ...Object.keys(IMAGE_ENVIRONMENT),
+  ] as const;
+  const savedSimpleEnvironment = Object.fromEntries(
+    SIMPLE_ENV_NAMES.map((name) => [name, process.env[name]]),
+  );
+
+  beforeEach(() => {
+    for (const name of Object.keys(IMAGE_ENVIRONMENT)) delete process.env[name];
+    delete process.env.RAILWAY_PUBLIC_DOMAIN;
+    process.env.RAILWAY_SIMPLE_PROFILE = '1';
+    process.env.RAILWAY_SOURCE_REPO = 'youruser/crypto-lending';
+  });
+
+  afterEach(() => {
+    for (const name of SIMPLE_ENV_NAMES) {
+      const value = savedSimpleEnvironment[name];
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  });
+
+  it('builds every service from the connected repository via its Dockerfile', async () => {
+    const configuration = await compile('production');
+    const expectations: Record<string, string> = {
+      api: 'Dockerfile.api',
+      web: 'Dockerfile.web',
+      gateway: 'deploy/railway/gateway/Dockerfile',
+      worker: 'Dockerfile.api',
+    };
+    for (const [name, dockerfilePath] of Object.entries(expectations)) {
+      const resource = serviceResource(configuration, name);
+      assert.equal(resource.source?.type, 'github');
+      assert.equal(resource.source?.repo, 'youruser/crypto-lending');
+      assert.equal(resource.source?.image, undefined);
+      assert.equal(resource.build?.builder, 'DOCKERFILE');
+      assert.equal(resource.build?.dockerfilePath, dockerfilePath);
+    }
+  });
+
+  it('needs no sealed shared variables to stand up', async () => {
+    const configuration = await compile('production');
+    const api = serviceResource(configuration, 'api');
+    // The auth/OIDC contract is filled in-container by the simple-profile
+    // normalizer, so nothing here may reference an unprovisioned shared variable.
+    assert.deepEqual(api.variables?.RAILWAY_SIMPLE_PROFILE, { type: 'literal', value: '1' });
+    assert.equal(api.variables?.OIDC_CLIENT_SECRET, undefined);
+    assert.deepEqual(api.variables?.DATABASE_RUNTIME_PASSWORD, {
+      type: 'literal',
+      value: 'railway-simple',
+    });
+    const sharedReferences = Object.values(api.variables ?? {}).filter(
+      (value) => typeof value === 'object' && value !== null && value.type === 'sharedReference',
+    );
+    assert.deepEqual(sharedReferences, []);
+  });
+
+  it('requires a well-formed source repository', async () => {
+    process.env.RAILWAY_SOURCE_REPO = 'not-a-repo';
+    await assert.rejects(compile('production'), /RAILWAY_SOURCE_REPO/u);
+    delete process.env.RAILWAY_SOURCE_REPO;
+    await assert.rejects(compile('production'), /RAILWAY_SOURCE_REPO/u);
+  });
+});

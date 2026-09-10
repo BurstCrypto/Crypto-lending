@@ -6,7 +6,10 @@ import { Pool } from 'pg';
 
 import { loadMigrationDatabaseConfig } from '../config/infrastructure.config';
 import { installFatalProcessBoundary, LOG_EVENTS, StructuredLogger } from '../logging';
-import { bootstrapRailwayDatabase } from './railway-database-bootstrap';
+import {
+  bootstrapRailwayDatabase,
+  sanitizeBootstrapMigrationEnvironment,
+} from './railway-database-bootstrap';
 
 const logger = new StructuredLogger({ workload: 'migration' });
 
@@ -26,11 +29,7 @@ async function main(): Promise<void> {
   if (!username || !password) {
     throw new Error('Railway database bootstrap requires runtime username and password');
   }
-  const migrationEnvironment = { ...process.env };
-  delete migrationEnvironment.APPLICATION_WORKLOAD;
-  for (const name of Object.keys(migrationEnvironment)) {
-    if (name.startsWith('DATABASE_RUNTIME_')) delete migrationEnvironment[name];
-  }
+  const migrationEnvironment = sanitizeBootstrapMigrationEnvironment(process.env);
   const config = loadMigrationDatabaseConfig(migrationEnvironment);
   const pool = new Pool({
     connectionString: config.connectionString,

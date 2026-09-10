@@ -39,13 +39,21 @@ reviewed index digest before intentionally changing it.
 The image build installs and verifies the repository-declared npm@11.6.4, then
 uses npm ci against package-lock.json with lifecycle scripts disabled. OCI
 metadata is isolated in a separate stage so changing a release revision or
-timestamp cannot invalidate dependency/build layers. Defaults are deliberately
-fail-closed: an all-zero revision and the 1970 timestamp are rejected. Every
-build must explicitly supply:
+timestamp cannot invalidate dependency/build layers. There are two build modes:
 
-- OCI_SOURCE=https://github.com/BurstCrypto/Crypto-lending;
-- a lowercase, nonzero, 40-character OCI_REVISION; and
-- an exact whole-second UTC OCI_CREATED, such as 2026-09-04T12:00:00Z.
+- **Attested build** (the signed release pipeline). Any build that supplies an
+  OCI_SOURCE opts into the reproducible-provenance contract, which stays
+  deliberately fail-closed — an all-zero revision or the 1970 timestamp is
+  rejected. Such a build must explicitly supply:
+  - OCI_SOURCE=https://github.com/BurstCrypto/Crypto-lending;
+  - a lowercase, nonzero, 40-character OCI_REVISION; and
+  - an exact whole-second UTC OCI_CREATED, such as 2026-09-04T12:00:00Z.
+- **Unattested native build** (Railway's builder, or a plain `docker build` with
+  no build args). When OCI_SOURCE is empty and OCI_REVISION is unset/all-zero —
+  the Dockerfile defaults — `validate-oci-build-metadata.mjs` recognizes an
+  unattested build and skips the provenance assertions so the image can build
+  outside the signed pipeline. The image is functionally identical; only the
+  reproducible OCI labels are absent.
 
 BuildKit's SOURCE_DATE_EPOCH input is declared and locked to 0. This normalizes
 the image configuration and layer timestamps independently of wall-clock build
