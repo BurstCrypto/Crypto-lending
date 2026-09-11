@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+import { BonsaiLogo } from '@/components/brand/bonsai-logo';
 import {
   AuthenticationUnauthenticatedError,
   restoreAuthenticationSession,
@@ -135,11 +136,11 @@ export function SiteHeader({
 
   return (
     <header className="site-header site-header--shared" data-session-navigation={sessionState}>
-      <Link className="brand site-header__brand" href="/" aria-label="Crypto Lending home">
+      <Link className="brand site-header__brand" href="/" aria-label="Bonsai Lending home">
         <span className="brand-mark" aria-hidden="true">
-          CL
+          <BonsaiLogo />
         </span>
-        <span className="brand-name">Crypto Lending</span>
+        <span className="brand-name">Bonsai Lending</span>
       </Link>
 
       <div className="site-header__menus">

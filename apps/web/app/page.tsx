@@ -22,7 +22,7 @@ export default function HomePage() {
             See how supported balances will be reported—without giving up wallet control.
           </h1>
           <p className="hero-copy">
-            Crypto Lending is building one protected workspace for supported Ethereum and Solana
+            Bonsai Lending is building one protected workspace for supported Ethereum and Solana
             wallet balances, conservative reporting totals, and source freshness. Live
             provider-backed balance data is not active yet; this rollout focuses on secure account
             access and wallet-ownership verification while your wallet keeps control.
@@ -139,7 +139,7 @@ export default function HomePage() {
       </section>
 
       <footer className="site-footer">
-        <p>Crypto Lending platform · Ethereum and Solana, wallet-controlled</p>
+        <p>Bonsai Lending platform · Ethereum and Solana, wallet-controlled</p>
       </footer>
     </main>
   );

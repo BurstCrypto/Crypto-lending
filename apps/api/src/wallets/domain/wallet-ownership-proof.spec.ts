@@ -155,7 +155,7 @@ describe('wallet ownership challenge construction', () => {
     expect(created.publicChallenge.message).toBe(
       `127.0.0.1:3000 wants you to sign in with your Ethereum account:\n` +
         `0xde709f2102306220921060314715629080e2fb77\n\n` +
-        `Verify this wallet for Crypto Lending. This proof does not authorize login, transactions, transfers, or loans.\n\n` +
+        `Verify this wallet for Bonsai Lending. This proof does not authorize login, transactions, transfers, or loans.\n\n` +
         `URI: http://127.0.0.1:3000/wallets/ownership\n` +
         `Version: 1\n` +
         `Chain ID: 11155111\n` +
