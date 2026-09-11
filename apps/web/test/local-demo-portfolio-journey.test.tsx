@@ -291,7 +291,7 @@ describe('authenticated local demo portfolio journey', () => {
     expect(dashboardOverview?.nextElementSibling).toBe(allocationPlanner);
     expect(
       await within(allocationPlanner!).findByRole('heading', {
-        name: 'Crypto Lending managed blend',
+        name: 'Bonsai Lending managed blend',
       }),
     ).toBeInTheDocument();
     expect(

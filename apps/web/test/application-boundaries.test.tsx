@@ -37,6 +37,6 @@ describe('application route boundaries', () => {
 
     const status = screen.getByRole('status');
     expect(status).toHaveAttribute('aria-busy', 'true');
-    expect(status).toHaveTextContent('Loading Crypto Lending');
+    expect(status).toHaveTextContent('Loading Bonsai Lending');
   });
 });

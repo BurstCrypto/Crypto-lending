@@ -16,7 +16,7 @@ export default function GlobalError({
             <span className="portfolio-state-mark" aria-hidden="true">
               !
             </span>
-            <h1>Crypto Lending is temporarily unavailable.</h1>
+            <h1>Bonsai Lending is temporarily unavailable.</h1>
             <p>No wallet or financial action was submitted. Retry, or return to the home page.</p>
             <div className="hero-actions">
               <button className="primary-action" type="button" onClick={reset}>

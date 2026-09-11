@@ -40,7 +40,7 @@ const SUBJECT_BINDING_RESOURCE_PREFIX = 'urn:crypto-lending:wallet-subject-bindi
 const OPERATION_RESOURCE = 'urn:crypto-lending:wallet-operation:register-wallet';
 const POLICY_RESOURCE = 'urn:crypto-lending:wallet-ownership:v1';
 const OWNERSHIP_STATEMENT =
-  'Verify this wallet for Crypto Lending. This proof does not authorize login, transactions, transfers, or loans.';
+  'Verify this wallet for Bonsai Lending. This proof does not authorize login, transactions, transfers, or loans.';
 const ED25519_SPKI_PREFIX = Buffer.from('302a300506032b6570032100', 'hex');
 const TYPED_ARRAY_PROTOTYPE = Object.getPrototypeOf(Uint8Array.prototype) as object;
 const TYPED_ARRAY_BUFFER_GETTER = Object.getOwnPropertyDescriptor(

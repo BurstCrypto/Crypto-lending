@@ -41,7 +41,7 @@ export default function PortfolioPage() {
       <ProductionPortfolio />
 
       <footer className="site-footer">
-        <p>Crypto Lending multi-chain mainnet read-only preview</p>
+        <p>Bonsai Lending multi-chain mainnet read-only preview</p>
       </footer>
     </main>
   );

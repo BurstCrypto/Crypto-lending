@@ -118,7 +118,7 @@ function RateStatus({ catalog }: { catalog: LocalDemoYieldCatalog }) {
       <div className="local-demo-yield-catalog-heading">
         <div>
           <p className="eyebrow">Managed rate data</p>
-          <h3 id="local-demo-yield-catalog-title">Crypto Lending managed blend</h3>
+          <h3 id="local-demo-yield-catalog-title">Bonsai Lending managed blend</h3>
         </div>
         <span
           className={`local-demo-yield-freshness is-${catalog.snapshot.freshness.toLowerCase()}`}
@@ -127,7 +127,7 @@ function RateStatus({ catalog }: { catalog: LocalDemoYieldCatalog }) {
         </span>
       </div>
       <p className="local-demo-yield-catalog-copy">
-        Preview the Crypto Lending managed blend below. Estimates combine supported EVM and Solana
+        Preview the Bonsai Lending managed blend below. Estimates combine supported EVM and Solana
         fixture balances with a locally cached, point-in-time managed rate set and make no live
         external request. Rates can change and risk has not been assessed.
       </p>
@@ -506,7 +506,7 @@ function AllocationPreview({
           <p className="eyebrow">Selected managed blend</p>
           <h3 id="local-demo-allocation-preview-title">{preview.selection.label}</h3>
           <p>{preview.selection.description}</p>
-          <small>Crypto Lending managed strategy · risk not assessed</small>
+          <small>Bonsai Lending managed strategy · risk not assessed</small>
         </div>
         <p className="local-demo-allocation-as-of">
           Portfolio estimated <Timestamp value={preview.asOf} />
@@ -575,7 +575,7 @@ function AllocationPreview({
             </li>
           </ul>
           <p className="local-demo-allocation-fee-disclosure">
-            Platform fee policy: Free tier charges 0.20% when Crypto Lending materially orchestrates
+            Platform fee policy: Free tier charges 0.20% when Bonsai Lending materially orchestrates
             a route. A direct-compatible route has a $0 platform routing fee.
           </p>
           <p className="local-demo-allocation-fee-disclosure">
@@ -1029,7 +1029,7 @@ export function LocalDemoAllocationPlanner({
           <span className="local-demo-proof-badge">Local model · estimate only</span>
         </div>
         <p className="local-demo-allocation-intro">
-          Preview a Crypto Lending managed blend across connected EVM and Solana fixture balances.
+          Preview a Bonsai Lending managed blend across connected EVM and Solana fixture balances.
           It starts with no liquid reserve; after previewing, use the slider to add liquidity if
           needed. Ecosystem allocation, variable fee estimates, and the first positive day after
           estimated fees appear only after you select the blend.

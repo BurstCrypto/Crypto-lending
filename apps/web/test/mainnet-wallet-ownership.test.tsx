@@ -669,7 +669,7 @@ describe('MainnetWalletOwnership', () => {
 
     const confirmation = screen.getByRole('group', { name: 'Remove this wallet?' });
     await waitFor(() => expect(screen.getByRole('button', { name: 'Keep wallet' })).toHaveFocus());
-    expect(confirmation).toHaveTextContent('stops Crypto Lending from showing or monitoring');
+    expect(confirmation).toHaveTextContent('stops Bonsai Lending from showing or monitoring');
     expect(confirmation).toHaveTextContent('does not disconnect your wallet extension');
     expect(confirmation).toHaveTextContent('revoke onchain approvals');
     expect(confirmation).toHaveTextContent('move funds');

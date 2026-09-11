@@ -36,7 +36,7 @@ function message(): string {
   return (
     `app.example.test wants you to sign in with your Solana account:\n` +
     `${ADDRESS}\n\n` +
-    `Verify this wallet for Crypto Lending. This proof does not authorize login, transactions, transfers, or loans.\n\n` +
+    `Verify this wallet for Bonsai Lending. This proof does not authorize login, transactions, transfers, or loans.\n\n` +
     `URI: ${ORIGIN}/\n` +
     `Version: 1\n` +
     `Chain ID: ${SOLANA_CAIP_CHAIN_IDS.mainnet}\n` +

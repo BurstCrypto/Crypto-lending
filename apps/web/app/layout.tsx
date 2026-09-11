@@ -4,8 +4,8 @@ import './globals.css';
 
 export const metadata: Metadata = {
   title: {
-    default: 'Crypto Lending',
-    template: '%s | Crypto Lending',
+    default: 'Bonsai Lending',
+    template: '%s | Bonsai Lending',
   },
   description:
     'Preview a protected Ethereum and Solana workspace for wallet ownership and conservative, source-attributed portfolio reporting.',

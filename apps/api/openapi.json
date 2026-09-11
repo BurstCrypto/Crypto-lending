@@ -475,8 +475,8 @@
   },
   "info": {
     "contact": {},
-    "description": "Versioned API for the Crypto Lending platform.",
-    "title": "Crypto Lending API",
+    "description": "Versioned API for the Bonsai Lending platform.",
+    "title": "Bonsai Lending API",
     "version": "1.0.0"
   },
   "openapi": "3.0.0",

@@ -52,7 +52,7 @@ export function AuthenticationShell({
       </div>
 
       <footer className="authentication-footer site-footer">
-        <p>Crypto Lending platform</p>
+        <p>Bonsai Lending platform</p>
         {footer}
       </footer>
     </main>

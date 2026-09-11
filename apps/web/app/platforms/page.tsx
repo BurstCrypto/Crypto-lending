@@ -39,7 +39,7 @@ export default function PlatformsPage() {
       <ProductionPlatformDirectory />
 
       <footer className="site-footer">
-        <p>Crypto Lending mainnet platform planning directory</p>
+        <p>Bonsai Lending mainnet platform planning directory</p>
       </footer>
     </main>
   );

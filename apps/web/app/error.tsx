@@ -3,6 +3,8 @@
 import Link from 'next/link';
 import { useEffect, useRef } from 'react';
 
+import { BonsaiLogo } from '@/components/brand/bonsai-logo';
+
 export default function ApplicationError({
   reset,
 }: {
@@ -18,11 +20,11 @@ export default function ApplicationError({
   return (
     <main className="page-shell portfolio-page-shell">
       <header className="site-header">
-        <Link className="brand" href="/" aria-label="Crypto Lending home">
+        <Link className="brand" href="/" aria-label="Bonsai Lending home">
           <span className="brand-mark" aria-hidden="true">
-            CL
+            <BonsaiLogo />
           </span>
-          <span>Crypto Lending</span>
+          <span>Bonsai Lending</span>
         </Link>
       </header>
       <section id="main-content" className="portfolio-state-card portfolio-state-error">

@@ -55,7 +55,7 @@ const REGISTRY_FINGERPRINT = /^[0-9a-f]{64}$/u;
 const NONCE = /^[a-zA-Z0-9]{8,64}$/u;
 const CANONICAL_DATE_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
 const OWNERSHIP_STATEMENT =
-  'Verify this wallet for Crypto Lending. This proof does not authorize login, transactions, transfers, or loans.';
+  'Verify this wallet for Bonsai Lending. This proof does not authorize login, transactions, transfers, or loans.';
 const POLICY_RESOURCE = '- urn:crypto-lending:wallet-ownership:v1';
 const SUBJECT_RESOURCE = /^- urn:crypto-lending:wallet-subject-binding:hmac-sha-256:[0-9a-f]{64}$/u;
 const OPERATION_RESOURCE = '- urn:crypto-lending:wallet-operation:register-wallet';
