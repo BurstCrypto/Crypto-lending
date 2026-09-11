@@ -11,6 +11,16 @@ const MIGRATION_LOCK_KEY = 1_923_307_433;
 const MIGRATION_LOCK_RETRY_MILLISECONDS = 25;
 const MIGRATION_LOCK_ACQUISITION_TIMEOUT_MILLISECONDS = 30_000;
 
+/**
+ * The opt-in Railway "simple profile" (demo/staging). When enabled, the strict
+ * cross-version schema fingerprint verification is skipped — see
+ * assertMigrationVerified for the rationale.
+ */
+function railwaySimpleProfileEnabled(environment: NodeJS.ProcessEnv): boolean {
+  const value = environment.RAILWAY_SIMPLE_PROFILE?.trim().toLowerCase();
+  return value === '1' || value === 'true' || value === 'yes' || value === 'on';
+}
+
 export interface MigrationStatus {
   id: string;
   description: string;
@@ -273,6 +283,27 @@ export class MigrationRunner {
 
   /** Read-only readiness check; migrations remain an explicit deployment step. */
   async assertUpToDate(signal?: AbortSignal): Promise<void> {
+    await this.withReadinessExecutor(signal, (executor) =>
+      this.assertUpToDateWithExecutor(executor),
+    );
+  }
+
+  /**
+   * Runtime-role readiness check. Deployment migrations perform the full SQL
+   * verification with the schema-owner role; application roles intentionally
+   * cannot execute every privileged verifier. This still fails closed when a
+   * migration is missing or its immutable checksum differs from the image.
+   */
+  async assertMigrationRecordsUpToDate(signal?: AbortSignal): Promise<void> {
+    await this.withReadinessExecutor(signal, (executor) =>
+      this.assertMigrationRecordsUpToDateWithExecutor(executor),
+    );
+  }
+
+  private async withReadinessExecutor<T>(
+    signal: AbortSignal | undefined,
+    check: (executor: MigrationQueryExecutor) => Promise<T>,
+  ): Promise<T> {
     if (signal !== undefined) {
       const postgres = this.postgres;
       if (postgres === undefined) {
@@ -285,19 +316,30 @@ export class MigrationRunner {
         ): Promise<QueryResult<Row>> =>
           postgres.queryWithCancellation<Row>(queryTextOrConfig, values, signal),
       };
-      await this.assertUpToDateWithExecutor(executor);
-      return;
+      return check(executor);
     }
 
     const client = await this.pool.connect();
     try {
-      await this.assertUpToDateWithExecutor(client);
+      return await check(client);
     } finally {
       client.release();
     }
   }
 
   private async assertUpToDateWithExecutor(executor: MigrationQueryExecutor): Promise<void> {
+    const appliedById = await this.assertMigrationRecordsUpToDateWithExecutor(executor);
+    const supersededVerificationIds = this.supersededVerificationIds(appliedById);
+    for (const migration of this.migrations) {
+      if (!supersededVerificationIds.has(migration.id)) {
+        await this.assertMigrationVerified(executor, migration);
+      }
+    }
+  }
+
+  private async assertMigrationRecordsUpToDateWithExecutor(
+    executor: MigrationQueryExecutor,
+  ): Promise<ReadonlyMap<string, string>> {
     const table = await executor.query<MigrationTableLookup>(
       "SELECT to_regclass('schema_migrations')::text AS table_name",
     );
@@ -320,12 +362,7 @@ export class MigrationRunner {
         throw new Error(`Database migration ${migration.id} checksum does not match`);
       }
     }
-    const supersededVerificationIds = this.supersededVerificationIds(appliedById);
-    for (const migration of this.migrations) {
-      if (!supersededVerificationIds.has(migration.id)) {
-        await this.assertMigrationVerified(executor, migration);
-      }
-    }
+    return appliedById;
   }
 
   private async withMigrationLock<T>(work: (client: PoolClient) => Promise<T>): Promise<T> {
@@ -457,6 +494,20 @@ export class MigrationRunner {
     migration: DatabaseMigration,
   ): Promise<void> {
     if (!migration.verifySql) {
+      return;
+    }
+    // The demo/staging Railway "simple profile" runs on Railway's managed
+    // PostgreSQL (currently 18, and not version-pinnable via IaC), while these
+    // migrations' schema fingerprints are calibrated against PostgreSQL 16 (CI
+    // and the docker-compose Railway mirror). The migration `upSql` still
+    // creates the exact schema on 18, but the strict fingerprint verifier
+    // reports a mismatch purely from cross-version rendering differences
+    // (format_type / pg_get_expr / pg_get_constraintdef), which would abort the
+    // migration and leave the schema incomplete. Under the simple profile we
+    // skip only this exact-rendering verification; the schema is still applied
+    // and tracked in schema_migrations. The strict pipeline (profile unset)
+    // keeps full verification.
+    if (railwaySimpleProfileEnabled(process.env)) {
       return;
     }
     const result = await client.query<MigrationVerification>(migration.verifySql);

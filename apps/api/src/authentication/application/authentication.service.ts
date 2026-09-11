@@ -336,6 +336,18 @@ export class AuthenticationService {
         false,
       );
     }
+    if (
+      payload.flow === 'registration' &&
+      config.providerKey === 'auth0' &&
+      identity.verifiedEmail !== normalizeContactEmail(payload.registration?.contactEmail)
+    ) {
+      return this.rejectClaimedCallback(
+        payload.transactionId,
+        'IDENTITY_INVALID',
+        correlationId,
+        false,
+      );
+    }
 
     const proposedCredentialId = randomUUID();
     const sessionSecret = generateOpaqueAuthenticationSecret('session');

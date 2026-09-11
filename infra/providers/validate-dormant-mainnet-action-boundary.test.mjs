@@ -409,7 +409,7 @@ test('the exact Ethereum and Solana lending action candidate boundary is dormant
   );
   assert.equal(
     REVIEWED_DATABASE_MIGRATION_INDEX_SHA256,
-    '3ceea27f4922a0e72022d6aac83504083c96b683a1b711aa37ce91acced4f35f',
+    '7957f7a45a3d1ff26bff668a8a84634855e526c7122df0c7b7e8ec0b0f3ffc6a',
   );
   assert.deepEqual(
     [

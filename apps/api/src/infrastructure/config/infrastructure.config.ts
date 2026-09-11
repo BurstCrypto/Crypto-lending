@@ -160,6 +160,39 @@ function isProduction(env: NodeJS.ProcessEnv): boolean {
   return env.NODE_ENV?.trim().toLowerCase() === 'production';
 }
 
+export function isRailwayDeployment(env: Readonly<NodeJS.ProcessEnv>): boolean {
+  const target = env.DEPLOYMENT_TARGET?.trim();
+  if (target === undefined || target === '') return false;
+  if (target !== 'railway') {
+    throw new Error('DEPLOYMENT_TARGET must be exactly railway when configured');
+  }
+  return true;
+}
+
+function railwayPrivateUrl(
+  value: string,
+  name: string,
+  protocols: readonly string[],
+  expectedPort: string,
+): URL {
+  const parsed = parseUrl(value, name);
+  if (
+    !protocols.includes(parsed.protocol) ||
+    !parsed.hostname.endsWith('.railway.internal') ||
+    parsed.hostname === '.railway.internal' ||
+    parsed.port !== expectedPort ||
+    !parsed.username ||
+    !parsed.password ||
+    parsed.search ||
+    parsed.hash
+  ) {
+    throw new Error(
+      `${name} must use an authenticated Railway private-network URL on port ${expectedPort}`,
+    );
+  }
+  return parsed;
+}
+
 function assertNoProductionTlsVerificationOverride(env: NodeJS.ProcessEnv): void {
   if (isProduction(env) && env.NODE_TLS_REJECT_UNAUTHORIZED !== undefined) {
     throw new Error(
@@ -536,6 +569,16 @@ function redisConnection(
     if (!parsedUrl.hostname) {
       throw new Error('REDIS_URL must use an authority-form URL with a hostname');
     }
+    if (isProduction(env) && isRailwayDeployment(env)) {
+      const parsed = railwayPrivateUrl(directUrl, 'REDIS_URL', ['redis:'], '6379');
+      if (parsed.pathname !== '' && parsed.pathname !== '/') {
+        throw new Error('Railway REDIS_URL must use database 0');
+      }
+      return {
+        url: parsed.toString(),
+        ...(parsed.username ? { username: decodeURIComponent(parsed.username) } : {}),
+      };
+    }
     if ([...parsedUrl.searchParams.keys()].some((name) => name.toLowerCase() === 'tls')) {
       throw new Error('REDIS_URL cannot override TLS through query parameters');
     }
@@ -832,6 +875,65 @@ function runtimeDatabaseSettings(
         ? BALANCE_CONSUMER_DATABASE_TIMEOUT_LIMITS
         : DEFAULT_RUNTIME_DATABASE_TIMEOUT_LIMITS;
 
+  if (isProduction(env) && isRailwayDeployment(env)) {
+    if (configuredEnvironmentVariableNamesWithPrefix(env, 'MIGRATION_DATABASE_').length > 0) {
+      throw new Error('Production runtime must not receive any MIGRATION_DATABASE_* variable');
+    }
+    if (hasPrivilegedDatabaseEnvironmentVariables(env)) {
+      throw new Error(
+        'Production runtime must not receive database bootstrap, master, or admin variables',
+      );
+    }
+    assertNoConfiguredVariables(
+      env,
+      LEGACY_DATABASE_VARIABLES,
+      'Railway runtime requires DATABASE_RUNTIME_* components; legacy DATABASE_* credentials are not allowed',
+    );
+    if (env.DATABASE_RUNTIME_URL !== undefined) {
+      throw new Error(
+        'Railway runtime must use a workload-scoped DATABASE_RUNTIME_USERNAME and components, not DATABASE_RUNTIME_URL',
+      );
+    }
+    const connectionString = databaseConnectionString(env, runtimeDatabaseVariables(workload));
+    const parsed = railwayPrivateUrl(
+      connectionString,
+      'Railway runtime database connection',
+      ['postgres:', 'postgresql:'],
+      '5432',
+    );
+    if (required(env, RUNTIME_DATABASE_VARIABLES.sslMode) !== 'disable') {
+      throw new Error('Railway runtime requires DATABASE_RUNTIME_SSL_MODE=disable');
+    }
+    return {
+      connectionString: parsed.toString(),
+      connectionTimeoutMs: positiveInteger(
+        env,
+        'DATABASE_CONNECTION_TIMEOUT_MS',
+        5_000,
+        timeoutLimits.connectionTimeoutMs,
+      ),
+      idleTimeoutMs: positiveInteger(env, 'DATABASE_IDLE_TIMEOUT_MS', 30_000, 600_000),
+      lockTimeoutMs: positiveInteger(
+        env,
+        'DATABASE_LOCK_TIMEOUT_MS',
+        5_000,
+        timeoutLimits.lockTimeoutMs,
+      ),
+      maxLifetimeSeconds: positiveInteger(env, 'DATABASE_MAX_LIFETIME_SECONDS', 1_800, 86_400),
+      poolMax: positiveInteger(env, 'DATABASE_POOL_MAX', 10, 100),
+      statementTimeoutMs: positiveInteger(
+        env,
+        'DATABASE_STATEMENT_TIMEOUT_MS',
+        15_000,
+        timeoutLimits.statementTimeoutMs,
+      ),
+      // Railway private networking is encrypted at the network layer and its
+      // plugin URL is intentionally not exposed over a public TCP endpoint.
+      ssl: false,
+      sessionRole: runtimeDatabaseSessionRole(workload),
+    };
+  }
+
   if (isProduction(env)) {
     if (configuredEnvironmentVariableNamesWithPrefix(env, 'MIGRATION_DATABASE_').length > 0) {
       throw new Error('Production runtime must not receive any MIGRATION_DATABASE_* variable');
@@ -898,6 +1000,49 @@ export function loadMigrationDatabaseConfig(
       throw new Error(
         'Production migration tasks must not receive database bootstrap, master, or admin variables',
       );
+    }
+    if (isRailwayDeployment(env)) {
+      if (!migrationConfigured) {
+        throw new Error('Railway migration requires MIGRATION_DATABASE_URL');
+      }
+      const directUrl = required(env, MIGRATION_DATABASE_VARIABLES.directUrl);
+      if (hasAny(env, connectionVariableNames(MIGRATION_DATABASE_VARIABLES).slice(1))) {
+        throw new Error(
+          'Railway migration must configure MIGRATION_DATABASE_URL without components',
+        );
+      }
+      const parsed = railwayPrivateUrl(
+        directUrl,
+        MIGRATION_DATABASE_VARIABLES.directUrl,
+        ['postgres:', 'postgresql:'],
+        '5432',
+      );
+      return {
+        connectionString: parsed.toString(),
+        connectionTimeoutMs: positiveInteger(
+          env,
+          'MIGRATION_DATABASE_CONNECTION_TIMEOUT_MS',
+          5_000,
+          60_000,
+        ),
+        idleTimeoutMs: positiveInteger(env, 'MIGRATION_DATABASE_IDLE_TIMEOUT_MS', 30_000, 600_000),
+        lockTimeoutMs: positiveInteger(env, 'MIGRATION_DATABASE_LOCK_TIMEOUT_MS', 10_000, 300_000),
+        maxLifetimeSeconds: positiveInteger(
+          env,
+          'MIGRATION_DATABASE_MAX_LIFETIME_SECONDS',
+          1_800,
+          86_400,
+        ),
+        poolMax: 1,
+        statementTimeoutMs: positiveInteger(
+          env,
+          'MIGRATION_DATABASE_STATEMENT_TIMEOUT_MS',
+          3_600_000,
+          43_200_000,
+        ),
+        ssl: false,
+        sessionRole: 'crypto_schema_owner',
+      };
     }
     assertNoConfiguredVariables(
       env,
@@ -998,6 +1143,7 @@ export function loadInfrastructureConfig(
   env: NodeJS.ProcessEnv = process.env,
 ): InfrastructureConfig {
   const production = isProduction(env);
+  const railway = isRailwayDeployment(env);
   const workload = applicationWorkload(env);
   if (workload === 'balance-consumer') {
     throw new Error(
@@ -1007,32 +1153,73 @@ export function loadInfrastructureConfig(
   const environment = applicationEnvironment(env);
   if (production) {
     assertNoProductionTlsVerificationOverride(env);
-    assertNoProductionAwsCredentialOverrides(env);
+    if (railway) {
+      const forbidden = Object.keys(env).filter(
+        (name) =>
+          env[name] !== undefined &&
+          (name === 'AWS_REGION' ||
+            name === 'AWS_CONTAINER_CREDENTIALS_RELATIVE_URI' ||
+            name.startsWith('SQS_')),
+      );
+      if (forbidden.length > 0) {
+        throw new Error(
+          `Railway runtime must not receive AWS or SQS configuration: ${forbidden.join(', ')}`,
+        );
+      }
+    } else {
+      assertNoProductionAwsCredentialOverrides(env);
+    }
     if (workload === 'worker' && hasRedisEnvironmentVariables(env)) {
       throw new Error('Production worker must not receive Redis configuration or credentials');
     }
     if (workload === 'api') assertNoUnknownProductionRedisVariables(env);
   }
-  const sqsClient = loadSqsClientInfrastructureConfig(env, production);
-  const rawQueueUrl = required(env, 'SQS_QUEUE_URL');
-  const rawDeadLetterQueueUrl = required(env, 'SQS_DEAD_LETTER_QUEUE_URL');
-  const rawBalanceQueueUrl = required(env, 'SQS_BALANCE_QUEUE_URL');
-  const rawBalanceDeadLetterQueueUrl = required(env, 'SQS_BALANCE_DEAD_LETTER_QUEUE_URL');
+  const sqsClient = railway
+    ? {
+        region: 'railway-postgres',
+        requestTimeoutMs: 15_000,
+        sdkMaxAttempts: 1,
+        maxReceiveCount: 1,
+        visibilityTimeoutSeconds: 30,
+        retryBaseDelaySeconds: 1,
+        retryMaxDelaySeconds: 1,
+      }
+    : loadSqsClientInfrastructureConfig(env, production);
+  const rawQueueUrl = railway
+    ? 'postgresql://railway.internal/jobs'
+    : required(env, 'SQS_QUEUE_URL');
+  const rawDeadLetterQueueUrl = railway
+    ? 'postgresql://railway.internal/jobs-dlq'
+    : required(env, 'SQS_DEAD_LETTER_QUEUE_URL');
+  const rawBalanceQueueUrl = railway
+    ? 'postgresql://railway.internal/balance-sync-dormant'
+    : required(env, 'SQS_BALANCE_QUEUE_URL');
+  const rawBalanceDeadLetterQueueUrl = railway
+    ? 'postgresql://railway.internal/balance-sync-dormant-dlq'
+    : required(env, 'SQS_BALANCE_DEAD_LETTER_QUEUE_URL');
   const queueUrl = production
-    ? productionSqsQueueUrl(rawQueueUrl, 'SQS_QUEUE_URL', sqsClient.region)
+    ? railway
+      ? rawQueueUrl
+      : productionSqsQueueUrl(rawQueueUrl, 'SQS_QUEUE_URL', sqsClient.region)
     : rawQueueUrl;
   const deadLetterQueueUrl = production
-    ? productionSqsQueueUrl(rawDeadLetterQueueUrl, 'SQS_DEAD_LETTER_QUEUE_URL', sqsClient.region)
+    ? railway
+      ? rawDeadLetterQueueUrl
+      : productionSqsQueueUrl(rawDeadLetterQueueUrl, 'SQS_DEAD_LETTER_QUEUE_URL', sqsClient.region)
     : rawDeadLetterQueueUrl;
   const balanceQueueUrl = production
-    ? productionSqsQueueUrl(rawBalanceQueueUrl, 'SQS_BALANCE_QUEUE_URL', sqsClient.region)
+    ? railway
+      ? rawBalanceQueueUrl
+      : productionSqsQueueUrl(rawBalanceQueueUrl, 'SQS_BALANCE_QUEUE_URL', sqsClient.region)
     : rawBalanceQueueUrl;
   const balanceDeadLetterQueueUrl = production
-    ? productionSqsQueueUrl(
-        rawBalanceDeadLetterQueueUrl,
-        'SQS_BALANCE_DEAD_LETTER_QUEUE_URL',
-        sqsClient.region,
-      )
+    ? railway
+      ? rawBalanceDeadLetterQueueUrl
+      : productionSqsQueueUrl(
+          rawBalanceDeadLetterQueueUrl,
+          'SQS_BALANCE_DEAD_LETTER_QUEUE_URL',
+          sqsClient.region,
+        )
     : rawBalanceDeadLetterQueueUrl;
   if (
     new Set([queueUrl, deadLetterQueueUrl, balanceQueueUrl, balanceDeadLetterQueueUrl]).size !== 4

@@ -87,7 +87,7 @@ export function LoginForm({
           {!submitting && <span aria-hidden="true">↗</span>}
         </button>
         <p className="authentication-form-note">
-          Crypto Lending receives a verified result—not your identity-provider password.
+          Bonsai Lending receives a verified result—not your identity-provider password.
         </p>
         <span className="visually-hidden" aria-live="polite">
           {submitting ? 'Opening secure sign in.' : ''}

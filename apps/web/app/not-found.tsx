@@ -1,6 +1,8 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 
+import { BonsaiLogo } from '@/components/brand/bonsai-logo';
+
 export const metadata: Metadata = {
   title: 'Page not found',
   robots: { index: false, follow: false },
@@ -10,11 +12,11 @@ export default function NotFound() {
   return (
     <main className="page-shell portfolio-page-shell">
       <header className="site-header">
-        <Link className="brand" href="/" aria-label="Crypto Lending home">
+        <Link className="brand" href="/" aria-label="Bonsai Lending home">
           <span className="brand-mark" aria-hidden="true">
-            CL
+            <BonsaiLogo />
           </span>
-          <span>Crypto Lending</span>
+          <span>Bonsai Lending</span>
         </Link>
       </header>
       <section id="main-content" className="portfolio-state-card">

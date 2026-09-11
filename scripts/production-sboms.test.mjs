@@ -43,7 +43,7 @@ import {
 } from './validate-production-sboms.mjs';
 
 const SOURCE_REVISION = 'c'.repeat(40);
-const OCI_SOURCE = 'https://github.com/Trey-Gleason/Crypto-lending';
+const OCI_SOURCE = 'https://github.com/BurstCrypto/Crypto-lending';
 const API_IMAGE_ID = imageMaterial('api').manifestDigest;
 const WEB_IMAGE_ID = imageMaterial('web').manifestDigest;
 const temporaryDirectories = [];
@@ -94,28 +94,47 @@ function tarArchive(entries) {
   ]);
 }
 
-function classicDockerArchive(kind, includeLayers = true) {
+function classicDockerArchive(kind, includeLayers = true, includeLayerSources = false, mutate) {
   const base = imageMaterial(kind);
-  const layerEntries = [
-    { contents: Buffer.from(`${kind}-first-layer\n`), pathname: 'first/layer.tar' },
-    { contents: Buffer.from(`${kind}-second-layer\n`), pathname: 'second/layer.tar' },
-  ];
-  const config = JSON.parse(base.configBytes.toString('utf8'));
-  config.rootfs.diff_ids = layerEntries.map(
-    ({ contents }) => `sha256:${createHash('sha256').update(contents).digest('hex')}`,
+  const layerEntries = [`${kind}-first-layer\n`, `${kind}-second-layer\n`].map(
+    (contents, index) => {
+      const bytes = Buffer.from(contents);
+      const digest = `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
+      return {
+        contents: bytes,
+        digest,
+        pathname: includeLayerSources
+          ? `blobs/sha256/${digest.slice('sha256:'.length)}`
+          : `${index === 0 ? 'first' : 'second'}/layer.tar`,
+      };
+    },
   );
+  const config = JSON.parse(base.configBytes.toString('utf8'));
+  config.rootfs.diff_ids = layerEntries.map(({ digest }) => digest);
   const configBytes = Buffer.from(JSON.stringify(config));
   const imageId = `sha256:${createHash('sha256').update(configBytes).digest('hex')}`;
   const configPath = `${imageId.slice('sha256:'.length)}.json`;
-  const manifestBytes = Buffer.from(
-    JSON.stringify([
-      {
-        Config: configPath,
-        Layers: layerEntries.map(({ pathname }) => pathname),
-        RepoTags: [`crypto-lending-${kind}:ci`],
-      },
-    ]),
-  );
+  const manifest = {
+    Config: configPath,
+    Layers: layerEntries.map(({ pathname }) => pathname),
+    RepoTags: [`crypto-lending-${kind}:ci`],
+    ...(includeLayerSources
+      ? {
+          LayerSources: Object.fromEntries(
+            layerEntries.map(({ contents, digest }) => [
+              digest,
+              {
+                mediaType: 'application/vnd.oci.image.layer.v1.tar',
+                size: contents.length,
+                digest,
+              },
+            ]),
+          ),
+        }
+      : {}),
+  };
+  mutate?.(manifest);
+  const manifestBytes = Buffer.from(JSON.stringify([manifest]));
   return Object.freeze({
     bytes: tarArchive([
       { contents: configBytes, pathname: configPath },
@@ -522,7 +541,7 @@ function syftBindingDocument(kind, mutate) {
         })),
         manifest: material.manifestBytes.toString('base64'),
         config: material.configBytes.toString('base64'),
-        repoDigests: [`${material.imageName}@${imageId}`],
+        repoDigests: [],
         architecture: 'amd64',
         os: 'linux',
         labels: material.labels,
@@ -579,10 +598,10 @@ function replaceNativeConfig(document, configBytes) {
   return configDigest;
 }
 
-function claimNativeImageId(document, imageId, kind = 'api') {
+function claimNativeImageId(document, imageId) {
   document.source.version = imageId.slice('sha256:'.length);
   document.source.metadata.userInput = imageId;
-  document.source.metadata.repoDigests = [`crypto-lending-${kind}@${imageId}`];
+  document.source.metadata.repoDigests = [];
 }
 
 function writeBindingPair(
@@ -792,6 +811,57 @@ describe('local Docker image archive capture boundaries', () => {
     assert.equal(existsSync(outputPath), true);
   });
 
+  it('captures Docker 28 classic archives with exact content-bound layer sources', () => {
+    const outputDirectory = path.join(fixtureRoot, '.local-validation', 'production-sbom');
+    mkdirSync(outputDirectory, { recursive: true });
+    const archive = classicDockerArchive('api', true, true);
+    const outputPath = path.join(outputDirectory, 'api-image.binding.json');
+
+    const evidence = captureProductionImageBinding({
+      workspaceKind: 'api',
+      imageReference: 'crypto-lending-api:ci',
+      expectedImageId: archive.imageId,
+      outputPath,
+      repoRoot: fixtureRoot,
+      inspect() {
+        return archive.imageId;
+      },
+      save(_docker, _image, archivePath) {
+        writeFileSync(archivePath, archive.bytes);
+      },
+    });
+
+    assert.equal(evidence.archiveFormat, 'docker');
+    assert.equal(existsSync(outputPath), true);
+  });
+
+  it('rejects Docker 28 layer sources that are not bound to the saved layer bytes', () => {
+    const outputDirectory = path.join(fixtureRoot, '.local-validation', 'production-sbom');
+    mkdirSync(outputDirectory, { recursive: true });
+    const archive = classicDockerArchive('api', true, true, (manifest) => {
+      const [digest] = Object.keys(manifest.LayerSources);
+      manifest.LayerSources[digest].size += 1;
+    });
+
+    assertCaptureCode(
+      () =>
+        captureProductionImageBinding({
+          workspaceKind: 'api',
+          imageReference: 'crypto-lending-api:ci',
+          expectedImageId: archive.imageId,
+          outputPath: path.join(outputDirectory, 'api-image.binding.json'),
+          repoRoot: fixtureRoot,
+          inspect() {
+            return archive.imageId;
+          },
+          save(_docker, _image, archivePath) {
+            writeFileSync(archivePath, archive.bytes);
+          },
+        }),
+      'ARCHIVE_DOCKER_LAYER_SOURCE_INVALID',
+    );
+  });
+
   it('rejects omitted classic layer payloads before writing binding evidence', () => {
     const outputDirectory = path.join(fixtureRoot, '.local-validation', 'production-sbom');
     mkdirSync(outputDirectory, { recursive: true });
@@ -944,6 +1014,18 @@ describe('actual-image SPDX validation', () => {
     assert.match(accepted.imageManifestDigest, /^sha256:[0-9a-f]{64}$/u);
     assert.notEqual(accepted.imageConfigDigest, accepted.imageManifestDigest);
 
+    const acceptedWithRepoDigest = validateProductionSyftBindingBytes(
+      syftBindingDocument('api', (document) => {
+        document.source.metadata.repoDigests = [`crypto-lending-api@${API_IMAGE_ID}`];
+      }),
+      'api',
+      expectations,
+      API_IMAGE_ID,
+      SOURCE_REVISION,
+      apiImageBinding,
+    );
+    assert.equal(acceptedWithRepoDigest.image, `docker:${API_IMAGE_ID}`);
+
     assertCode(
       () =>
         validateProductionSyftBindingBytes(
@@ -983,7 +1065,7 @@ describe('actual-image SPDX validation', () => {
       [
         'SYFT_IMAGE_INPUT_BINDING_INVALID',
         (document) => {
-          document.source.metadata.repoDigests[0] = `crypto-lending-api@sha256:${'f'.repeat(64)}`;
+          document.source.metadata.repoDigests = [`crypto-lending-api@sha256:${'f'.repeat(64)}`];
         },
       ],
       [
@@ -1547,7 +1629,7 @@ describe('SBOM CI integration policy', () => {
       workflow.replace(SBOM_ACTION_COMMIT, 'f'.repeat(40)),
       workflow.replace('upload-artifact: false', 'upload-artifact: true'),
       workflow.replace(
-        '--build-arg "OCI_SOURCE=https://github.com/Trey-Gleason/Crypto-lending"',
+        '--build-arg "OCI_SOURCE=https://github.com/BurstCrypto/Crypto-lending"',
         '--build-arg "OCI_SOURCE=https://example.invalid/repository"',
       ),
       workflow.replace(

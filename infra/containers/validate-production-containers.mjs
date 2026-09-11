@@ -20,7 +20,7 @@ export const RDS_BUNDLE_SHA256 = 'e5bb2084ccf45087bda1c9bffdea0eb15ee67f0b916461
 export const MAX_PRODUCTION_CONTAINER_SOURCE_BYTES = 393_216;
 export const PRODUCTION_CONTAINER_INPUT_ERROR =
   'Production container inputs must be the 18 non-empty, canonical, stable, single-link repository files within their reviewed per-file limits and 393216-byte aggregate limit; text must be strict UTF-8 without a byte-order mark.';
-const SOURCE_URL = 'https://github.com/Trey-Gleason/Crypto-lending';
+const SOURCE_URL = 'https://github.com/BurstCrypto/Crypto-lending';
 const REDIS_SESSION_REVOCATION_CLI_SHA256 =
   'fabc12502a15b2b8771c0f4e133bcec7a9ec3c92da389b8f677c9c10f6fa769b';
 const REDIS_SESSION_REVOCATION_RUNTIME_SHA256 =
@@ -354,7 +354,7 @@ function validateSharedDockerfile(source, filename, expected) {
 function validateApiDockerfile(source) {
   const errors = validateSharedDockerfile(source, 'Dockerfile.api', {
     command: 'CMD ["node", "dist/main.js"]',
-    health: 'http://127.0.0.1:3001/api/v1/health',
+    health: 'http://127.0.0.1:3001/api/v1/internal/health/dependencies',
     port: 3001,
     runtimeMode: 'api',
     runtimeRoot: 'apps/api',

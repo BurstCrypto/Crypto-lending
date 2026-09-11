@@ -444,7 +444,7 @@ function publicFailureMessage(error: unknown, networkName: string): string {
   if (error instanceof MainnetWalletRuntimeError) {
     switch (error.code) {
       case 'WRONG_NETWORK':
-        return `Set the selected wallet to ${networkName}, then try again. Crypto Lending will not switch or add a network.`;
+        return `Set the selected wallet to ${networkName}, then try again. Bonsai Lending will not switch or add a network.`;
       case 'ACCOUNT_UNAVAILABLE':
       case 'CONNECTION_CHANGED':
         return 'The selected wallet account changed. Connect it again and choose the account you want to verify.';
@@ -456,7 +456,7 @@ function publicFailureMessage(error: unknown, networkName: string): string {
   }
   if (error instanceof InjectedEvmWalletError) {
     if (error.code === 'INJECTED_EVM_UNSUPPORTED_NETWORK') {
-      return `Set the selected wallet to ${networkName}, then try again. Crypto Lending will not switch or add a network.`;
+      return `Set the selected wallet to ${networkName}, then try again. Bonsai Lending will not switch or add a network.`;
     }
     if (error.code === 'INJECTED_EVM_USER_REJECTED') {
       return 'The wallet request was declined. Nothing was verified.';
@@ -473,7 +473,7 @@ function publicFailureMessage(error: unknown, networkName: string): string {
       case 'WALLET_OWNERSHIP_AUTHENTICATION_REQUIRED':
         return 'Your account session ended. Sign in again before verifying a wallet.';
       case 'WALLET_OWNERSHIP_CONFLICT':
-        return 'This chain account is already registered to another Crypto Lending account.';
+        return 'This chain account is already registered to another Bonsai Lending account.';
       case 'WALLET_OWNERSHIP_REJECTED':
         return 'The ownership proof was not accepted. Connect the wallet and request a fresh message.';
       case 'WALLET_OWNERSHIP_UNAVAILABLE':
@@ -997,7 +997,7 @@ export function MainnetWalletOwnership({
       <div className="public-testnet-disclosure" id="mainnet-wallet-disclosure">
         <strong>No transaction or network switching</strong>
         <p>
-          Each network account receives its own server-authored ownership message. Crypto Lending
+          Each network account receives its own server-authored ownership message. Bonsai Lending
           does not switch networks, bridge funds, approve tokens, or request a transaction.
         </p>
       </div>
@@ -1065,7 +1065,7 @@ export function MainnetWalletOwnership({
                     >
                       <strong id={`${descriptionId}-title`}>Remove this wallet?</strong>
                       <p id={descriptionId}>
-                        This stops Crypto Lending from showing or monitoring this address. It does
+                        This stops Bonsai Lending from showing or monitoring this address. It does
                         not disconnect your wallet extension, revoke onchain approvals, or move
                         funds. Adding it again requires a new ownership signature. An encrypted
                         security record is retained.
@@ -1236,7 +1236,7 @@ export function MainnetWalletOwnership({
               {mainnetWalletNetworkFor(result.chainId).displayName} account{' '}
               {result.status === 'registered' ? 'verified' : 'already verified'}
             </strong>
-            <p>{result.addressHint} is registered to this Crypto Lending account.</p>
+            <p>{result.addressHint} is registered to this Bonsai Lending account.</p>
           </div>
         ) : ambiguous && network.namespace === 'eip155' ? (
           <p role="alert">

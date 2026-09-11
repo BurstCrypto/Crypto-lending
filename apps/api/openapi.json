@@ -475,8 +475,8 @@
   },
   "info": {
     "contact": {},
-    "description": "Versioned API for the Crypto Lending platform.",
-    "title": "Crypto Lending API",
+    "description": "Versioned API for the Bonsai Lending platform.",
+    "title": "Bonsai Lending API",
     "version": "1.0.0"
   },
   "openapi": "3.0.0",
@@ -929,7 +929,7 @@
             "description": "Session revoked or already absent",
             "headers": {
               "X-Authentication-Provider-Logout": {
-                "description": "Bounded Cognito logout navigation URL, present only after confirmed local revocation",
+                "description": "Bounded managed-provider logout URL, present only after confirmed local revocation",
                 "schema": {
                   "format": "uri",
                   "maxLength": 4096,

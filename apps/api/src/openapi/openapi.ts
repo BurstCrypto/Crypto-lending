@@ -5,8 +5,8 @@ import { API_CONTRACT_VERSION, OPENAPI_DOCUMENT_PATH, SERVICE_NAME } from '../co
 
 export function createOpenApiDocument(app: INestApplication): OpenAPIObject {
   const config = new DocumentBuilder()
-    .setTitle('Crypto Lending API')
-    .setDescription('Versioned API for the Crypto Lending platform.')
+    .setTitle('Bonsai Lending API')
+    .setDescription('Versioned API for the Bonsai Lending platform.')
     .setVersion(API_CONTRACT_VERSION)
     .addApiKey(
       {

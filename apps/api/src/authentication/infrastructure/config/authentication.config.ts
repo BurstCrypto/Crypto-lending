@@ -263,9 +263,10 @@ function configuredOidcLogout(
     testRuntime: providerTestRuntime,
   });
   const parsedEndpoint = new URL(endSessionEndpoint);
+  const expectedLogoutPath = providerKey === 'auth0' ? '/v2/logout' : '/logout';
   if (
     parsedEndpoint.origin !== new URL(authorizationEndpoint).origin ||
-    parsedEndpoint.pathname !== '/logout'
+    parsedEndpoint.pathname !== expectedLogoutPath
   ) {
     return fail('OIDC_END_SESSION_ENDPOINT');
   }
@@ -281,7 +282,10 @@ function configuredOidcLogout(
 
   const providerLogoutUrl = new URL(endSessionEndpoint);
   providerLogoutUrl.searchParams.set('client_id', clientId);
-  providerLogoutUrl.searchParams.set('logout_uri', postLogoutRedirectUri);
+  providerLogoutUrl.searchParams.set(
+    providerKey === 'auth0' ? 'returnTo' : 'logout_uri',
+    postLogoutRedirectUri,
+  );
   if (providerLogoutUrl.href.length > 4_096) return fail('OIDC_END_SESSION_ENDPOINT');
 
   return Object.freeze({ endSessionEndpoint, postLogoutRedirectUri });

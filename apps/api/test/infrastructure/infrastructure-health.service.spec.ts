@@ -18,7 +18,7 @@ describe('InfrastructureHealthService', () => {
       healthCheck: jest.fn().mockResolvedValue(undefined),
     } as unknown as PostgresService;
     const migrations = {
-      assertUpToDate: jest.fn().mockResolvedValue(undefined),
+      assertMigrationRecordsUpToDate: jest.fn().mockResolvedValue(undefined),
     } as unknown as MigrationRunner;
     const redis = {
       healthCheck: jest.fn().mockResolvedValue(undefined),
@@ -38,8 +38,8 @@ describe('InfrastructureHealthService', () => {
     });
     const postgresSignal = (postgres.healthCheck as jest.Mock).mock.calls[0]?.[0] as
       AbortSignal | undefined;
-    const migrationSignal = (migrations.assertUpToDate as jest.Mock).mock.calls[0]?.[0] as
-      AbortSignal | undefined;
+    const migrationSignal = (migrations.assertMigrationRecordsUpToDate as jest.Mock).mock
+      .calls[0]?.[0] as AbortSignal | undefined;
     expect(postgresSignal).toBeInstanceOf(AbortSignal);
     expect(migrationSignal).toBe(postgresSignal);
     expect(postgresSignal?.aborted).toBe(false);
@@ -50,7 +50,7 @@ describe('InfrastructureHealthService', () => {
       healthCheck: jest.fn().mockResolvedValue(undefined),
     } as unknown as PostgresService;
     const migrations = {
-      assertUpToDate: jest.fn().mockResolvedValue(undefined),
+      assertMigrationRecordsUpToDate: jest.fn().mockResolvedValue(undefined),
     } as unknown as MigrationRunner;
     const redis = {
       healthCheck: jest.fn().mockRejectedValue(new Error('connection refused')),
@@ -79,7 +79,7 @@ describe('InfrastructureHealthService', () => {
       healthCheck: jest.fn().mockReturnValue(dependenciesReleased),
     } as unknown as PostgresService;
     const migrations = {
-      assertUpToDate: jest.fn().mockResolvedValue(undefined),
+      assertMigrationRecordsUpToDate: jest.fn().mockResolvedValue(undefined),
     } as unknown as MigrationRunner;
     const redis = {
       healthCheck: jest.fn().mockReturnValue(dependenciesReleased),
@@ -100,7 +100,7 @@ describe('InfrastructureHealthService', () => {
     const [firstResult, secondResult] = await Promise.all([first, second]);
 
     expect(secondResult).toBe(firstResult);
-    expect(migrations.assertUpToDate).toHaveBeenCalledTimes(1);
+    expect(migrations.assertMigrationRecordsUpToDate).toHaveBeenCalledTimes(1);
   });
 
   it('reuses a completed result only for the brief cache lifetime', async () => {
@@ -112,7 +112,7 @@ describe('InfrastructureHealthService', () => {
       healthCheck: jest.fn().mockResolvedValue(undefined),
     } as unknown as PostgresService;
     const migrations = {
-      assertUpToDate: jest.fn().mockResolvedValue(undefined),
+      assertMigrationRecordsUpToDate: jest.fn().mockResolvedValue(undefined),
     } as unknown as MigrationRunner;
     const redis = {
       healthCheck: jest.fn().mockRejectedValue(new Error('cache unavailable')),
@@ -131,7 +131,7 @@ describe('InfrastructureHealthService', () => {
     expect(cached).toBe(first);
     expect(refreshed).not.toBe(first);
     expect(postgres.healthCheck).toHaveBeenCalledTimes(2);
-    expect(migrations.assertUpToDate).toHaveBeenCalledTimes(2);
+    expect(migrations.assertMigrationRecordsUpToDate).toHaveBeenCalledTimes(2);
     expect(redis.healthCheck).toHaveBeenCalledTimes(2);
     expect(sqs.healthCheck).toHaveBeenCalledTimes(2);
   });
@@ -150,7 +150,7 @@ describe('InfrastructureHealthService', () => {
         .mockRejectedValueOnce(new Error('database unavailable')),
     } as unknown as PostgresService;
     const migrations = {
-      assertUpToDate: jest.fn().mockResolvedValue(undefined),
+      assertMigrationRecordsUpToDate: jest.fn().mockResolvedValue(undefined),
     } as unknown as MigrationRunner;
     const redis = {
       healthCheck: jest.fn().mockResolvedValue(undefined),
@@ -181,7 +181,7 @@ describe('InfrastructureHealthService', () => {
       healthCheck: jest.fn().mockResolvedValue(undefined),
     } as unknown as PostgresService;
     const migrations = {
-      assertUpToDate: jest.fn().mockResolvedValue(undefined),
+      assertMigrationRecordsUpToDate: jest.fn().mockResolvedValue(undefined),
     } as unknown as MigrationRunner;
     const redis = {
       healthCheck: jest.fn().mockResolvedValue(undefined),
@@ -235,7 +235,7 @@ describe('InfrastructureHealthService', () => {
         healthCheck: jest.fn().mockResolvedValue(undefined),
       } as unknown as PostgresService;
       const migrations = {
-        assertUpToDate: jest.fn().mockResolvedValue(undefined),
+        assertMigrationRecordsUpToDate: jest.fn().mockResolvedValue(undefined),
       } as unknown as MigrationRunner;
       const redis = {
         healthCheck: jest.fn().mockResolvedValue(undefined),
@@ -254,7 +254,7 @@ describe('InfrastructureHealthService', () => {
         },
       });
       expect(postgres.healthCheck).not.toHaveBeenCalled();
-      expect(migrations.assertUpToDate).not.toHaveBeenCalled();
+      expect(migrations.assertMigrationRecordsUpToDate).not.toHaveBeenCalled();
       expect(redis.healthCheck).not.toHaveBeenCalled();
       expect(sqs.healthCheck).not.toHaveBeenCalled();
     },
@@ -273,7 +273,7 @@ describe('InfrastructureHealthService', () => {
       healthCheck: jest.fn().mockReturnValue(dependenciesReleased),
     } as unknown as PostgresService;
     const migrations = {
-      assertUpToDate: jest.fn().mockResolvedValue(undefined),
+      assertMigrationRecordsUpToDate: jest.fn().mockResolvedValue(undefined),
     } as unknown as MigrationRunner;
     const redis = {
       healthCheck: jest.fn().mockReturnValue(dependenciesReleased),
@@ -303,7 +303,7 @@ describe('InfrastructureHealthService', () => {
       healthCheck: jest.fn().mockReturnValue(never),
     } as unknown as PostgresService;
     const migrations = {
-      assertUpToDate: jest.fn().mockResolvedValue(undefined),
+      assertMigrationRecordsUpToDate: jest.fn().mockResolvedValue(undefined),
     } as unknown as MigrationRunner;
     const redis = {
       healthCheck: jest.fn().mockReturnValue(never),
@@ -336,7 +336,7 @@ describe('InfrastructureHealthService', () => {
       AbortSignal | undefined;
     expect(sqsSignal?.aborted).toBe(true);
     expect(postgresSignal?.aborted).toBe(true);
-    expect(migrations.assertUpToDate).not.toHaveBeenCalled();
+    expect(migrations.assertMigrationRecordsUpToDate).not.toHaveBeenCalled();
   });
 
   it('retries timed-out PostgreSQL work only after its aborted operation drains', async () => {
@@ -365,7 +365,7 @@ describe('InfrastructureHealthService', () => {
       }),
     } as unknown as PostgresService;
     const migrations = {
-      assertUpToDate: jest.fn().mockResolvedValue(undefined),
+      assertMigrationRecordsUpToDate: jest.fn().mockResolvedValue(undefined),
     } as unknown as MigrationRunner;
     const redis = {
       healthCheck: jest.fn().mockResolvedValue(undefined),
@@ -384,7 +384,7 @@ describe('InfrastructureHealthService', () => {
       checks: { postgres: { status: 'down' } },
     });
     expect(firstSignal?.aborted).toBe(true);
-    expect(migrations.assertUpToDate).not.toHaveBeenCalled();
+    expect(migrations.assertMigrationRecordsUpToDate).not.toHaveBeenCalled();
 
     monotonicNow = 5_001;
     const whileDraining = health.check(25);
@@ -396,16 +396,16 @@ describe('InfrastructureHealthService', () => {
     await Promise.resolve();
     await Promise.resolve();
     await Promise.resolve();
-    expect(migrations.assertUpToDate).not.toHaveBeenCalled();
+    expect(migrations.assertMigrationRecordsUpToDate).not.toHaveBeenCalled();
 
     monotonicNow = 10_002;
     await expect(health.check(25)).resolves.toMatchObject({ status: 'ok' });
     expect(postgres.healthCheck).toHaveBeenCalledTimes(2);
-    expect(migrations.assertUpToDate).toHaveBeenCalledTimes(1);
+    expect(migrations.assertMigrationRecordsUpToDate).toHaveBeenCalledTimes(1);
     const retriedPostgresSignal = (postgres.healthCheck as jest.Mock).mock.calls[1]?.[0] as
       AbortSignal | undefined;
-    const retriedMigrationSignal = (migrations.assertUpToDate as jest.Mock).mock.calls[0]?.[0] as
-      AbortSignal | undefined;
+    const retriedMigrationSignal = (migrations.assertMigrationRecordsUpToDate as jest.Mock).mock
+      .calls[0]?.[0] as AbortSignal | undefined;
     expect(retriedMigrationSignal).toBe(retriedPostgresSignal);
   });
 
@@ -419,7 +419,7 @@ describe('InfrastructureHealthService', () => {
       healthCheck: jest.fn().mockReturnValue(blocked),
     } as unknown as PostgresService;
     const migrations = {
-      assertUpToDate: jest.fn().mockResolvedValue(undefined),
+      assertMigrationRecordsUpToDate: jest.fn().mockResolvedValue(undefined),
     } as unknown as MigrationRunner;
     const redis = {
       healthCheck: jest.fn().mockReturnValue(blocked),

@@ -157,7 +157,7 @@ describe('SiteHeader', () => {
     );
 
     expect(screen.queryByRole('navigation')).toBeNull();
-    expect(screen.getByRole('link', { name: 'Crypto Lending home' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Bonsai Lending home' })).toBeInTheDocument();
 
     await act(async () => {
       verification.reject(new AuthenticationUnauthenticatedError());

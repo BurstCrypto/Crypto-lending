@@ -135,10 +135,10 @@ import {
 import type { DatabaseMigration } from './migration';
 
 /**
- * NEVER FOR DEPLOYMENT. This owner-privileged fixture intentionally omits the
- * production principal-boundary migration so isolated database tests can
- * create disposable schemas. Production modules and CLIs must inject only
- * DATABASE_MIGRATION_LIST.
+ * Owner-compatible schema migrations shared by disposable tests and managed
+ * database targets. The legacy TEST_SCHEMA name is retained for compatibility;
+ * deployment registries import the production-neutral alias below and append
+ * their reviewed target-specific principal boundary.
  */
 export const DATABASE_TEST_SCHEMA_MIGRATION_LIST: readonly DatabaseMigration[] = Object.freeze([
   createJobOutboxMigration,
@@ -179,6 +179,8 @@ export const DATABASE_TEST_SCHEMA_MIGRATION_LIST: readonly DatabaseMigration[] =
   createMainnetFinancialActionAtomicFinalityPersistenceTestSchemaMigrationV0037,
   createMainnetFinancialActionRevocationRecoveryTestSchemaMigrationV0038,
 ]);
+
+export const DATABASE_OWNER_COMPATIBLE_MIGRATION_LIST = DATABASE_TEST_SCHEMA_MIGRATION_LIST;
 
 export const DATABASE_MIGRATION_LIST: readonly DatabaseMigration[] = Object.freeze([
   createJobOutboxMigration,

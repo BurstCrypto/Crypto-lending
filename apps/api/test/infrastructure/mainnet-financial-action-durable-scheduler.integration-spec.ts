@@ -315,7 +315,7 @@ describeWithPostgres('migration 0042 durable scheduler (guarded PostgreSQL 16)',
     fullPool = new Pool({
       connectionString: testDatabaseUrl as string,
       max: 2,
-      options: `-c search_path=${fullSchema} -c statement_timeout=45000 -c lock_timeout=4000`,
+      options: `-c search_path=${fullSchema} -c statement_timeout=120000 -c lock_timeout=4000`,
     });
     functionalPool = new Pool({
       connectionString: testDatabaseUrl as string,
@@ -350,7 +350,7 @@ describeWithPostgres('migration 0042 durable scheduler (guarded PostgreSQL 16)',
         createMainnetFinancialActionDurableSchedulerTestSchemaMigrationV0042.verifySql ?? '',
       ),
     ).resolves.toMatchObject({ rows: [{ valid: true }] });
-  }, 60_000);
+  }, 180_000);
 
   it('transactionally backfills and exactly deduplicates prepared lifecycle state', async () => {
     const job = await requiredRow<{

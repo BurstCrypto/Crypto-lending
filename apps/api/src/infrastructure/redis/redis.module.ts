@@ -15,6 +15,12 @@ export function createRedisClient(config: InfrastructureConfig): Redis {
   }
   const encrypted = new URL(config.redis.url).protocol === 'rediss:';
   const client = new Redis(config.redis.url, {
+    // Railway's private network (`*.railway.internal`) resolves over IPv6 only.
+    // ioredis otherwise defaults to an IPv4 lookup, so the connection to a
+    // Railway-managed Redis never establishes and readiness PINGs fail. family 0
+    // lets Node resolve both AAAA and A records, so this stays correct on IPv4
+    // managed Redis (e.g. ElastiCache) as well.
+    family: 0,
     lazyConnect: true,
     // INFO is not part of the reviewed application ACL. PING is the explicit
     // readiness operation and is bounded by the health service timeout.

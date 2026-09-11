@@ -501,7 +501,10 @@ export class ManagedOidcClient implements OidcClientPort {
       url.searchParams.set('response_type', 'code');
       url.searchParams.set('client_id', this.config.clientId);
       url.searchParams.set('redirect_uri', this.config.redirectUri);
-      url.searchParams.set('scope', 'openid');
+      url.searchParams.set(
+        'scope',
+        this.config.providerKey === 'auth0' ? 'openid email' : 'openid',
+      );
       url.searchParams.set('state', state);
       url.searchParams.set('nonce', nonce);
       url.searchParams.set('code_challenge', request.codeChallenge);
@@ -714,12 +717,27 @@ export class ManagedOidcClient implements OidcClientPort {
     } catch {
       return fail('OIDC_ID_TOKEN_INVALID');
     }
+    let verifiedEmail: string | undefined;
+    if (this.config.providerKey === 'auth0') {
+      if (
+        payload.email_verified !== true ||
+        typeof payload.email !== 'string' ||
+        payload.email.length < 3 ||
+        payload.email.length > 320 ||
+        /[\0\r\n]/u.test(payload.email)
+      ) {
+        return fail('OIDC_ID_TOKEN_INVALID');
+      }
+      verifiedEmail = payload.email.trim().toLowerCase();
+      if (!verifiedEmail.includes('@')) return fail('OIDC_ID_TOKEN_INVALID');
+    }
     return Object.freeze({
       providerKey: this.config.providerKey,
       issuer: this.config.issuer,
       subject,
       issuedAtEpochSeconds: issuedAt as number,
       expiresAtEpochSeconds: expiresAt as number,
+      ...(verifiedEmail === undefined ? {} : { verifiedEmail }),
     });
   }
 }

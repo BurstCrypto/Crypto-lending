@@ -110,7 +110,7 @@ export class InfrastructureHealthService {
         'postgres',
         async (signal) => {
           await this.postgres.healthCheck(signal);
-          await this.migrations.assertUpToDate(signal);
+          await this.migrations.assertMigrationRecordsUpToDate(signal);
         },
         timeoutMs,
       ),

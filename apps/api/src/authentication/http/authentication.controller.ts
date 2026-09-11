@@ -69,11 +69,11 @@ const HTTP_QUALITY_VALUE = /^(?:0(?:\.\d{0,3})?|1(?:\.0{0,3})?)$/u;
 export const AUTHENTICATION_PROVIDER_LOGOUT_HEADER = 'X-Authentication-Provider-Logout';
 const MAXIMUM_PROVIDER_LOGOUT_URL_LENGTH = 4_096;
 
-function cognitoProviderLogoutUrl(
+function managedProviderLogoutUrl(
   config: Extract<RuntimeAuthenticationConfig, { readonly mode: 'oidc' }>,
 ): string | undefined {
   if (
-    config.providerKey !== 'cognito' ||
+    (config.providerKey !== 'cognito' && config.providerKey !== 'auth0') ||
     config.endSessionEndpoint === undefined ||
     config.postLogoutRedirectUri === undefined
   ) {
@@ -90,7 +90,7 @@ function cognitoProviderLogoutUrl(
       endSessionEndpoint.username !== '' ||
       endSessionEndpoint.password !== '' ||
       endSessionEndpoint.origin !== authorizationEndpoint.origin ||
-      endSessionEndpoint.pathname !== '/logout' ||
+      endSessionEndpoint.pathname !== (config.providerKey === 'auth0' ? '/v2/logout' : '/logout') ||
       endSessionEndpoint.search !== '' ||
       endSessionEndpoint.hash !== '' ||
       endSessionEndpoint.href !== config.endSessionEndpoint ||
@@ -102,7 +102,10 @@ function cognitoProviderLogoutUrl(
     }
 
     endSessionEndpoint.searchParams.set('client_id', config.clientId);
-    endSessionEndpoint.searchParams.set('logout_uri', config.postLogoutRedirectUri);
+    endSessionEndpoint.searchParams.set(
+      config.providerKey === 'auth0' ? 'returnTo' : 'logout_uri',
+      config.postLogoutRedirectUri,
+    );
     const providerLogoutUrl = endSessionEndpoint.href;
     if (
       providerLogoutUrl.length > MAXIMUM_PROVIDER_LOGOUT_URL_LENGTH ||
@@ -337,7 +340,7 @@ export class AuthenticationController {
     headers: {
       [AUTHENTICATION_PROVIDER_LOGOUT_HEADER]: {
         description:
-          'Bounded Cognito logout navigation URL, present only after confirmed local revocation',
+          'Bounded managed-provider logout URL, present only after confirmed local revocation',
         schema: { type: 'string', format: 'uri', maxLength: MAXIMUM_PROVIDER_LOGOUT_URL_LENGTH },
       },
     },
@@ -367,7 +370,7 @@ export class AuthenticationController {
     }
     response.setHeader('Set-Cookie', this.clearSessionCookies());
     if (localLogoutConfirmed) {
-      const providerLogoutUrl = cognitoProviderLogoutUrl(this.enabledConfig());
+      const providerLogoutUrl = managedProviderLogoutUrl(this.enabledConfig());
       if (providerLogoutUrl !== undefined) {
         response.setHeader(AUTHENTICATION_PROVIDER_LOGOUT_HEADER, providerLogoutUrl);
       }

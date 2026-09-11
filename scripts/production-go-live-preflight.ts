@@ -773,7 +773,7 @@ const REVIEWED_PROVIDER_POSITION_READ_ARTIFACT_SHA256 = Object.freeze({
   providerPositionChainAnchorRecordIntentReconciliationLifecycleSource:
     '4b0bd742fe5508c2c18b07c10ae7feb4c5a2d888c1498fde8ee01a784fc040dc',
   providerPositionMigrationIndexSource:
-    '3ceea27f4922a0e72022d6aac83504083c96b683a1b711aa37ce91acced4f35f',
+    '7957f7a45a3d1ff26bff668a8a84634855e526c7122df0c7b7e8ec0b0f3ffc6a',
   providerPositionAdmissionCoordinatorSource:
     'bcd6324695359cd3ef43ac6620da2b756c379c75fe5c0e99897791996b3312eb',
   providerPositionDeadlineRunnerSource:
@@ -783,7 +783,7 @@ const REVIEWED_PROVIDER_POSITION_READ_ARTIFACT_SHA256 = Object.freeze({
   providerPositionRuntimeCompositionSource:
     'e8053eb8c64fbc6985d9a35b11130be1ac2b083c5774fbdd24c53822bc2ca0fc',
   providerPositionInfrastructureConfigSource:
-    '7d74d191b8abd1910b6aad7efb3f0b29a8763b31b71b9caeeee0a14bac31d54c',
+    'eb4bb3868fa7d528cd396ba58abee0ab64a5443e2added4218b9b72ff01b1c77',
   providerPositionRuntimePostgresPoolSource:
     'd15b4a0604cda0bcc9d8df7f597863e42c4ef573ba8ed4362386cd2beaa1f823',
   portfolioWalletRegistrationReaderPortSource:
@@ -955,18 +955,18 @@ const REVIEWED_BALANCE_CONSUMER_ARTIFACT_SHA256 = Object.freeze({
   applicationRootSource: 'fcad49388bdfddcc55b0865a4ac4220e3d27ba77a20a19537121b68bf4b5c9dd',
   localDevelopmentAppModuleSource:
     'c607a60bd2a388dce1605752ca4d858ee137e670fccee0052ec157bc02605fc2',
-  mainSource: 'b902f7f4f71fc4e6237c3baa75206a42244e93a902684a8387a167a6a180a0e9',
-  outboxWorkerCliSource: 'd416d7a635479e2c45dc03049ac70748c087ab061c7378f41470aaa4e4b88677',
+  mainSource: 'b77c79155552253bc3da0e441c6e0757d020ca6dd6295e04d62861a0cf09f443',
+  outboxWorkerCliSource: '238ae79dcb4f644425729d431d4ccc6679507e04dc69789d25ee3a23fbf159e0',
   redisSessionRevocationCliSource:
     'fabc12502a15b2b8771c0f4e133bcec7a9ec3c92da389b8f677c9c10f6fa769b',
-  migrationCliSource: '9155e1b10fce756188c8b9d8de201b2f82c36680fb76ee28c15923b5c7101b51',
+  migrationCliSource: 'ca2cae0a491777567a67e02066fafbaa59bb7c7dcb9e2a25925636c56f6e0cdf',
   balanceSyncOrchestratorSource: '9e47a337a511ba6d3306de440b1f491983559fac16addc2bbdeb270b4c229be9',
   balanceSyncDomainSource: 'c6992ec597647013b09d2898e196825747f135d72c34bbcf61bc67a393df36b2',
   chainObservationPolicySource: 'ef887514b86230d1516e5a8139c94dc2b2dde06c979440bc6eb3f4df90511533',
   failClosedJobDispositionSource:
     'd49d752db7ca17513a67219af26261add92bf73433224dfd847a098f73baf833',
   reviewedJobDispatcherSource: 'd5c922588ecc2c7eb930d2e2acc55b64167b033e9b5523fabd952cb9e50e43af',
-  infrastructureConfigSource: '7d74d191b8abd1910b6aad7efb3f0b29a8763b31b71b9caeeee0a14bac31d54c',
+  infrastructureConfigSource: 'eb4bb3868fa7d528cd396ba58abee0ab64a5443e2added4218b9b72ff01b1c77',
   pinnedQueueReceiptSource: '76543f1e4b4c446eb98b85ad52ea934d7e84f8f7fedcd82f6e516a7eb45a8c56',
   sqsJobWorkerSource: '833ec8c536421751efd722c503144fc160432ffee71043f97d8711ca9fd70fc1',
   observabilitySource: 'cc451c75a65c8651161ae6c2bd10b25fc290c4ca81818ceeb16bbbec64fff18b',
@@ -974,8 +974,8 @@ const REVIEWED_BALANCE_CONSUMER_ARTIFACT_SHA256 = Object.freeze({
   sqsModuleSource: 'dc958100bd372500a9428c28cc6219a4cb00db61314a63478368d0b0cf95221b',
   sqsTokensSource: REVIEWED_SQS_TOKENS_SOURCE_SHA256,
   apiPackageSource: 'c911e7171be6ff64908d1c15fc1d240f51ace8e8b90d6bcad4c605c994439774',
-  rootPackageSource: '04672cea1f2c2d410ba3d2c27635a12542d8cda176b5816f26b408db8808f79a',
-  rootPackageLockSource: 'bc34899fd5992398c426fee6999d84fe828877f984222d396d7f6836671d9035',
+  rootPackageSource: '873b5157771761cdd0acc5cebe4ab4ce1e5c0793d61b739b6c22c9838c6a5b8e',
+  rootPackageLockSource: '9dfd213af59556274babbeacf16e3b7c4cde4c9b92601fdec7e7d64d292820aa',
   applicationTemplateSource: '58b040eea3858661d45ab0f1334457c0b937cfb8179bad665aa3bb649171807c',
   applicationValidatorSource: '3da9441a8d3c5de0b47b88fd0c11d489c940234702f768ea9774279f7fab3e00',
   workloadTemplateSource: '4c74c98e73635df30570dfe1e726b41cb6f62832f0bfc2e43dcd087d384b78de',
@@ -1001,10 +1001,10 @@ const REVIEWED_BALANCE_CONSUMER_ARTIFACT_SHA256 = Object.freeze({
     '9ff329c1ce601cc2b830036239b2f16f34ebe6163aca57e033714d2e8718010f',
   mainnetBalanceAgreementEvidenceV2MigrationSource:
     'c9afef59a9101d568597eb37845d6d2a997edf63f1496d3d04296075fcc61fff',
-  migrationIndexSource: '3ceea27f4922a0e72022d6aac83504083c96b683a1b711aa37ce91acced4f35f',
+  migrationIndexSource: '7957f7a45a3d1ff26bff668a8a84634855e526c7122df0c7b7e8ec0b0f3ffc6a',
   releaseManifestSource: 'de21eaf35f60691ec9a2fa9127d8caddfc608cbcdc69776002efb3da730e5bc0',
   productionContainerValidatorSource:
-    'a9fbc9e638f4a33266e823ff8c07a9b53703e1bc8f1f4f46eab30c7b50a9b0b0',
+    '7bea336d67fd205ee932fbaf7e1c0c861169216e0811e859cd3e1407d130aa17',
 } satisfies Readonly<Record<keyof BalanceConsumerArtifactSources, string>>);
 const MAX_BALANCE_CONSUMER_ARTIFACT_BYTES = 256 * 1024;
 const MAX_BALANCE_CONSUMER_PACKAGE_LOCK_BYTES = 768 * 1024;
@@ -9647,7 +9647,7 @@ const API_RUNTIME_PINNED_INPUT_PATHS = Object.freeze([
   'tsconfig.json',
 ]);
 const REVIEWED_API_RUNTIME_REPOSITORY_SNAPSHOT_SHA256 =
-  'ddbce511af4eca3706b2e21fa95c1c66640c1a711a10af35f355ed63f189b094';
+  '8c6e02618d7cde7c79de3be337e8dd3533186f9e0e60e14b6e4c9827f3bed6e4';
 const API_RUNTIME_OWNED_DEPLOYMENT_IDENTITY_PATHS = new Set([
   'blockchain-sync/infrastructure/rpc/ethereum-mainnet-balance-deployment-identity.verifier.ts',
   'blockchain-sync/infrastructure/rpc/ethereum-mainnet-balance-deployment.manifest.ts',

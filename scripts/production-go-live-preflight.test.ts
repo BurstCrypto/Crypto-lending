@@ -6844,14 +6844,14 @@ test('repository loader brands the bounded full API runtime absence attestation'
   assert.equal(Object.isFrozen(attestation), true);
   assert.deepEqual(attestation, {
     inspected: true,
-    sourceFileCount: 426,
-    sourceBytes: 7485313,
+    sourceFileCount: 437,
+    sourceBytes: 7537085,
     repositorySnapshotSha256: attestation?.repositorySnapshotSha256,
     concreteDeploymentIdentityRegistration: 'ABSENT',
   });
   assert.equal(
     attestation?.repositorySnapshotSha256,
-    'ddbce511af4eca3706b2e21fa95c1c66640c1a711a10af35f355ed63f189b094',
+    '8c6e02618d7cde7c79de3be337e8dd3533186f9e0e60e14b6e4c9827f3bed6e4',
   );
 });
 

@@ -10,7 +10,7 @@ interface RegisterPageProps {
 
 export const metadata: Metadata = {
   title: 'Create account',
-  description: 'Create an account for the Crypto Lending workspace.',
+  description: 'Create an account for the Bonsai Lending workspace.',
   robots: { index: false, follow: false, nocache: true },
 };
 

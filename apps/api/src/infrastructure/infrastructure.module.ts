@@ -9,10 +9,9 @@ import { ReadinessAbuseLimiter } from './health/readiness-abuse-limiter';
 import { ReadinessAbuseInterceptor } from './health/readiness-abuse.interceptor';
 import { OutboxModule } from './outbox/outbox.module';
 import { RedisModule } from './redis/redis.module';
-import { SqsModule } from './sqs/sqs.module';
 
 @Module({
-  imports: [InfrastructureConfigModule, PostgresModule, RedisModule, SqsModule, OutboxModule],
+  imports: [InfrastructureConfigModule, PostgresModule, RedisModule, OutboxModule],
   controllers: [InfrastructureHealthController, InternalInfrastructureHealthController],
   providers: [
     InfrastructureHealthService,

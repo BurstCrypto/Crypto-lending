@@ -274,4 +274,6 @@ export interface VerifiedOidcIdentity {
   readonly subject: OidcSubject;
   readonly issuedAtEpochSeconds: number;
   readonly expiresAtEpochSeconds: number;
+  /** Present only when the managed provider cryptographically asserted it. */
+  readonly verifiedEmail?: string;
 }

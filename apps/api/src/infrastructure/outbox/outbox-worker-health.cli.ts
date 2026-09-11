@@ -7,10 +7,13 @@ import { NestFactory } from '@nestjs/core';
 import { bindExecutableWorkload } from '../config/application-workload';
 import { PostgresModule } from '../database/postgres.module';
 import { installFatalProcessBoundary, LOG_EVENTS, structuredLogger } from '../logging';
-import { SqsModule } from '../sqs/sqs.module';
+import { OutboxTransportModule } from './outbox-transport.module';
 import { assertOutboxWorkerHealthy, OutboxWorkerHealthService } from './outbox-worker-health';
 
-@Module({ imports: [PostgresModule, SqsModule], providers: [OutboxWorkerHealthService] })
+@Module({
+  imports: [PostgresModule, OutboxTransportModule],
+  providers: [OutboxWorkerHealthService],
+})
 class OutboxWorkerHealthApplicationModule {}
 
 async function main(): Promise<void> {

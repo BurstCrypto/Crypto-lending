@@ -2,11 +2,28 @@ import { resolve } from 'node:path';
 import process from 'node:process';
 import { pathToFileURL } from 'node:url';
 
-const EXPECTED_SOURCE = 'https://github.com/Trey-Gleason/Crypto-lending';
+const EXPECTED_SOURCE = 'https://github.com/BurstCrypto/Crypto-lending';
 const LOWERCASE_GIT_REVISION = /^[0-9a-f]{40}$/u;
 const CANONICAL_UTC_SECOND =
   /^(20[2-9][0-9]|21[0-9]{2})-(0[1-9]|1[0-2])-([0-2][0-9]|3[01])T([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]Z$/u;
 const UNSET_REVISION = '0'.repeat(40);
+
+/**
+ * A native build (e.g. Railway's builder, or a plain `docker build` with no
+ * attestation args) supplies none of the OCI provenance arguments, so the
+ * Dockerfile defaults apply: empty OCI_SOURCE and the all-zero revision. That is
+ * an unattested build, not an invalid one — the reproducible-provenance contract
+ * only binds when a build pipeline explicitly supplies OCI_SOURCE. Detecting the
+ * default shape here lets the image build outside the signed CI pipeline while
+ * keeping the strict contract for any build that opts into attestation.
+ */
+export function isUnattestedNativeBuild(environment) {
+  const source = environment.OCI_SOURCE;
+  const revision = environment.OCI_REVISION;
+  const sourceUnset = source === undefined || source === '';
+  const revisionUnset = revision === undefined || revision === '' || revision === UNSET_REVISION;
+  return sourceUnset && revisionUnset;
+}
 
 export function validateOciBuildMetadata(environment) {
   const source = environment.OCI_SOURCE;
@@ -14,6 +31,8 @@ export function validateOciBuildMetadata(environment) {
   const created = environment.OCI_CREATED;
   const sourceDateEpoch = environment.SOURCE_DATE_EPOCH;
   const errors = [];
+
+  if (isUnattestedNativeBuild(environment)) return Object.freeze(errors);
 
   if (source !== EXPECTED_SOURCE) errors.push('OCI_SOURCE must identify the canonical repository');
   if (!revision || !LOWERCASE_GIT_REVISION.test(revision) || revision === UNSET_REVISION) {
@@ -41,9 +60,16 @@ function isDirectExecution() {
 }
 
 if (isDirectExecution()) {
-  const errors = validateOciBuildMetadata(process.env);
-  if (errors.length > 0) {
-    for (const error of errors) process.stderr.write(`${error}\n`);
-    process.exitCode = 1;
+  if (isUnattestedNativeBuild(process.env)) {
+    process.stderr.write(
+      'OCI build metadata: unattested native build (no OCI_SOURCE/OCI_REVISION supplied); ' +
+        'skipping reproducible-provenance checks.\n',
+    );
+  } else {
+    const errors = validateOciBuildMetadata(process.env);
+    if (errors.length > 0) {
+      for (const error of errors) process.stderr.write(`${error}\n`);
+      process.exitCode = 1;
+    }
   }
 }

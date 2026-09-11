@@ -338,6 +338,24 @@ describe('authentication CSRF and logout boundary', () => {
     ).resolves.toBe(providerLogout.href);
   });
 
+  it('returns only the exact same-origin Auth0 post-logout navigation hint', async () => {
+    const returnTo = new URL('/login', window.location.origin).href;
+    const providerLogout = new URL('https://identity.example.test/v2/logout');
+    providerLogout.searchParams.set('client_id', 'public-client');
+    providerLogout.searchParams.set('returnTo', returnTo);
+
+    await expect(
+      logoutAuthenticationSession({
+        cookieHeader: `__Host-cl_csrf=${CSRF}`,
+        fetch: async () =>
+          new Response(null, {
+            status: 204,
+            headers: { [AUTHENTICATION_PROVIDER_LOGOUT_HEADER]: providerLogout.href },
+          }),
+      }),
+    ).resolves.toBe(providerLogout.href);
+  });
+
   it('treats malformed provider logout hints as an absent hint after confirmed local logout', async () => {
     const logoutUri = new URL('/login', window.location.origin).href;
     const invalid = [

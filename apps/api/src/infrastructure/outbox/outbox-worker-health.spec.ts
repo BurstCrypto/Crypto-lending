@@ -18,7 +18,7 @@ describe('OutboxWorkerHealthService', () => {
 
   it('checks only PostgreSQL, migrations, and SQS', async () => {
     const postgres = { healthCheck: jest.fn().mockResolvedValue(undefined) };
-    const migrations = { assertUpToDate: jest.fn().mockResolvedValue(undefined) };
+    const migrations = { assertMigrationRecordsUpToDate: jest.fn().mockResolvedValue(undefined) };
     const sqs = { healthCheck: jest.fn().mockResolvedValue(undefined) };
     const health = new OutboxWorkerHealthService(
       postgres as unknown as PostgresService,
@@ -31,10 +31,11 @@ describe('OutboxWorkerHealthService', () => {
       checks: { postgres: { status: 'up' }, sqs: { status: 'up' } },
     });
     expect(postgres.healthCheck).toHaveBeenCalledTimes(1);
-    expect(migrations.assertUpToDate).toHaveBeenCalledTimes(1);
+    expect(migrations.assertMigrationRecordsUpToDate).toHaveBeenCalledTimes(1);
     expect(sqs.healthCheck).toHaveBeenCalledTimes(1);
     const postgresSignal = postgres.healthCheck.mock.calls[0]?.[0] as AbortSignal | undefined;
-    const migrationSignal = migrations.assertUpToDate.mock.calls[0]?.[0] as AbortSignal | undefined;
+    const migrationSignal = migrations.assertMigrationRecordsUpToDate.mock.calls[0]?.[0] as
+      AbortSignal | undefined;
     expect(postgresSignal).toBeInstanceOf(AbortSignal);
     expect(migrationSignal).toBe(postgresSignal);
     expect(postgresSignal?.aborted).toBe(false);
@@ -61,7 +62,7 @@ describe('OutboxWorkerHealthService', () => {
         });
       }),
     };
-    const migrations = { assertUpToDate: jest.fn().mockResolvedValue(undefined) };
+    const migrations = { assertMigrationRecordsUpToDate: jest.fn().mockResolvedValue(undefined) };
     const health = new OutboxWorkerHealthService(
       postgres as unknown as PostgresService,
       migrations as unknown as MigrationRunner,
@@ -75,12 +76,12 @@ describe('OutboxWorkerHealthService', () => {
       checks: { postgres: { status: 'down' }, sqs: { status: 'up' } },
     });
     expect(postgresSignal?.aborted).toBe(true);
-    expect(migrations.assertUpToDate).not.toHaveBeenCalled();
+    expect(migrations.assertMigrationRecordsUpToDate).not.toHaveBeenCalled();
 
     finishDrain?.();
     await Promise.resolve();
     await Promise.resolve();
-    expect(migrations.assertUpToDate).not.toHaveBeenCalled();
+    expect(migrations.assertMigrationRecordsUpToDate).not.toHaveBeenCalled();
   });
 
   it('reports dependency names without exposing raw failures', async () => {
@@ -88,7 +89,7 @@ describe('OutboxWorkerHealthService', () => {
       {
         healthCheck: jest.fn().mockRejectedValue(new Error('database-secret')),
       } as unknown as PostgresService,
-      { assertUpToDate: jest.fn() } as unknown as MigrationRunner,
+      { assertMigrationRecordsUpToDate: jest.fn() } as unknown as MigrationRunner,
       { healthCheck: jest.fn().mockRejectedValue(new Error('queue-secret')) },
     );
 

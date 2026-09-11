@@ -13,7 +13,7 @@ interface LoginPageProps {
 
 export const metadata: Metadata = {
   title: 'Sign in',
-  description: 'Secure account access for the Crypto Lending workspace.',
+  description: 'Secure account access for the Bonsai Lending workspace.',
   robots: { index: false, follow: false, nocache: true },
 };
 

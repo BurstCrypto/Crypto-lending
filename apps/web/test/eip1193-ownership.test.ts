@@ -40,7 +40,7 @@ function message(overrides: { requestId?: string; nonce?: string } = {}): string
   return (
     `app.example.test wants you to sign in with your Ethereum account:\n` +
     `${ADDRESS}\n\n` +
-    `Verify this wallet for Crypto Lending. This proof does not authorize login, transactions, transfers, or loans.\n\n` +
+    `Verify this wallet for Bonsai Lending. This proof does not authorize login, transactions, transfers, or loans.\n\n` +
     `URI: ${ORIGIN}/\n` +
     `Version: 1\n` +
     `Chain ID: 1\n` +

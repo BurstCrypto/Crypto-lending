@@ -202,7 +202,7 @@ describe('PortfolioPage', () => {
     expect(screen.queryByText('Sample data')).not.toBeInTheDocument();
     expect(screen.queryByText(/demo wallets/iu)).not.toBeInTheDocument();
     expect(screen.queryByText(/synthetic local portfolio/iu)).not.toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Crypto Lending home' })).toHaveAttribute('href', '/');
+    expect(screen.getByRole('link', { name: 'Bonsai Lending home' })).toHaveAttribute('href', '/');
     expect(screen.queryByRole('link', { name: 'Account' })).toBeNull();
     expect(screen.queryByRole('navigation', { name: 'Jump to portfolio sections' })).toBeNull();
     expect(document.querySelector('#balances')).not.toBeNull();
@@ -228,8 +228,8 @@ describe('PortfolioPage', () => {
         name: 'Your supported balances, in one clear view.',
       }),
     ).toBeInTheDocument();
-    expect(screen.queryByText('Crypto Lending isolated synthetic regression harness')).toBeNull();
-    expect(screen.getByText('Crypto Lending multi-chain mainnet read-only preview')).toBeVisible();
+    expect(screen.queryByText('Bonsai Lending isolated synthetic regression harness')).toBeNull();
+    expect(screen.getByText('Bonsai Lending multi-chain mainnet read-only preview')).toBeVisible();
     expect(screen.queryByRole('navigation', { name: 'Jump to portfolio sections' })).toBeNull();
     expect(document.querySelector('#balances')).not.toBeNull();
     expect(document.querySelector('#wallets')).toBeNull();

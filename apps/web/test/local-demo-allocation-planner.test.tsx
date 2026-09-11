@@ -249,7 +249,7 @@ describe('LocalDemoAllocationPlanner', () => {
     );
 
     expect(
-      await screen.findByRole('heading', { name: 'Crypto Lending managed blend' }),
+      await screen.findByRole('heading', { name: 'Bonsai Lending managed blend' }),
     ).toBeInTheDocument();
     expect(screen.getByText(/^(?:Rates current|Archived rates · stale)$/u)).toBeInTheDocument();
     expect(screen.getByText(/make no live external request/u)).toBeInTheDocument();
@@ -801,7 +801,7 @@ describe('LocalDemoAllocationPlanner', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Retry rates' }));
 
     expect(
-      await screen.findByRole('heading', { name: 'Crypto Lending managed blend' }),
+      await screen.findByRole('heading', { name: 'Bonsai Lending managed blend' }),
     ).toBeInTheDocument();
     expect(harness.readYieldCatalog).toHaveBeenCalledTimes(2);
   });
