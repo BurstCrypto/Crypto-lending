@@ -54,10 +54,7 @@ export function BonsaiLogo({ size = '1em', className, title }: BonsaiLogoProps) 
       />
 
       {/* Shallow pot */}
-      <path
-        d="M9.5 25.5 L22.5 25.5 L20.5 29.5 L11.5 29.5 Z"
-        fill="currentColor"
-      />
+      <path d="M9.5 25.5 L22.5 25.5 L20.5 29.5 L11.5 29.5 Z" fill="currentColor" />
     </svg>
   );
 }
