@@ -70,7 +70,7 @@ describe('Railway production topology', () => {
     assert.equal(api.deploy?.healthcheckPath, '/api/v1/internal/health/dependencies');
     assert.match(
       api.deploy?.preDeployCommand?.[0] ?? '',
-      /railway-database-bootstrap\.cli\.js && env [^&]+ node dist\/infrastructure\/database\/migration\.cli\.js --production up/u,
+      /^sh -c 'node dist\/infrastructure\/database\/railway-database-bootstrap\.cli\.js && env [^&]+ node dist\/infrastructure\/database\/migration\.cli\.js --production up'$/u,
     );
     assert.equal(web.deploy?.startCommand, 'node server.js');
     assert.equal(

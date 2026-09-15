@@ -1,3 +1,6 @@
+import { PasswordlessController } from './http/passwordless.controller';
+import { PasswordlessService } from './application/passwordless.service';
+import { PasswordlessDelivery } from './infrastructure/passwordless-delivery';
 import { Module } from '@nestjs/common';
 
 import { CURRENT_PRINCIPAL_RESOLVER } from '../accounts/auth/current-principal';
@@ -24,7 +27,7 @@ import { SessionResolutionAdmission } from './infrastructure/session-resolution-
 
 @Module({
   imports: [PostgresModule],
-  controllers: [AuthenticationController],
+  controllers: [AuthenticationController, PasswordlessController],
   providers: [
     { provide: AUTHENTICATION_CONFIG, useFactory: loadAuthenticationConfig },
     {
@@ -45,6 +48,8 @@ import { SessionResolutionAdmission } from './infrastructure/session-resolution-
         config.mode === 'oidc' ? new ManagedOidcClient(config) : null,
     },
     AuthenticationService,
+    PasswordlessService,
+    PasswordlessDelivery,
     {
       provide: SessionResolutionAdmission,
       inject: [INFRASTRUCTURE_CONFIG],

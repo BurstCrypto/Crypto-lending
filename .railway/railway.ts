@@ -170,8 +170,10 @@ export default defineRailway((ctx) => {
   const api = service('api', {
     ...serviceSource('RAILWAY_API_IMAGE', 'Dockerfile.api', simpleProfile, sourceRepo),
     start: 'env -u MIGRATION_DATABASE_URL node dist/main.js',
+    // Railway executes this as an argv command. An explicit shell is required
+    // for &&; otherwise bootstrap receives the migration command as unused args.
     preDeploy:
-      'node dist/infrastructure/database/railway-database-bootstrap.cli.js && env -u APPLICATION_WORKLOAD -u DATABASE_RUNTIME_HOST -u DATABASE_RUNTIME_PORT -u DATABASE_RUNTIME_NAME -u DATABASE_RUNTIME_USERNAME -u DATABASE_RUNTIME_PASSWORD -u DATABASE_RUNTIME_SSL_MODE -u REDIS_URL node dist/infrastructure/database/migration.cli.js --production up',
+      "sh -c 'node dist/infrastructure/database/railway-database-bootstrap.cli.js && env -u APPLICATION_WORKLOAD -u DATABASE_RUNTIME_HOST -u DATABASE_RUNTIME_PORT -u DATABASE_RUNTIME_NAME -u DATABASE_RUNTIME_USERNAME -u DATABASE_RUNTIME_PASSWORD -u DATABASE_RUNTIME_SSL_MODE -u REDIS_URL node dist/infrastructure/database/migration.cli.js --production up'",
     healthcheck: '/api/v1/internal/health/dependencies',
     healthcheckTimeout: 120,
     networking: { serviceDomains: {}, customDomains: {}, tcpProxies: {} },
