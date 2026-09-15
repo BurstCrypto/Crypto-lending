@@ -38,6 +38,17 @@ The rollout branch records these synthetic fixtures in the existing exact-match
 exception ledger, bound to source path, line, Git blob, rule, scope and redacted
 fingerprint. Its hash pin and regression tests cover the additional entries.
 
+The production preflight retains its exact source comparisons and negative tests.
+Its API snapshot now covers 442 runtime files and 7,538,187 bytes, with SHA-256
+`e803c868013d4ca7f8e14bc355bdf9537d9e09a056beb8777676dd8aa209357f`.
+This incorporates the passwordless changes and the existing Railway simple-profile
+bootstrap changes since the previous snapshot. The related entrypoint, dependency
+lock and gateway-validator fingerprints were refreshed after checking their diffs.
+The full runtime inspection still confirms dormant balance-consumer registration
+is absent. All 137 executable preflight tests passed locally; one Windows symlink
+test was skipped. Both production container builds and their hardened runtime
+checks passed, as did all 71 API end-to-end tests and the release tooling tests.
+
 The owner confirmed that there should be zero existing accounts, so no existing
 login migration is planned. Native phone identities remain separate from OIDC
 identities. A read-only database count was unavailable because no public
