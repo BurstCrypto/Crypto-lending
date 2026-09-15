@@ -57,6 +57,33 @@ function cognitoEnvironment(): NodeJS.ProcessEnv {
 }
 
 describe('authentication configuration', () => {
+  it('loads native passwordless sessions on Railway without an OIDC provider', () => {
+    const environment = oidcEnvironment();
+    for (const name of Object.keys(environment))
+      if (name.startsWith('OIDC_')) delete environment[name];
+    environment.AUTH_MODE = 'passwordless';
+    environment.DEPLOYMENT_TARGET = 'railway';
+    const config = loadAuthenticationConfig(environment);
+    expect(config.mode).toBe('passwordless');
+    expect(config).not.toHaveProperty('clientId');
+    expect(config).not.toHaveProperty('authorizationEndpoint');
+    expect(config).toHaveProperty('sessionHmacKeys');
+    environment.AUTH_PUBLIC_ORIGIN = 'http://hqbonsai.com';
+    expect(() => loadAuthenticationConfig(environment)).toThrow(
+      expect.objectContaining({ field: 'AUTH_PUBLIC_ORIGIN' }),
+    );
+  });
+
+  it('does not enable passwordless on a deployment without its database migration', () => {
+    expect(() =>
+      loadAuthenticationConfig({
+        ...oidcEnvironment(),
+        AUTH_MODE: 'passwordless',
+        DEPLOYMENT_TARGET: 'aws',
+      }),
+    ).toThrow(expect.objectContaining({ field: 'DEPLOYMENT_TARGET' }));
+  });
+
   it('defaults to an exact frozen disabled mode when no auth values are present', () => {
     const config = loadAuthenticationConfig({ NODE_ENV: 'test' });
     expect(config).toEqual({ mode: 'disabled' });

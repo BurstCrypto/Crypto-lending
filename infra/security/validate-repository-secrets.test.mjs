@@ -113,7 +113,7 @@ test('binds reviewed fixture exceptions to every exact redacted finding field', 
     { ...exact, scope: 'repository' },
   ];
 
-  assert.equal(reviewed.size, 37);
+  assert.equal(reviewed.size, 49);
   assert.deepEqual(
     filterReviewedFalsePositiveFindings([exact, ...nearMisses], reviewed),
     nearMisses,
@@ -123,11 +123,35 @@ test('binds reviewed fixture exceptions to every exact redacted finding field', 
 test('fails closed when the reviewed fixture ledger bytes drift', () => {
   const reviewedBytes = readFileSync(falsePositiveLedgerPath);
 
-  assert.equal(parseReviewedFalsePositiveLedger(reviewedBytes).size, 37);
+  assert.equal(parseReviewedFalsePositiveLedger(reviewedBytes).size, 49);
   assert.throws(
     () => parseReviewedFalsePositiveLedger(Buffer.concat([reviewedBytes, Buffer.from('\n')])),
     /Reviewed false-positive ledger is invalid/u,
   );
+});
+
+test('keeps Railway fixture exceptions bound to the reviewed source and credential bytes', () => {
+  const repository = createRepository();
+  const fixturePath = 'apps/api/src/infrastructure/config/railway-simple-profile.spec.ts';
+  const fixture = readFileSync(new URL(`../../${fixturePath}`, import.meta.url), 'utf8');
+  try {
+    write(repository, fixturePath, fixture);
+    commitAll(repository, 'add reviewed Railway configuration fixture');
+    assert.equal(runScanner(repository).status, 0);
+
+    const changed = fixture.replace('railway-simple@redis.', 'changed-fixture@redis.');
+    assert.notEqual(changed, fixture);
+    write(repository, fixturePath, changed);
+    runGit(repository, 'add', fixturePath);
+    assertFinding(runScanner(repository), 'url.embedded-credentials', 'index');
+
+    write(repository, fixturePath, fixture);
+    write(repository, 'unreviewed-copy.spec.ts', fixture);
+    runGit(repository, 'add', '--all');
+    assertFinding(runScanner(repository), 'url.embedded-credentials', 'index');
+  } finally {
+    rmSync(repository, { recursive: true, force: true });
+  }
 });
 
 test('scans the staged index instead of an unstaged working-tree replacement', () => {

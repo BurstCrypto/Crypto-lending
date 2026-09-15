@@ -57,6 +57,11 @@ const EXPECTED_DOCKERIGNORE = `**
 !infra/containers/aws-rds-global-bundle.crt
 !infra/containers/validate-built-runtime.mjs
 !infra/containers/validate-oci-build-metadata.mjs
+!deploy/
+!deploy/railway/
+!deploy/railway/gateway/
+!deploy/railway/gateway/Caddyfile
+!deploy/railway/gateway/Dockerfile
 **/.env
 **/.env.*
 **/*.key

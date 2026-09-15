@@ -21,7 +21,7 @@ export interface DisabledAuthenticationConfig {
   readonly mode: 'disabled';
 }
 
-export interface OidcAuthenticationConfig {
+export interface OidcAuthenticationConfig extends SessionAuthenticationConfig {
   readonly mode: 'oidc';
   readonly localDemo: boolean;
   readonly providerKey: OidcProviderKey;
@@ -45,6 +45,11 @@ export interface OidcAuthenticationConfig {
   readonly jwksCacheTtlSeconds: number;
   readonly clockToleranceSeconds: number;
   readonly maximumIdTokenAgeSeconds: number;
+}
+
+export interface SessionAuthenticationConfig {
+  readonly localDemo: boolean;
+  readonly publicOrigin: string;
   readonly preAuthenticationTtlSeconds: number;
   readonly sessionIdleTtlSeconds: number;
   readonly sessionAbsoluteTtlSeconds: number;
@@ -60,7 +65,13 @@ export interface OidcAuthenticationConfig {
   readonly csrfHmacKey: AuthenticationKey<'csrf-hmac'>;
 }
 
-export type AuthenticationConfig = DisabledAuthenticationConfig | OidcAuthenticationConfig;
+export interface PasswordlessAuthenticationConfig extends SessionAuthenticationConfig {
+  readonly mode: 'passwordless';
+}
+
+export type EnabledAuthenticationConfig =
+  OidcAuthenticationConfig | PasswordlessAuthenticationConfig;
+export type AuthenticationConfig = DisabledAuthenticationConfig | EnabledAuthenticationConfig;
 
 const OIDC_VARIABLES = [
   'OIDC_PROVIDER_KEY',
@@ -409,7 +420,7 @@ export function loadAuthenticationConfig(
   const localDemo = localDemoEnabled(environment);
   const configuredMode = environment.AUTH_MODE;
   const mode = configuredMode === undefined ? 'disabled' : configuredMode;
-  if (mode !== 'disabled' && mode !== 'oidc') return fail('AUTH_MODE');
+  if (mode !== 'disabled' && mode !== 'oidc' && mode !== 'passwordless') return fail('AUTH_MODE');
   if (mode === 'disabled') {
     if (environment.NODE_ENV?.trim().toLowerCase() === 'production') {
       return fail('AUTH_MODE');
@@ -417,6 +428,11 @@ export function loadAuthenticationConfig(
     const unexpected = OIDC_VARIABLES.find((name) => environment[name] !== undefined);
     if (unexpected) return fail(unexpected);
     return Object.freeze({ mode: 'disabled' });
+  }
+
+  if (mode === 'passwordless') {
+    if (environment.DEPLOYMENT_TARGET !== 'railway') return fail('DEPLOYMENT_TARGET');
+    return Object.freeze({ mode, ...loadSessionAuthenticationConfig(environment, false) });
   }
 
   const testRuntime = environment.NODE_ENV === 'test';
@@ -570,6 +586,43 @@ export function loadAuthenticationConfig(
     60,
     3_600,
   );
+
+  return Object.freeze({
+    mode: 'oidc',
+    providerKey,
+    issuer,
+    authorizationEndpoint,
+    tokenEndpoint,
+    jwksUri,
+    clientId,
+    audience,
+    ...(configuredRequiredTokenUse === undefined
+      ? {}
+      : { requiredTokenUse: configuredRequiredTokenUse }),
+    ...configuredLogout,
+    signingAlgorithm: configuredSigningAlgorithm,
+    tokenEndpointAuthenticationMethod,
+    ...(clientSecret ? { clientSecret } : {}),
+    redirectUri,
+    httpTimeoutMs,
+    tokenResponseMaxBytes,
+    jwksResponseMaxBytes,
+    jwksCacheTtlSeconds,
+    clockToleranceSeconds,
+    maximumIdTokenAgeSeconds,
+    ...loadSessionAuthenticationConfig(environment, localDemo),
+  });
+}
+
+function loadSessionAuthenticationConfig(
+  environment: Readonly<NodeJS.ProcessEnv>,
+  localDemo: boolean,
+): SessionAuthenticationConfig {
+  const testRuntime = environment.NODE_ENV === 'test';
+  const publicOrigin = exactUrl(required(environment, 'AUTH_PUBLIC_ORIGIN'), 'AUTH_PUBLIC_ORIGIN', {
+    originOnly: true,
+    testRuntime: localDemo,
+  });
   const preAuthenticationTtlSeconds = boundedInteger(
     environment,
     'AUTH_PREAUTH_TTL_SECONDS',
@@ -668,30 +721,8 @@ export function loadAuthenticationConfig(
   }
 
   return Object.freeze({
-    mode: 'oidc',
     localDemo,
-    providerKey,
-    issuer,
-    authorizationEndpoint,
-    tokenEndpoint,
-    jwksUri,
-    clientId,
-    audience,
-    ...(configuredRequiredTokenUse === undefined
-      ? {}
-      : { requiredTokenUse: configuredRequiredTokenUse }),
-    ...configuredLogout,
-    signingAlgorithm: configuredSigningAlgorithm,
-    tokenEndpointAuthenticationMethod,
-    ...(clientSecret ? { clientSecret } : {}),
     publicOrigin,
-    redirectUri,
-    httpTimeoutMs,
-    tokenResponseMaxBytes,
-    jwksResponseMaxBytes,
-    jwksCacheTtlSeconds,
-    clockToleranceSeconds,
-    maximumIdTokenAgeSeconds,
     preAuthenticationTtlSeconds,
     sessionIdleTtlSeconds,
     sessionAbsoluteTtlSeconds,

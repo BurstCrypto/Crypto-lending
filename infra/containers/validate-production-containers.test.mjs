@@ -595,6 +595,14 @@ test('rejects build-context allowlist weakening or accidental source omission', 
     replace(source, 'dockerignore', '!apps/web/lib/**\n', ''),
     /build-context allowlist/u,
   );
+  assertRejected(
+    replace(source, 'dockerignore', '!deploy/railway/gateway/Caddyfile\n', ''),
+    /build-context allowlist/u,
+  );
+  assertRejected(
+    replace(source, 'dockerignore', '!deploy/\n', '!deploy/\n!deploy/**\n'),
+    /build-context allowlist/u,
+  );
 });
 
 test('rejects standalone web assembly and runtime binding drift', () => {

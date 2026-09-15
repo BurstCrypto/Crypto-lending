@@ -886,6 +886,48 @@
         ]
       }
     },
+    "/api/v1/auth/code/complete": {
+      "post": {
+        "operationId": "PasswordlessController_complete",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "authentication"
+        ]
+      }
+    },
+    "/api/v1/auth/code/request": {
+      "post": {
+        "operationId": "PasswordlessController_requestCode",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "authentication"
+        ]
+      }
+    },
+    "/api/v1/auth/code/verify": {
+      "post": {
+        "operationId": "PasswordlessController_verifyCode",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "authentication"
+        ]
+      }
+    },
     "/api/v1/auth/login": {
       "get": {
         "operationId": "AuthenticationController_login",
@@ -940,6 +982,20 @@
           }
         },
         "summary": "Revoke the current local session family",
+        "tags": [
+          "authentication"
+        ]
+      }
+    },
+    "/api/v1/auth/options": {
+      "get": {
+        "operationId": "PasswordlessController_options",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
         "tags": [
           "authentication"
         ]

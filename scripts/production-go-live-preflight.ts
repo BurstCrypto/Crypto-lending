@@ -955,7 +955,7 @@ const REVIEWED_BALANCE_CONSUMER_ARTIFACT_SHA256 = Object.freeze({
   applicationRootSource: 'fcad49388bdfddcc55b0865a4ac4220e3d27ba77a20a19537121b68bf4b5c9dd',
   localDevelopmentAppModuleSource:
     'c607a60bd2a388dce1605752ca4d858ee137e670fccee0052ec157bc02605fc2',
-  mainSource: 'b902f7f4f71fc4e6237c3baa75206a42244e93a902684a8387a167a6a180a0e9',
+  mainSource: 'b77c79155552253bc3da0e441c6e0757d020ca6dd6295e04d62861a0cf09f443',
   outboxWorkerCliSource: '238ae79dcb4f644425729d431d4ccc6679507e04dc69789d25ee3a23fbf159e0',
   redisSessionRevocationCliSource:
     'fabc12502a15b2b8771c0f4e133bcec7a9ec3c92da389b8f677c9c10f6fa769b',
@@ -973,9 +973,9 @@ const REVIEWED_BALANCE_CONSUMER_ARTIFACT_SHA256 = Object.freeze({
   sqsServiceSource: '2abb5d6592858be750263200fdd8b17a3ad15e0ee3ad5ca8fe14e36b5ac46d13',
   sqsModuleSource: 'dc958100bd372500a9428c28cc6219a4cb00db61314a63478368d0b0cf95221b',
   sqsTokensSource: REVIEWED_SQS_TOKENS_SOURCE_SHA256,
-  apiPackageSource: 'c911e7171be6ff64908d1c15fc1d240f51ace8e8b90d6bcad4c605c994439774',
+  apiPackageSource: '4f9da41e7668407f13fbcde2dbdcc79ca83941e956ae5d328887adab10d0d215',
   rootPackageSource: '143bad27b4049a2d380bc71b2351f755c480dbd6cb6a1ec24f1d51a33ee3f25c',
-  rootPackageLockSource: '1330c58badd585f8818c9df82272acb35a0aa5eed9ab1588a554ef33b0f07c01',
+  rootPackageLockSource: '90ecd049dd287d6e9be1d0dd5d53e0a6996018f6145f5cc8e08296768f581eb2',
   applicationTemplateSource: '58b040eea3858661d45ab0f1334457c0b937cfb8179bad665aa3bb649171807c',
   applicationValidatorSource: '3da9441a8d3c5de0b47b88fd0c11d489c940234702f768ea9774279f7fab3e00',
   workloadTemplateSource: '4c74c98e73635df30570dfe1e726b41cb6f62832f0bfc2e43dcd087d384b78de',
@@ -1004,7 +1004,7 @@ const REVIEWED_BALANCE_CONSUMER_ARTIFACT_SHA256 = Object.freeze({
   migrationIndexSource: '7957f7a45a3d1ff26bff668a8a84634855e526c7122df0c7b7e8ec0b0f3ffc6a',
   releaseManifestSource: 'a06a41af34ec8f52a8001572aef68a2e3ea38520318152a4953b575f877745d6',
   productionContainerValidatorSource:
-    '7bea336d67fd205ee932fbaf7e1c0c861169216e0811e859cd3e1407d130aa17',
+    'b5384c259a2fea022c7341f04bd279e4b4ab22c6f3763c28ddf485680ac62875',
 } satisfies Readonly<Record<keyof BalanceConsumerArtifactSources, string>>);
 const MAX_BALANCE_CONSUMER_ARTIFACT_BYTES = 256 * 1024;
 const MAX_BALANCE_CONSUMER_PACKAGE_LOCK_BYTES = 768 * 1024;
@@ -9647,7 +9647,7 @@ const API_RUNTIME_PINNED_INPUT_PATHS = Object.freeze([
   'tsconfig.json',
 ]);
 const REVIEWED_API_RUNTIME_REPOSITORY_SNAPSHOT_SHA256 =
-  'ba194885a41c7ad98a9c5be7256ccb9fa638c5d17704edb4656ef397ba43056d';
+  'e803c868013d4ca7f8e14bc355bdf9537d9e09a056beb8777676dd8aa209357f';
 const API_RUNTIME_OWNED_DEPLOYMENT_IDENTITY_PATHS = new Set([
   'blockchain-sync/infrastructure/rpc/ethereum-mainnet-balance-deployment-identity.verifier.ts',
   'blockchain-sync/infrastructure/rpc/ethereum-mainnet-balance-deployment.manifest.ts',
