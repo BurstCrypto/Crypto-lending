@@ -25,7 +25,14 @@ export function compileContracts(includeTests = false) {
           optimizer: { enabled: true, runs: 200 },
           evmVersion: 'cancun',
           outputSelection: {
-            '*': { '*': ['abi', 'evm.bytecode.object', 'evm.deployedBytecode.object', 'evm.deployedBytecode.immutableReferences'] },
+            '*': {
+              '*': [
+                'abi',
+                'evm.bytecode.object',
+                'evm.deployedBytecode.object',
+                'evm.deployedBytecode.immutableReferences',
+              ],
+            },
           },
         },
       }),

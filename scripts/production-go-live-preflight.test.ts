@@ -6844,14 +6844,14 @@ test('repository loader brands the bounded full API runtime absence attestation'
   assert.equal(Object.isFrozen(attestation), true);
   assert.deepEqual(attestation, {
     inspected: true,
-    sourceFileCount: 442,
-    sourceBytes: 7538187,
+    sourceFileCount: 445,
+    sourceBytes: 7575768,
     repositorySnapshotSha256: attestation?.repositorySnapshotSha256,
     concreteDeploymentIdentityRegistration: 'ABSENT',
   });
   assert.equal(
     attestation?.repositorySnapshotSha256,
-    'e803c868013d4ca7f8e14bc355bdf9537d9e09a056beb8777676dd8aa209357f',
+    '3b9881bcf4afe989dbcfa1fd22be2a0f79f80a2517a410c9f4169d28f14a87ec',
   );
 });
 
@@ -7947,7 +7947,7 @@ test('balance-consumer artifact shape, bounds, and private brand fail closed', (
   };
   const oversizedPackageLock = {
     ...BALANCE_CONSUMER_ARTIFACTS,
-    rootPackageLockSource: 'x'.repeat(768 * 1024 + 1),
+    rootPackageLockSource: 'x'.repeat(1024 * 1024 + 1),
   };
   const oversizedTotal = Object.fromEntries(
     Object.keys(BALANCE_CONSUMER_ARTIFACTS).map((key) => [key, 'x'.repeat(80 * 1024)]),

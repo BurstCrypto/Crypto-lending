@@ -10,6 +10,7 @@ export const WEB_LOG_ROUTES = Object.freeze([
   '/',
   '/account',
   '/api/health',
+  '/api/mainnet',
   '/api/version',
   '/login',
   '/register',

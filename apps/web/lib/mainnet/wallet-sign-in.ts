@@ -8,7 +8,10 @@ export interface WalletSignInInput {
   issuedAt: string;
   expirationTime: string;
 }
-export interface WalletSignInChallenge { id: string; input: WalletSignInInput }
+export interface WalletSignInChallenge {
+  id: string;
+  input: WalletSignInInput;
+}
 
 /** The SIWE / SIWS message for the fields requested by this application. */
 export function walletSignInMessage(input: WalletSignInInput, address: string) {

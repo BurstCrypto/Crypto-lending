@@ -21,14 +21,22 @@ export class MainnetTestJournal {
       CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, wallet TEXT NOT NULL, expires INTEGER NOT NULL);
     `);
   }
-  close() { this.db.close(); }
-  paused(): boolean { return this.db.prepare('SELECT paused FROM settings WHERE id=1').get()!.paused === 1; }
-  pause(value: boolean) { this.db.prepare('UPDATE settings SET paused=? WHERE id=1').run(value ? 1 : 0); }
+  close() {
+    this.db.close();
+  }
+  paused(): boolean {
+    return this.db.prepare('SELECT paused FROM settings WHERE id=1').get()!.paused === 1;
+  }
+  pause(value: boolean) {
+    this.db.prepare('UPDATE settings SET paused=? WHERE id=1').run(value ? 1 : 0);
+  }
   challenge(wallet: string, now = Date.now(), chainId = '1') {
     this.db.prepare('DELETE FROM challenges WHERE expires<=? OR wallet=?').run(now, wallet);
     const id = randomUUID();
     const message = `${MAINNET_TEST.origin} requests ownership proof for a local mainnet test.\nWallet: ${wallet}\nChain ID: ${chainId}\nNonce: ${randomBytes(32).toString('hex')}\nExpires: ${new Date(now + 120_000).toISOString()}\nThis message creates a local testing session. It does not approve token spending or authorize a transaction.`;
-    this.db.prepare('INSERT INTO challenges VALUES (?,?,?,?)').run(id, wallet, message, now + 120_000);
+    this.db
+      .prepare('INSERT INTO challenges VALUES (?,?,?,?)')
+      .run(id, wallet, message, now + 120_000);
     return { id, message, wallet };
   }
   readChallenge(id: string, now = Date.now()) {
@@ -38,21 +46,38 @@ export class MainnetTestJournal {
   session(challengeId: string, wallet: string, now = Date.now()): string {
     const token = randomBytes(32).toString('hex');
     this.atomic(() => {
-      const consumed = this.db.prepare('DELETE FROM challenges WHERE id=? AND wallet=? AND expires>?').run(challengeId, wallet, now);
-      if (consumed.changes !== 1) return fail('The ownership challenge has expired or was already used.');
+      const consumed = this.db
+        .prepare('DELETE FROM challenges WHERE id=? AND wallet=? AND expires>?')
+        .run(challengeId, wallet, now);
+      if (consumed.changes !== 1)
+        return fail('The ownership challenge has expired or was already used.');
       this.db.prepare('DELETE FROM sessions WHERE expires<=? OR wallet=?').run(now, wallet);
-      this.db.prepare('INSERT INTO sessions VALUES (?,?,?)').run(hash(token), wallet, now + SESSION_MS);
+      this.db
+        .prepare('INSERT INTO sessions VALUES (?,?,?)')
+        .run(hash(token), wallet, now + SESSION_MS);
     });
     return token;
   }
   authenticate(token: string, wallet: string, now = Date.now()): boolean {
     if (!/^[0-9a-f]{64}$/.test(token)) return false;
-    return Boolean(this.db.prepare('SELECT id FROM sessions WHERE id=? AND wallet=? AND expires>?').get(hash(token), wallet, now));
+    return Boolean(
+      this.db
+        .prepare('SELECT id FROM sessions WHERE id=? AND wallet=? AND expires>?')
+        .get(hash(token), wallet, now),
+    );
   }
-  logout(token: string) { this.db.prepare('DELETE FROM sessions WHERE id=?').run(hash(token)); }
+  logout(token: string) {
+    this.db.prepare('DELETE FROM sessions WHERE id=?').run(hash(token));
+  }
   private atomic<T>(operation: () => T): T {
     this.db.exec('BEGIN IMMEDIATE');
-    try { const result = operation(); this.db.exec('COMMIT'); return result; }
-    catch (error) { this.db.exec('ROLLBACK'); throw error; }
+    try {
+      const result = operation();
+      this.db.exec('COMMIT');
+      return result;
+    } catch (error) {
+      this.db.exec('ROLLBACK');
+      throw error;
+    }
   }
 }

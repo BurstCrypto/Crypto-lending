@@ -10,18 +10,31 @@ import {
 describe('browser no-external-egress policy', () => {
   afterEach(() => vi.unstubAllEnvs());
   it('does not forward mainnet-mode account requests to the ordinary API port', async () => {
-    vi.stubEnv('NODE_ENV', 'development'); vi.stubEnv('LOCAL_MAINNET_TEST_MODE', 'enabled');
-    vi.stubEnv('WEB_API_PROXY_MODE', 'enabled'); vi.stubEnv('WEB_API_PROXY_ORIGIN', 'http://127.0.0.1:3001');
+    vi.stubEnv('NODE_ENV', 'development');
+    vi.stubEnv('LOCAL_MAINNET_TEST_MODE', 'enabled');
+    vi.stubEnv('WEB_API_PROXY_MODE', 'enabled');
+    vi.stubEnv('WEB_API_PROXY_ORIGIN', 'http://127.0.0.1:3001');
     expect(await nextConfig.rewrites()).toEqual([]);
     vi.stubEnv('LOCAL_MAINNET_TEST_MODE', 'disabled');
-    expect(await nextConfig.rewrites()).toEqual([{ source: '/api/v1/:path*', destination: 'http://127.0.0.1:3001/api/v1/:path*' }]);
+    expect(await nextConfig.rewrites()).toEqual([
+      { source: '/api/v1/:path*', destination: 'http://127.0.0.1:3001/api/v1/:path*' },
+    ]);
   });
   it('allows the same wallet broadcast endpoint on the shared production and local workspace', async () => {
-    vi.stubEnv('LOCAL_MAINNET_TEST_MODE', 'enabled'); vi.stubEnv('NODE_ENV', 'development');
+    vi.stubEnv('LOCAL_MAINNET_TEST_MODE', 'enabled');
+    vi.stubEnv('NODE_ENV', 'development');
     const development = await nextConfig.headers();
-    expect(development.filter((entry) => entry.headers.some((h) => h.value.includes(SOLANA_BROWSER_RPC_URL))).map((entry) => entry.source)).toEqual(['/mainnet-test', '/portfolio']);
+    expect(
+      development
+        .filter((entry) => entry.headers.some((h) => h.value.includes(SOLANA_BROWSER_RPC_URL)))
+        .map((entry) => entry.source),
+    ).toEqual(['/mainnet-test', '/portfolio']);
     vi.stubEnv('NODE_ENV', 'production');
-    expect((await nextConfig.headers()).filter((entry) => entry.headers.some((h) => h.value.includes(SOLANA_BROWSER_RPC_URL))).map((entry) => entry.source)).toEqual(['/mainnet-test', '/portfolio']);
+    expect(
+      (await nextConfig.headers())
+        .filter((entry) => entry.headers.some((h) => h.value.includes(SOLANA_BROWSER_RPC_URL)))
+        .map((entry) => entry.source),
+    ).toEqual(['/mainnet-test', '/portfolio']);
     expect(JSON.stringify(await nextConfig.headers())).not.toContain('api.mainnet-beta.solana.com');
   });
   it('denies external browser resources and service calls in production', () => {

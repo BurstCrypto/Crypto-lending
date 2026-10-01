@@ -973,9 +973,9 @@ const REVIEWED_BALANCE_CONSUMER_ARTIFACT_SHA256 = Object.freeze({
   sqsServiceSource: '2abb5d6592858be750263200fdd8b17a3ad15e0ee3ad5ca8fe14e36b5ac46d13',
   sqsModuleSource: 'dc958100bd372500a9428c28cc6219a4cb00db61314a63478368d0b0cf95221b',
   sqsTokensSource: REVIEWED_SQS_TOKENS_SOURCE_SHA256,
-  apiPackageSource: '4f9da41e7668407f13fbcde2dbdcc79ca83941e956ae5d328887adab10d0d215',
-  rootPackageSource: '143bad27b4049a2d380bc71b2351f755c480dbd6cb6a1ec24f1d51a33ee3f25c',
-  rootPackageLockSource: '90ecd049dd287d6e9be1d0dd5d53e0a6996018f6145f5cc8e08296768f581eb2',
+  apiPackageSource: '3b87f2ebfde192767163023af43f0b6f0616977684c9cda530c794de0255a825',
+  rootPackageSource: 'c156dd83cd890a2033f6f01cb1e41b2973aa44273ffa632a3d37510caa8e7608',
+  rootPackageLockSource: '95d0b57ce0679a2c037fb0b8e6930a1cfb67ee0f7e200b1c781522d9e7b4b325',
   applicationTemplateSource: '58b040eea3858661d45ab0f1334457c0b937cfb8179bad665aa3bb649171807c',
   applicationValidatorSource: '3da9441a8d3c5de0b47b88fd0c11d489c940234702f768ea9774279f7fab3e00',
   workloadTemplateSource: '4c74c98e73635df30570dfe1e726b41cb6f62832f0bfc2e43dcd087d384b78de',
@@ -1004,11 +1004,11 @@ const REVIEWED_BALANCE_CONSUMER_ARTIFACT_SHA256 = Object.freeze({
   migrationIndexSource: '7957f7a45a3d1ff26bff668a8a84634855e526c7122df0c7b7e8ec0b0f3ffc6a',
   releaseManifestSource: 'de21eaf35f60691ec9a2fa9127d8caddfc608cbcdc69776002efb3da730e5bc0',
   productionContainerValidatorSource:
-    'b5384c259a2fea022c7341f04bd279e4b4ab22c6f3763c28ddf485680ac62875',
+    '0e8b6c75f8b435390d71a10d04e27183a1f2ba3fc9ea529b85315c7f09446558',
 } satisfies Readonly<Record<keyof BalanceConsumerArtifactSources, string>>);
 const MAX_BALANCE_CONSUMER_ARTIFACT_BYTES = 256 * 1024;
-const MAX_BALANCE_CONSUMER_PACKAGE_LOCK_BYTES = 768 * 1024;
-const MAX_BALANCE_CONSUMER_TOTAL_BYTES = 2176 * 1024;
+const MAX_BALANCE_CONSUMER_PACKAGE_LOCK_BYTES = 1024 * 1024;
+const MAX_BALANCE_CONSUMER_TOTAL_BYTES = 2432 * 1024;
 const NON_PRODUCTION_ENVIRONMENT_ALLOWED_PATTERN = "'^(dev|test|qa|sandbox|staging)(-[a-z0-9]+)*$'";
 const PRODUCTION_AWARE_ENVIRONMENT_PATTERN_SOURCE =
   '/^(?:dev|test|qa|sandbox|staging|production)(?:-[a-z0-9]+)*$/u';
@@ -9647,7 +9647,7 @@ const API_RUNTIME_PINNED_INPUT_PATHS = Object.freeze([
   'tsconfig.json',
 ]);
 const REVIEWED_API_RUNTIME_REPOSITORY_SNAPSHOT_SHA256 =
-  'e803c868013d4ca7f8e14bc355bdf9537d9e09a056beb8777676dd8aa209357f';
+  '3b9881bcf4afe989dbcfa1fd22be2a0f79f80a2517a410c9f4169d28f14a87ec';
 const API_RUNTIME_OWNED_DEPLOYMENT_IDENTITY_PATHS = new Set([
   'blockchain-sync/infrastructure/rpc/ethereum-mainnet-balance-deployment-identity.verifier.ts',
   'blockchain-sync/infrastructure/rpc/ethereum-mainnet-balance-deployment.manifest.ts',

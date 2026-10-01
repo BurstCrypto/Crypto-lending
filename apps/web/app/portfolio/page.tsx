@@ -35,7 +35,8 @@ export default function PortfolioPage() {
             Your supported balances, in one clear view.
           </h1>
           <p className="portfolio-introduction__description">
-            Connect your wallet, choose how much USDC to lend, and let Smart Lending select the destination. Manage your deposits and withdrawals here.
+            Connect your wallet, choose how much USDC to lend, and let Smart Lending select the
+            destination. Manage your deposits and withdrawals here.
           </p>
         </div>
       </section>

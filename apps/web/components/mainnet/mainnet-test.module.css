@@ -1,6 +1,16 @@
-.page { padding-bottom: 2rem; color: var(--ink); overflow-wrap: anywhere; }
-.page h2 { margin: 0 0 0.75rem; font-size: clamp(1.35rem, 3vw, 1.8rem); letter-spacing: -0.035em; }
-.page p { line-height: 1.65; }
+.page {
+  padding-bottom: 2rem;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+.page h2 {
+  margin: 0 0 0.75rem;
+  font-size: clamp(1.35rem, 3vw, 1.8rem);
+  letter-spacing: -0.035em;
+}
+.page p {
+  line-height: 1.65;
+}
 .card {
   margin: 1.5rem 0;
   padding: clamp(1.25rem, 3vw, 2rem);
@@ -9,9 +19,17 @@
   border-radius: var(--radius-large);
   box-shadow: var(--shadow-soft);
 }
-.card > p:not(:global(.eyebrow)) { color: var(--ink-soft); }
-.page label { display: block; margin: 1rem 0; font-size: 0.875rem; font-weight: 650; }
-.page input, .page select {
+.card > p:not(:global(.eyebrow)) {
+  color: var(--ink-soft);
+}
+.page label {
+  display: block;
+  margin: 1rem 0;
+  font-size: 0.875rem;
+  font-weight: 650;
+}
+.page input,
+.page select {
   display: block;
   width: 100%;
   min-height: var(--control-height);
@@ -33,46 +51,186 @@
   font-size: 0.875rem;
   font-weight: 750;
 }
-.page button:hover:not(:disabled) { background: var(--evergreen-strong); }
-.page button:disabled { opacity: 0.45; cursor: not-allowed; }
-.page button:focus-visible, .page input:focus-visible, .page select:focus-visible, .page summary:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 3px; }
-.page a:not(:global(.navigation-button)) { color: var(--evergreen); text-underline-offset: 0.2em; }
-.row { display: flex; gap: 0.75rem; flex-wrap: wrap; align-items: end; }
-.row label { flex: 1; min-width: min(100%, 14rem); }
-.page dl { display: grid; grid-template-columns: 11rem minmax(0, 1fr); gap: 0.6rem 1rem; font-size: 0.875rem; }
-.page dt { color: var(--ink-soft); }
-.page dd { margin: 0; }
-.muted { color: var(--ink-soft); font-size: 0.875rem; }
-.error, .notice { padding: 1rem; border-radius: var(--radius-medium); margin: 1.25rem 0; }
-.error { border: 1px solid var(--danger-line); background: var(--danger-surface); color: var(--danger); }
-.notice { border: 1px solid var(--success-line); background: var(--success-surface); color: var(--success); }
-.page .check { display: flex; align-items: center; gap: 0.65rem; }
-.page .check input { width: auto; min-height: auto; margin: 0; }
-.page pre { white-space: pre-wrap; font-size: 0.75rem; max-height: 300px; overflow: auto; }
-.page summary { margin: 1rem 0; color: var(--ink-soft); font-size: 0.875rem; }
-.hash, .address { font-family: ui-monospace, monospace; overflow-wrap: anywhere; }
-.balances { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; margin: 1.5rem 0; }
-.balances p { margin-block: 0.5rem; }
-.overview { display: flex; gap: 2rem; align-items: center; justify-content: space-between; padding: 1rem 0; }
-.overview > p { max-width: 26rem; }
-.markets { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; align-items: start; }
-.markets > article { scroll-margin-top: 1.5rem; }
-.markets h3 { margin: 0; font-size: 1.5rem; }
-.lendingReview { border-top: 1px solid var(--line); margin-top: 1.5rem; padding-top: 1rem; }
-.lendingReview h4 { font-size: 1.1rem; margin-block: 0.5rem; }
-.bridgeSection { margin-top: 2rem; border-top: 1px solid var(--line); }
-.tableScroll { overflow-x: auto; }
-.providerTable { width: 100%; border-collapse: collapse; text-align: left; font-size: 0.875rem; }
-.providerTable th, .providerTable td { padding: 0.85rem 0.75rem; border-bottom: 1px solid var(--line); vertical-align: top; }
-.providerTable thead th { color: var(--ink-soft); font-weight: 650; }
-.providerTable tbody th { font-weight: 650; }
-.tableNote { display: block; margin-top: 0.25rem; color: var(--ink-soft); font-size: 0.8rem; }
-.depositList { padding-left: 1.25rem; }
-.depositList li { margin-block: 0.75rem; line-height: 1.65; }
+.page button:hover:not(:disabled) {
+  background: var(--evergreen-strong);
+}
+.page button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.page button:focus-visible,
+.page input:focus-visible,
+.page select:focus-visible,
+.page summary:focus-visible {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 3px;
+}
+.page a:not(:global(.navigation-button)) {
+  color: var(--evergreen);
+  text-underline-offset: 0.2em;
+}
+.row {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  align-items: end;
+}
+.row label {
+  flex: 1;
+  min-width: min(100%, 14rem);
+}
+.page dl {
+  display: grid;
+  grid-template-columns: 11rem minmax(0, 1fr);
+  gap: 0.6rem 1rem;
+  font-size: 0.875rem;
+}
+.page dt {
+  color: var(--ink-soft);
+}
+.page dd {
+  margin: 0;
+}
+.muted {
+  color: var(--ink-soft);
+  font-size: 0.875rem;
+}
+.error,
+.notice {
+  padding: 1rem;
+  border-radius: var(--radius-medium);
+  margin: 1.25rem 0;
+}
+.error {
+  border: 1px solid var(--danger-line);
+  background: var(--danger-surface);
+  color: var(--danger);
+}
+.notice {
+  border: 1px solid var(--success-line);
+  background: var(--success-surface);
+  color: var(--success);
+}
+.page .check {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+}
+.page .check input {
+  width: auto;
+  min-height: auto;
+  margin: 0;
+}
+.page pre {
+  white-space: pre-wrap;
+  font-size: 0.75rem;
+  max-height: 300px;
+  overflow: auto;
+}
+.page summary {
+  margin: 1rem 0;
+  color: var(--ink-soft);
+  font-size: 0.875rem;
+}
+.hash,
+.address {
+  font-family: ui-monospace, monospace;
+  overflow-wrap: anywhere;
+}
+.balances {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  margin: 1.5rem 0;
+}
+.balances p {
+  margin-block: 0.5rem;
+}
+.overview {
+  display: flex;
+  gap: 2rem;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem 0;
+}
+.overview > p {
+  max-width: 26rem;
+}
+.markets {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  align-items: start;
+}
+.markets > article {
+  scroll-margin-top: 1.5rem;
+}
+.markets h3 {
+  margin: 0;
+  font-size: 1.5rem;
+}
+.lendingReview {
+  border-top: 1px solid var(--line);
+  margin-top: 1.5rem;
+  padding-top: 1rem;
+}
+.lendingReview h4 {
+  font-size: 1.1rem;
+  margin-block: 0.5rem;
+}
+.bridgeSection {
+  margin-top: 2rem;
+  border-top: 1px solid var(--line);
+}
+.tableScroll {
+  overflow-x: auto;
+}
+.providerTable {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+  font-size: 0.875rem;
+}
+.providerTable th,
+.providerTable td {
+  padding: 0.85rem 0.75rem;
+  border-bottom: 1px solid var(--line);
+  vertical-align: top;
+}
+.providerTable thead th {
+  color: var(--ink-soft);
+  font-weight: 650;
+}
+.providerTable tbody th {
+  font-weight: 650;
+}
+.tableNote {
+  display: block;
+  margin-top: 0.25rem;
+  color: var(--ink-soft);
+  font-size: 0.8rem;
+}
+.depositList {
+  padding-left: 1.25rem;
+}
+.depositList li {
+  margin-block: 0.75rem;
+  line-height: 1.65;
+}
 @media (max-width: 640px) {
-  .page dl { grid-template-columns: minmax(0, 1fr); }
-  .page dd { margin-bottom: 0.5rem; }
-  .balances { grid-template-columns: minmax(0, 1fr); }
-  .markets { grid-template-columns: minmax(0, 1fr); }
-  .overview { display: block; }
+  .page dl {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .page dd {
+    margin-bottom: 0.5rem;
+  }
+  .balances {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .markets {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .overview {
+    display: block;
+  }
 }

@@ -28,7 +28,7 @@ update an already deployed website.
 
 ## Prerequisites
 
-- Node.js 22.13 or newer on the Node 22 line, or Node.js 24+
+- Node.js 24.15 or newer on the Node 24 line, or Node.js 26+
 - npm 11.6.4
 - Docker with Docker Compose
 

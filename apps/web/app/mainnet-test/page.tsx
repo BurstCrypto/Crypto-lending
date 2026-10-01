@@ -9,6 +9,10 @@ export const metadata = { title: 'Local mainnet test', robots: { index: false, f
 
 export default async function MainnetTestPage() {
   const config = localMainnetConfig();
-  if (!config || !isLocalMainnetRequest({ url: MAINNET_TEST.origin, headers: await headers() }, false)) notFound();
+  if (
+    !config ||
+    !isLocalMainnetRequest({ url: MAINNET_TEST.origin, headers: await headers() }, false)
+  )
+    notFound();
   redirect('/portfolio');
 }

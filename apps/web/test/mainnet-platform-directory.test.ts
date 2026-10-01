@@ -17,7 +17,9 @@ function providers(response: Record<string, unknown>): Array<Record<string, unkn
 
 describe('mainnet platform directory response contract', () => {
   it('uses the production planning directory in the local workspace without advertising live data', () => {
-    expect(parseMainnetPlatformDirectory(mainnetPlatformPlanningDirectory())).toEqual(parseMainnetPlatformDirectory(MAINNET_PLATFORM_DIRECTORY_RESPONSE));
+    expect(parseMainnetPlatformDirectory(mainnetPlatformPlanningDirectory())).toEqual(
+      parseMainnetPlatformDirectory(MAINNET_PLATFORM_DIRECTORY_RESPONSE),
+    );
   });
   it('accepts ten Ethereum and Solana read-only candidates and returns an immutable copy', () => {
     const parsed = parseMainnetPlatformDirectory(MAINNET_PLATFORM_DIRECTORY_RESPONSE);

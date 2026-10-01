@@ -431,12 +431,12 @@ test('rejects an API Solana SDK, unpinned web SDK, or missing mainnet built-runt
       source,
       'apiPackage',
       '"dependencies": {',
-      '"dependencies": {\n    "@solana/web3.js": "1.98.4",',
+      '"dependencies": {\n    "@solana/web3.js": "1.99.0",',
     ),
     /outside the production API dependency graph/u,
   );
   assertRejected(
-    replace(source, 'webPackage', '"@solana/web3.js": "1.98.4"', '"@solana/web3.js": "^1.98.4"'),
+    replace(source, 'webPackage', '"@solana/web3.js": "1.99.0"', '"@solana/web3.js": "^1.99.0"'),
     /pin the reviewed wallet and lending SDK versions/u,
   );
   assertRejected(
@@ -612,7 +612,12 @@ test('rejects build-context allowlist weakening or accidental source omission', 
 test('rejects standalone web assembly and runtime binding drift', () => {
   const source = loadSources();
   assertRejected(
-    replace(source, 'webDockerfile', 'RUN ["node", "infra/containers/assemble-mainnet-web.mjs", "apps/web/.next/standalone"]', 'RUN ["node", "--version"]'),
+    replace(
+      source,
+      'webDockerfile',
+      'RUN ["node", "infra/containers/assemble-mainnet-web.mjs", "apps/web/.next/standalone"]',
+      'RUN ["node", "--version"]',
+    ),
     /materialize the traced mainnet provider aliases/u,
   );
   assertRejected(

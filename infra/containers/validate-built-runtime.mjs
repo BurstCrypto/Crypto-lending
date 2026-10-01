@@ -34,7 +34,7 @@ const FORBIDDEN_WEB_MARKERS = Object.freeze([
 // The mainnet web entry owns unsigned provider preparation. The reporting-only
 // web profile and API profiles retain their existing dependency prohibitions.
 const MAINNET_WEB_PACKAGES = Object.freeze({
-  '@solana/web3.js': '1.98.4',
+  '@solana/web3.js': '1.99.0',
   '@0dotxyz/p0-ts-sdk': '2.8.3',
   '@jup-ag/lend': '0.3.0-beta.1',
   '@solendprotocol/solend-sdk': '0.14.27',
@@ -505,7 +505,9 @@ function validateCanonicalWebManifest(bytes) {
 function validateBuiltWebRuntimeInternal(standaloneRootInput, options = {}) {
   if (process.env.NODE_ENV !== 'production') invalid(ERRORS.webMode);
   const mainnet = options.mainnet === true;
-  const packagePaths = Object.keys(MAINNET_WEB_PACKAGES).map((name) => `node_modules/${name}/package.json`);
+  const packagePaths = Object.keys(MAINNET_WEB_PACKAGES).map(
+    (name) => `node_modules/${name}/package.json`,
+  );
   const snapshot = scanRuntimeTree(standaloneRootInput, {
     afterFirstRead: options.afterFirstRead,
     capturePaths: new Set([WEB_MANIFEST_PATH, ...(mainnet ? packagePaths : [])]),
@@ -528,10 +530,16 @@ function validateBuiltWebRuntimeInternal(standaloneRootInput, options = {}) {
       const bytes = snapshot.capturedFiles.get(`node_modules/${name}/package.json`);
       if (!bytes) invalid('Missing mainnet provider dependency: ' + name);
       const manifest = JSON.parse(bytes.toString('utf8'));
-      if (manifest.name !== name || manifest.version !== version) invalid('Unexpected mainnet provider dependency version: ' + name);
+      if (manifest.name !== name || manifest.version !== version)
+        invalid('Unexpected mainnet provider dependency version: ' + name);
     }
-    for (const name of ['BonsaiCctpSourceRouter', 'BonsaiAaveSupplyRouter', 'BonsaiLendingRouter']) {
-      if (!snapshot.files.has(`onchain/build/${name}.json`)) invalid('Missing compiled mainnet router: ' + name);
+    for (const name of [
+      'BonsaiCctpSourceRouter',
+      'BonsaiAaveSupplyRouter',
+      'BonsaiLendingRouter',
+    ]) {
+      if (!snapshot.files.has(`onchain/build/${name}.json`))
+        invalid('Missing compiled mainnet router: ' + name);
     }
   }
   return Object.freeze({
@@ -551,7 +559,9 @@ export function validateBuiltWebRuntime(standaloneRootInput) {
   return withSanitizedFailure(() => validateBuiltWebRuntimeInternal(standaloneRootInput));
 }
 export function validateBuiltMainnetWebRuntime(standaloneRootInput) {
-  return withSanitizedFailure(() => validateBuiltWebRuntimeInternal(standaloneRootInput, { mainnet: true }));
+  return withSanitizedFailure(() =>
+    validateBuiltWebRuntimeInternal(standaloneRootInput, { mainnet: true }),
+  );
 }
 
 /** Test-only fault and bound seam; production callers always use the fixed limits above. */
@@ -566,7 +576,12 @@ function main() {
       'Usage: node validate-built-runtime.mjs <api|web|web-mainnet> <runtime-root>',
     );
   }
-  const report = mode === 'api' ? validateBuiltApiRuntime(root) : mode === 'web-mainnet' ? validateBuiltMainnetWebRuntime(root) : validateBuiltWebRuntime(root);
+  const report =
+    mode === 'api'
+      ? validateBuiltApiRuntime(root)
+      : mode === 'web-mainnet'
+        ? validateBuiltMainnetWebRuntime(root)
+        : validateBuiltWebRuntime(root);
   process.stdout.write(JSON.stringify(report) + '\n');
 }
 

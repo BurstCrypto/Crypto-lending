@@ -11,8 +11,17 @@ const APP_ROOT = resolve(WEB_ROOT, 'app');
 // Only the gated local mainnet host may reach these server preparation modules.
 // Continue traversing them so retired imports cannot hide behind this boundary.
 const LOCAL_MAINNET_EXTERNAL_MODULES = new Set([
-  ...['source-plan', 'ethereum-source', 'solana-source', 'cctp-mint', 'destination-lending', 'solana-destination-verification', 'circle-client', 'plan-storage', 'lending-fee']
-    .map((name) => resolve(WEB_ROOT, '../../onchain/src', `${name}.ts`)),
+  ...[
+    'source-plan',
+    'ethereum-source',
+    'solana-source',
+    'cctp-mint',
+    'destination-lending',
+    'solana-destination-verification',
+    'circle-client',
+    'plan-storage',
+    'lending-fee',
+  ].map((name) => resolve(WEB_ROOT, '../../onchain/src', `${name}.ts`)),
   resolve(WEB_ROOT, '../api/src/routing-fees/domain/routing-fee.ts'),
   resolve(WEB_ROOT, '../api/src/smart-lending/domain/fee-aware-return.ts'),
 ]);
@@ -165,8 +174,12 @@ function existingFile(path: string): boolean {
 function resolveLocalModule(importer: string, specifier: string): string | null {
   if (!isLocalSpecifier(specifier) || isIgnoredAsset(specifier)) return null;
   // Compiled public bytecode binds the browser's deployment review; it is data, not an executable module.
-  if (specifier === '../../../../onchain/build/BonsaiLendingRouter.json' && relativeWebPath(importer) === 'lib/mainnet/bridge-client.ts') {
-    if (!existsSync(resolve(dirname(importer), specifier))) throw new Error('Compile the lending router before building the web app.');
+  if (
+    specifier === '../../../../onchain/build/BonsaiLendingRouter.json' &&
+    relativeWebPath(importer) === 'lib/mainnet/bridge-client.ts'
+  ) {
+    if (!existsSync(resolve(dirname(importer), specifier)))
+      throw new Error('Compile the lending router before building the web app.');
     return null;
   }
 
@@ -174,7 +187,11 @@ function resolveLocalModule(importer: string, specifier: string): string | null 
   const base = specifier.startsWith('@/')
     ? resolve(WEB_ROOT, cleanSpecifier.slice(2))
     : resolve(dirname(importer), cleanSpecifier);
-  if (!isWithinWebRoot(base) && !LOCAL_MAINNET_EXTERNAL_MODULES.has(base) && !LOCAL_MAINNET_EXTERNAL_MODULES.has(`${base}.ts`)) {
+  if (
+    !isWithinWebRoot(base) &&
+    !LOCAL_MAINNET_EXTERNAL_MODULES.has(base) &&
+    !LOCAL_MAINNET_EXTERNAL_MODULES.has(`${base}.ts`)
+  ) {
     throw new Error(
       `Production import escapes the web root: ${relativeWebPath(importer)} -> ${specifier}`,
     );
@@ -283,22 +300,51 @@ function importChain(entry: string, graph: ImportGraph, target: string): readonl
 
 describe('production import graph', () => {
   it('shares the workspace while confining transaction engines to the authenticated mainnet API', () => {
-    const workspaceEntries = new Set(['app/page.tsx', 'app/account/page.tsx', 'app/portfolio/page.tsx']);
+    const workspaceEntries = new Set([
+      'app/page.tsx',
+      'app/account/page.tsx',
+      'app/portfolio/page.tsx',
+    ]);
     const workspaceModules = new Set([
-      'lib/local-mainnet/config.server.ts', 'lib/mainnet/policy.ts', 'lib/mainnet/bridge-types.ts',
-      'lib/local-mainnet/page-context.server.ts', 'lib/local-mainnet/bridge-config.server.ts',
-      'lib/mainnet/solana-address.ts', 'lib/mainnet/bridge-client.ts',
-      'components/local-mainnet/workspace.tsx', 'components/mainnet/mainnet-test.tsx', 'components/mainnet/lending.tsx',
+      'lib/local-mainnet/config.server.ts',
+      'lib/mainnet/policy.ts',
+      'lib/mainnet/bridge-types.ts',
+      'lib/local-mainnet/page-context.server.ts',
+      'lib/local-mainnet/bridge-config.server.ts',
+      'lib/mainnet/solana-address.ts',
+      'lib/mainnet/bridge-client.ts',
+      'components/local-mainnet/workspace.tsx',
+      'components/mainnet/mainnet-test.tsx',
+      'components/mainnet/lending.tsx',
     ]);
     for (const entry of productionEntries()) {
-      if (['app/api/local-mainnet/route.ts', 'app/api/mainnet/route.ts', 'app/mainnet-test/page.tsx'].includes(relativeWebPath(entry))) continue;
+      if (
+        [
+          'app/api/local-mainnet/route.ts',
+          'app/api/mainnet/route.ts',
+          'app/mainnet-test/page.tsx',
+        ].includes(relativeWebPath(entry))
+      )
+        continue;
       const modules = [...buildImportGraph(entry).modules];
-      const localModules = modules.filter((path) => relativeWebPath(path).includes('/local-mainnet/'));
+      const localModules = modules.filter((path) =>
+        relativeWebPath(path).includes('/local-mainnet/'),
+      );
       // The fee arithmetic has no server imports and is shared with wallet-side validation.
-      expect(modules.filter((path) => LOCAL_MAINNET_EXTERNAL_MODULES.has(path) && path !== resolve(WEB_ROOT, '../../onchain/src/lending-fee.ts')), relativeWebPath(entry)).toEqual([]);
+      expect(
+        modules.filter(
+          (path) =>
+            LOCAL_MAINNET_EXTERNAL_MODULES.has(path) &&
+            path !== resolve(WEB_ROOT, '../../onchain/src/lending-fee.ts'),
+        ),
+        relativeWebPath(entry),
+      ).toEqual([]);
       if (workspaceEntries.has(relativeWebPath(entry))) {
         expect(moduleSpecifiers(entry)).toContain('@/lib/local-mainnet/config.server');
-        expect(localModules.filter((path) => !workspaceModules.has(relativeWebPath(path))), relativeWebPath(entry)).toEqual([]);
+        expect(
+          localModules.filter((path) => !workspaceModules.has(relativeWebPath(path))),
+          relativeWebPath(entry),
+        ).toEqual([]);
       } else expect(localModules, relativeWebPath(entry)).toEqual([]);
     }
   });

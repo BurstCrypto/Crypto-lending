@@ -5,7 +5,11 @@ import { isLocalMainnetRequest, localMainnetConfig } from './config.server';
 
 export async function localMainnetPageContext() {
   const config = localMainnetConfig();
-  if (!config || !isLocalMainnetRequest({ url: config.origin, headers: await headers() }, false)) notFound();
+  if (!config || !isLocalMainnetRequest({ url: config.origin, headers: await headers() }, false))
+    notFound();
   const { readTreasurySetup } = await import('./bridge-config.server');
-  return { setupToken: process.env.LOCAL_MAINNET_TEST_LAUNCH_TOKEN!, treasuries: readTreasurySetup() };
+  return {
+    setupToken: process.env.LOCAL_MAINNET_TEST_LAUNCH_TOKEN!,
+    treasuries: readTreasurySetup(),
+  };
 }

@@ -113,7 +113,7 @@ test('binds reviewed fixture exceptions to every exact redacted finding field', 
     { ...exact, scope: 'repository' },
   ];
 
-  assert.equal(reviewed.size, 49);
+  assert.equal(reviewed.size, 56);
   assert.deepEqual(
     filterReviewedFalsePositiveFindings([exact, ...nearMisses], reviewed),
     nearMisses,
@@ -123,10 +123,32 @@ test('binds reviewed fixture exceptions to every exact redacted finding field', 
 test('fails closed when the reviewed fixture ledger bytes drift', () => {
   const reviewedBytes = readFileSync(falsePositiveLedgerPath);
 
-  assert.equal(parseReviewedFalsePositiveLedger(reviewedBytes).size, 49);
+  assert.equal(parseReviewedFalsePositiveLedger(reviewedBytes).size, 56);
   assert.throws(
     () => parseReviewedFalsePositiveLedger(Buffer.concat([reviewedBytes, Buffer.from('\n')])),
     /Reviewed false-positive ledger is invalid/u,
+  );
+});
+
+test('limits historical synthetic AWS fixture exceptions to their exact reviewed history', () => {
+  const reviewed = parseReviewedFalsePositiveLedger(readFileSync(falsePositiveLedgerPath));
+  const historicalFixture = {
+    blob: '9db1b0917529350c7cff1428b8cc0c4c03300990',
+    fingerprint: '475ce427f7875eb6',
+    line: 626,
+    path: 'infra/rehearsal/validate-nonproduction-rehearsal-record.test.mjs',
+    rule: 'provider.aws-access-key-id',
+    scope: 'history',
+  };
+  const findings = [
+    { ...historicalFixture, scope: 'index' },
+    { ...historicalFixture, line: historicalFixture.line + 1 },
+    { ...historicalFixture, fingerprint: '0000000000000000' },
+    { ...historicalFixture, path: 'copied-fixture.test.mjs' },
+  ];
+  assert.deepEqual(
+    filterReviewedFalsePositiveFindings([historicalFixture, ...findings], reviewed),
+    findings,
   );
 });
 
@@ -360,6 +382,7 @@ test('binds production public identifiers to their exact reviewed assignment nam
     'arn:aws:secretsmanager:us-west-2:111122223333:secret:crypto-lending/test/auth-wallet-keys-AbCdEf';
   const redisSecretArnIdentifier =
     'arn:aws:secretsmanager:us-west-2:111122223333:secret:crypto-lending/test/redis-operator-AbCdEf';
+  const collateralTokenIdentifier = ['0xcbB7C0000aB88B473b1f5aFd9', 'ef808440eed33Bf'].join('');
   try {
     write(
       repository,
@@ -367,6 +390,7 @@ test('binds production public identifiers to their exact reviewed assignment nam
       [
         'const identifiers = {',
         `  TOKEN_PROGRAM: '${solanaProgramIdentifier}',`,
+        `  TOKEN: '${solanaProgramIdentifier}',`,
         `  legacyTokenProgramAddress: '${solanaProgramIdentifier}',`,
         `  TOKEN_ACCOUNT: '${solanaAccountIdentifier}',`,
         `  usdcTokenReserveAddress: '${reserveIdentifier}',`,
@@ -375,6 +399,7 @@ test('binds production public identifiers to their exact reviewed assignment nam
         `  spTokenImplementation: '${sparkImplementationIdentifier}',`,
         `  AuthWalletKeysSecretArn: '${secretArnIdentifier}',`,
         `  redisOperatorSecretArn: '${redisSecretArnIdentifier}',`,
+        `  collateralToken: ${collateralTokenIdentifier},`,
         `  API_TOKEN: '${solanaProgramIdentifier}',`,
         `  tokenAccountCopy: '${solanaAccountIdentifier}',`,
         `  reserveTokenAddress: '${reserveIdentifier}',`,
@@ -383,6 +408,7 @@ test('binds production public identifiers to their exact reviewed assignment nam
         `  spTokenImplementationCopy: '${sparkImplementationIdentifier}',`,
         `  OtherSecretArn: '${secretArnIdentifier}',`,
         `  OtherRedisSecretArn: '${redisSecretArnIdentifier}',`,
+        `  API_TOKEN: '${collateralTokenIdentifier}',`,
         '};',
         '',
       ].join('\n'),
@@ -397,7 +423,7 @@ test('binds production public identifiers to their exact reviewed assignment nam
         .trim()
         .split('\n')
         .filter((line) => line.startsWith('rule=assignment.high-entropy-secret\t')).length,
-      8,
+      9,
     );
     assertRedacted(
       result,
@@ -409,7 +435,45 @@ test('binds production public identifiers to their exact reviewed assignment nam
       sparkImplementationIdentifier,
       secretArnIdentifier,
       redisSecretArnIdentifier,
+      collateralTokenIdentifier,
     );
+  } finally {
+    rmSync(repository, { force: true, recursive: true });
+  }
+});
+
+test('allows public Git SSH userinfo while rejecting passwords and other users', () => {
+  const repository = createRepository();
+  try {
+    write(
+      repository,
+      'fixture-urls.txt',
+      ['git+ssh://git@github.com/Irys-xyz/avsc.git', ''].join('\n'),
+    );
+    runGit(repository, 'add', 'fixture-urls.txt');
+    const allowed = runScanner(repository);
+    assert.equal(allowed.status, 0, allowed.stdout);
+
+    write(
+      repository,
+      'unreviewed-urls.txt',
+      [
+        ['git+ssh://git:', 'unreviewed-password@github.com/Irys-xyz/avsc.git'].join(''),
+        ['git+ssh://', 'unreviewed@github.com/Irys-xyz/avsc.git'].join(''),
+        ['git+ssh://git@', 'unreviewed.example/Irys-xyz/avsc.git'].join(''),
+        '',
+      ].join('\n'),
+    );
+    runGit(repository, 'add', 'unreviewed-urls.txt');
+    const rejected = runScanner(repository);
+    assertFinding(rejected, 'url.embedded-credentials', 'index');
+    assert.equal(
+      rejected.stdout
+        .split('\n')
+        .filter((line) => line.startsWith('rule=url.embedded-credentials\t')).length,
+      3,
+    );
+    assertRedacted(rejected, 'unreviewed-password');
   } finally {
     rmSync(repository, { force: true, recursive: true });
   }

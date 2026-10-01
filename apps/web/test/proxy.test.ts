@@ -44,50 +44,89 @@ describe('web request proxy', () => {
     ]);
   });
   it('gates the local mainnet page before streaming even with a launch token in production', () => {
-    vi.stubEnv('LOCAL_MAINNET_TEST_MODE', 'enabled'); vi.stubEnv('LOCAL_MAINNET_TEST_LAUNCH_TOKEN', 'a'.repeat(64));
-    const request = new NextRequest('http://127.0.0.1:3000/mainnet-test', { headers: { host: '127.0.0.1:3000' } });
-    vi.stubEnv('NODE_ENV', 'production'); expect(proxy(request).status).toBe(404);
-    vi.stubEnv('NODE_ENV', 'development'); expect(proxy(request).headers.get('x-middleware-next')).toBe('1');
-    expect(proxy(new NextRequest('http://localhost:3000/mainnet-test', { headers: { host: 'localhost:3000' } })).status).toBe(404);
-  });
-
-  it.each(['/', '/portfolio', '/platforms', '/account'])('opens the local wallet workspace without an account cookie: %s', (path) => {
-    vi.stubEnv('NODE_ENV', 'development');
     vi.stubEnv('LOCAL_MAINNET_TEST_MODE', 'enabled');
     vi.stubEnv('LOCAL_MAINNET_TEST_LAUNCH_TOKEN', 'a'.repeat(64));
-    const response = proxy(new NextRequest(`http://127.0.0.1:3000${path}`, { headers: { host: '127.0.0.1:3000' } }));
-    expect(response.headers.get('x-middleware-next')).toBe('1');
-    expect(response.headers.has('location')).toBe(false);
-    expectAccountPrivacyHeaders(response);
-  });
-
-  it.each(['/login', '/register'])('sends local authentication links straight to the wallet workspace: %s', (path) => {
+    const request = new NextRequest('http://127.0.0.1:3000/mainnet-test', {
+      headers: { host: '127.0.0.1:3000' },
+    });
+    vi.stubEnv('NODE_ENV', 'production');
+    expect(proxy(request).status).toBe(404);
     vi.stubEnv('NODE_ENV', 'development');
-    vi.stubEnv('LOCAL_MAINNET_TEST_MODE', 'enabled');
-    vi.stubEnv('LOCAL_MAINNET_TEST_LAUNCH_TOKEN', 'a'.repeat(64));
-    const response = proxy(new NextRequest(`http://127.0.0.1:3000${path}`, { headers: { host: '127.0.0.1:3000' } }));
-    expect(response.headers.get('location')).toBe('http://127.0.0.1:3000/portfolio');
+    expect(proxy(request).headers.get('x-middleware-next')).toBe('1');
+    expect(
+      proxy(
+        new NextRequest('http://localhost:3000/mainnet-test', {
+          headers: { host: 'localhost:3000' },
+        }),
+      ).status,
+    ).toBe(404);
   });
 
-  it.each(['/', '/portfolio', '/platforms', '/account'])('rejects nonlocal hosts and forwarded clients in wallet mode: %s', (path) => {
-    vi.stubEnv('NODE_ENV', 'development');
-    vi.stubEnv('LOCAL_MAINNET_TEST_MODE', 'enabled');
-    vi.stubEnv('LOCAL_MAINNET_TEST_LAUNCH_TOKEN', 'a'.repeat(64));
-    expect(proxy(accountRequest(path)).status).toBe(404);
-    expect(proxy(new NextRequest(`http://127.0.0.1:3000${path}`, { headers: { host: '127.0.0.1:3000', 'x-forwarded-for': '203.0.113.4' } })).status).toBe(404);
-  });
+  it.each(['/', '/portfolio', '/platforms', '/account'])(
+    'opens the local wallet workspace without an account cookie: %s',
+    (path) => {
+      vi.stubEnv('NODE_ENV', 'development');
+      vi.stubEnv('LOCAL_MAINNET_TEST_MODE', 'enabled');
+      vi.stubEnv('LOCAL_MAINNET_TEST_LAUNCH_TOKEN', 'a'.repeat(64));
+      const response = proxy(
+        new NextRequest(`http://127.0.0.1:3000${path}`, { headers: { host: '127.0.0.1:3000' } }),
+      );
+      expect(response.headers.get('x-middleware-next')).toBe('1');
+      expect(response.headers.has('location')).toBe(false);
+      expectAccountPrivacyHeaders(response);
+    },
+  );
 
-  it.each(['production', 'deployment', 'missing-token', 'ordinary-development'])('keeps account protection outside the local launcher: %s', (mode) => {
-    vi.stubEnv('NODE_ENV', mode === 'production' ? 'production' : 'development');
-    vi.stubEnv('LOCAL_MAINNET_TEST_MODE', mode === 'ordinary-development' ? undefined : 'enabled');
-    vi.stubEnv('LOCAL_MAINNET_TEST_LAUNCH_TOKEN', mode === 'missing-token' ? undefined : 'a'.repeat(64));
-    vi.stubEnv('DEPLOYMENT_TARGET', mode === 'deployment' ? 'railway' : undefined);
-    for (const path of ['/portfolio', '/platforms', '/account']) {
-      const response = proxy(accountRequest(path));
-      expect(response.status).toBe(307);
-      expect(new URL(response.headers.get('location')!).pathname).toBe('/login');
-    }
-  });
+  it.each(['/login', '/register'])(
+    'sends local authentication links straight to the wallet workspace: %s',
+    (path) => {
+      vi.stubEnv('NODE_ENV', 'development');
+      vi.stubEnv('LOCAL_MAINNET_TEST_MODE', 'enabled');
+      vi.stubEnv('LOCAL_MAINNET_TEST_LAUNCH_TOKEN', 'a'.repeat(64));
+      const response = proxy(
+        new NextRequest(`http://127.0.0.1:3000${path}`, { headers: { host: '127.0.0.1:3000' } }),
+      );
+      expect(response.headers.get('location')).toBe('http://127.0.0.1:3000/portfolio');
+    },
+  );
+
+  it.each(['/', '/portfolio', '/platforms', '/account'])(
+    'rejects nonlocal hosts and forwarded clients in wallet mode: %s',
+    (path) => {
+      vi.stubEnv('NODE_ENV', 'development');
+      vi.stubEnv('LOCAL_MAINNET_TEST_MODE', 'enabled');
+      vi.stubEnv('LOCAL_MAINNET_TEST_LAUNCH_TOKEN', 'a'.repeat(64));
+      expect(proxy(accountRequest(path)).status).toBe(404);
+      expect(
+        proxy(
+          new NextRequest(`http://127.0.0.1:3000${path}`, {
+            headers: { host: '127.0.0.1:3000', 'x-forwarded-for': '203.0.113.4' },
+          }),
+        ).status,
+      ).toBe(404);
+    },
+  );
+
+  it.each(['production', 'deployment', 'missing-token', 'ordinary-development'])(
+    'keeps account protection outside the local launcher: %s',
+    (mode) => {
+      vi.stubEnv('NODE_ENV', mode === 'production' ? 'production' : 'development');
+      vi.stubEnv(
+        'LOCAL_MAINNET_TEST_MODE',
+        mode === 'ordinary-development' ? undefined : 'enabled',
+      );
+      vi.stubEnv(
+        'LOCAL_MAINNET_TEST_LAUNCH_TOKEN',
+        mode === 'missing-token' ? undefined : 'a'.repeat(64),
+      );
+      vi.stubEnv('DEPLOYMENT_TARGET', mode === 'deployment' ? 'railway' : undefined);
+      for (const path of ['/portfolio', '/platforms', '/account']) {
+        const response = proxy(accountRequest(path));
+        expect(response.status).toBe(307);
+        expect(new URL(response.headers.get('location')!).pathname).toBe('/login');
+      }
+    },
+  );
 
   it.each(['/login', '/register'])(
     'keeps the public authentication page private without requiring a session: %s',

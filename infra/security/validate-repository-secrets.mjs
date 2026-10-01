@@ -19,15 +19,18 @@ const REVIEWED_FALSE_POSITIVE_LEDGER_PATH = fileURLToPath(
 // The ledger contains no matched material. Its reviewed bytes and every
 // rule/scope/path/line/blob/redacted-fingerprint tuple must match exactly.
 const REVIEWED_FALSE_POSITIVE_LEDGER_SHA256 =
-  '2f174081f279af505602813182a03feb08ea7e040861de583f54c7d2a618b334';
+  '691ef1b253db90263b88c7f65e2eb6a550d86498740d64b30f34c5b3ba115aae';
 const REVIEWED_FALSE_POSITIVE_CLASSIFICATIONS = new Set([
+  'LOCAL_CONTAINER_SERVICE_TEST_FIXTURE',
   'LOCAL_LOOPBACK_DATABASE_TEST_FIXTURE',
   'RAILWAY_PRIVATE_NETWORK_TEST_FIXTURE',
   'NON_SECRET_HASH_BINDING_TEST_EXPRESSION',
   'RESERVED_EXAMPLE_DOMAIN_REDACTION_TEST_FIXTURE',
+  'SYNTHETIC_SECRET_REJECTION_TEST_FIXTURE',
 ]);
 const REVIEWED_FALSE_POSITIVE_RULES = new Set([
   'assignment.high-entropy-secret',
+  'provider.aws-access-key-id',
   'url.embedded-credentials',
 ]);
 const REVIEWED_FALSE_POSITIVE_SCOPES = new Set(['history', 'index']);
@@ -96,6 +99,7 @@ const REVIEWED_PUBLIC_IDENTIFIER_ASSIGNMENTS = new Map([
     'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA',
     new Set([
       'PUBLIC_TESTNET_TOKEN_PROGRAM',
+      'TOKEN',
       'TOKEN_2022',
       'TOKEN_PROGRAM',
       'LEGACY_TOKEN_PROGRAM',
@@ -104,6 +108,7 @@ const REVIEWED_PUBLIC_IDENTIFIER_ASSIGNMENTS = new Map([
   ],
   ['TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb', new Set(['TOKEN_2022', 'TOKEN_2022_PROGRAM'])],
   ['BGocb4GEpbTFm8UFV2VsDSaBXHELPfAXrvd4vtt8QWrA', new Set(['TOKEN_ACCOUNT'])],
+  ['0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf', new Set(['collateralToken'])],
   ['94vK29npVbyRHXH63rRcTiSr26SFhrQTzbpNJuhQEDu', new Set(['usdcTokenReserveAddress'])],
   ['SPL_TOKEN_0087CA54_ACCOUNT_PACK_165', new Set(['tokenAccountLayout'])],
   ['0x377c3bd93f2a2984e1e7be6a5c22c525ed4a4815', new Set(['spToken'])],
@@ -144,6 +149,7 @@ const REVIEWED_SYNTHETIC_TEST_ASSIGNMENTS = new Map([
 // These tuples are deliberately narrow: protocol, decoded username, decoded
 // password, and host must all match a reviewed local or negative-test fixture.
 const REVIEWED_DUMMY_URL_CREDENTIALS = new Set([
+  'git+ssh|git||github.com',
   'https|credential||secret-provider.example',
   'postgres|api|secret|example.invalid',
   'postgres|crypto_admin|local_admin_only|localhost',

@@ -138,7 +138,10 @@ export function SiteHeader({
       : null;
 
   return (
-    <header className="site-header site-header--shared" data-session-navigation={localWalletMode ? 'local-wallet' : sessionState}>
+    <header
+      className="site-header site-header--shared"
+      data-session-navigation={localWalletMode ? 'local-wallet' : sessionState}
+    >
       <Link className="brand site-header__brand" href="/" aria-label="Bonsai Lending home">
         <span className="brand-mark" aria-hidden="true">
           <BonsaiLogo />

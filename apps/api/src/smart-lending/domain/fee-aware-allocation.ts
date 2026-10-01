@@ -3,8 +3,16 @@ import {
   type MainnetLaunchNetworkId,
 } from '../../blockchain/domain/mainnet-launch-network-policy';
 import { PORTFOLIO_USD_SCALE } from '../../portfolio/domain/unified-portfolio';
-import { calculateFeeAwareReturn, compareFeeAwareReturns, type FeeAwareAllocationCostsUsdMantissa, type FeeAwareCandidateCalculation } from './fee-aware-return';
-export type { FeeAwareAllocationCostsUsdMantissa, FeeAwareCandidateCalculation } from './fee-aware-return';
+import {
+  calculateFeeAwareReturn,
+  compareFeeAwareReturns,
+  type FeeAwareAllocationCostsUsdMantissa,
+  type FeeAwareCandidateCalculation,
+} from './fee-aware-return';
+export type {
+  FeeAwareAllocationCostsUsdMantissa,
+  FeeAwareCandidateCalculation,
+} from './fee-aware-return';
 
 const CANONICAL_TIMESTAMP_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
 const SAFE_REFERENCE_PATTERN = /^[\x21-\x7e]{1,192}$/u;
@@ -35,7 +43,6 @@ export const FEE_AWARE_ALLOCATION_COST_KINDS = Object.freeze([
 ] as const);
 
 export type FeeAwareAllocationCostKind = (typeof FEE_AWARE_ALLOCATION_COST_KINDS)[number];
-
 
 export interface FeeAwareCapitalPosition {
   readonly positionId: string;
@@ -191,7 +198,6 @@ export type FeeAwareCandidateReason =
   | 'AGGREGATE_CROSS_CHAIN_PRINCIPAL_EXCEEDED'
   | 'AGGREGATE_PROVIDER_PRINCIPAL_EXCEEDED'
   | 'NUMERIC_LIMIT_EXCEEDED';
-
 
 export interface FeeAwareCandidateAssessment {
   readonly candidateId: string;
@@ -737,8 +743,6 @@ function compareOptionalNetBenefit(
   if (rightValue === undefined) return -1;
   return leftValue === rightValue ? 0 : leftValue > rightValue ? -1 : 1;
 }
-
-
 
 function parseRequest(value: unknown): ParsedRequest {
   const record = exactRecord(value, [

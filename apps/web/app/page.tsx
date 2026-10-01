@@ -25,16 +25,24 @@ export default function HomePage() {
           tabIndex={-1}
         >
           <p className="eyebrow">Ethereum and Solana mainnet</p>
-          <h1 id="page-title">
-            Your stablecoins. Smarter lending.
-          </h1>
+          <h1 id="page-title">Your stablecoins. Smarter lending.</h1>
           <p className="hero-copy">
-            Connect an Ethereum wallet, a Solana wallet, or both. Choose your USDC amount and holding period. Smart Lending selects where to lend, and your wallet approves every transaction.
+            Connect an Ethereum wallet, a Solana wallet, or both. Choose your USDC amount and
+            holding period. Smart Lending selects where to lend, and your wallet approves every
+            transaction.
           </p>
-          {localWalletMode ? <div className="hero-actions action-group">
-            <Link className="primary-action action-button" href="/portfolio#wallets">Connect wallets</Link>
-            <Link className="secondary-action action-button" href="/portfolio#lending">Explore Smart Lending</Link>
-          </div> : <HomeSessionActions />}
+          {localWalletMode ? (
+            <div className="hero-actions action-group">
+              <Link className="primary-action action-button" href="/portfolio#wallets">
+                Connect wallets
+              </Link>
+              <Link className="secondary-action action-button" href="/portfolio#lending">
+                Explore Smart Lending
+              </Link>
+            </div>
+          ) : (
+            <HomeSessionActions />
+          )}
 
           <ul className="home-hero-points" aria-label="Platform highlights">
             <li>Ethereum and Solana scope</li>
@@ -54,7 +62,11 @@ export default function HomePage() {
               <span aria-hidden="true">01</span>
               <div>
                 <h3>{localWalletMode ? 'Connect your wallets' : 'Sign in securely'}</h3>
-                <p>{localWalletMode ? 'Choose Ethereum, Solana, or both. Your saved treasury addresses are ready.' : 'Use a managed identity provider to access your private account workspace.'}</p>
+                <p>
+                  {localWalletMode
+                    ? 'Choose Ethereum, Solana, or both. Your saved treasury addresses are ready.'
+                    : 'Use a managed identity provider to access your private account workspace.'}
+                </p>
               </div>
             </li>
             <li className="home-step">
@@ -62,7 +74,8 @@ export default function HomePage() {
               <div>
                 <h3>Let Smart Lending choose</h3>
                 <p>
-                  Choose the USDC amount and holding period. Smart Lending selects a destination using current rates, available capacity, and estimated costs.
+                  Choose the USDC amount and holding period. Smart Lending selects a destination
+                  using current rates, available capacity, and estimated costs.
                 </p>
               </div>
             </li>
@@ -71,7 +84,8 @@ export default function HomePage() {
               <div>
                 <h3>Review and confirm</h3>
                 <p>
-                  Review the amount, expected return, receiving wallet, and costs before approving each mainnet transaction in your wallet.
+                  Review the amount, expected return, receiving wallet, and costs before approving
+                  each mainnet transaction in your wallet.
                 </p>
               </div>
             </li>
@@ -98,7 +112,8 @@ export default function HomePage() {
             </span>
             <h3>Unify supported balances</h3>
             <p>
-              Check the balances available in each connected wallet, and manage your supported USDC lending positions.
+              Check the balances available in each connected wallet, and manage your supported USDC
+              lending positions.
             </p>
           </article>
 
@@ -108,7 +123,8 @@ export default function HomePage() {
             </span>
             <h3>See returns after costs</h3>
             <p>
-              See the selected plan’s current supply APY, estimated fees, and projected net earnings for your amount and holding period.
+              See the selected plan’s current supply APY, estimated fees, and projected net earnings
+              for your amount and holding period.
             </p>
           </article>
 
@@ -118,7 +134,8 @@ export default function HomePage() {
             </span>
             <h3>Keep control in your wallet</h3>
             <p>
-              Connecting a wallet does not approve spending. Review and sign each transaction in your wallet or on your Ledger.
+              Connecting a wallet does not approve spending. Review and sign each transaction in
+              your wallet or on your Ledger.
             </p>
           </article>
         </div>
@@ -130,7 +147,9 @@ export default function HomePage() {
           <h2 id="home-scope-title">Review first. Act only when you are ready.</h2>
         </div>
         <p>
-          Deposit amounts are bounded by your connected wallet balance and the selected market’s capacity. Direct lending has no platform fee. Bridge fees, network fees, and account rent are shown before you sign. Supply rates and future returns can change.
+          Deposit amounts are bounded by your connected wallet balance and the selected market’s
+          capacity. Direct lending has no platform fee. Bridge fees, network fees, and account rent
+          are shown before you sign. Supply rates and future returns can change.
         </p>
       </section>
 

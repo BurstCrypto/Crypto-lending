@@ -47,7 +47,11 @@ export function AuthenticationShell({
           <p className="authentication-description">{description}</p>
           <div className="authentication-assurance" aria-label="Security information">
             <span className="security-label-dot" aria-hidden="true" />
-            <p>{localWalletMode ? 'Your wallets approve every transaction.' : 'Your secure session stays out of browser storage.'}</p>
+            <p>
+              {localWalletMode
+                ? 'Your wallets approve every transaction.'
+                : 'Your secure session stays out of browser storage.'}
+            </p>
           </div>
         </section>
 

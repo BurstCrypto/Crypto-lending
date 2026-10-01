@@ -6,5 +6,11 @@ import { LocalMainnetTest } from './mainnet-test';
 /** Both environments use this workspace; local testing adds read-only provider details. */
 export async function MainnetWorkspace() {
   const context = localMainnetConfig() ? await localMainnetPageContext() : null;
-  return <LocalMainnetTest setupToken={context?.setupToken ?? ''} initialTreasuries={MAINNET_TREASURIES} showProviderDetails={context !== null} />;
+  return (
+    <LocalMainnetTest
+      setupToken={context?.setupToken ?? ''}
+      initialTreasuries={MAINNET_TREASURIES}
+      showProviderDetails={context !== null}
+    />
+  );
 }

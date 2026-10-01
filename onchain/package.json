@@ -10,8 +10,8 @@
   },
   "dependencies": {
     "@openzeppelin/contracts": "5.4.0",
-    "@solana/web3.js": "1.98.4",
-    "viem": "2.55.18"
+    "@solana/web3.js": "1.99.0",
+    "viem": "2.56.3"
   },
   "devDependencies": {
     "@types/node": "22.20.1",

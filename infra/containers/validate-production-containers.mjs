@@ -12,9 +12,9 @@ import {
 } from '../shared/read-secure-local-file.mjs';
 
 export const NODE_BASE_IMAGE =
-  'node:24.20.0-bookworm-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e';
+  'node:26.10.0-bookworm-slim@sha256:662933cf47f013bc8e4beb31a6116448427a82057ba7c42c97e4c5ba766504c2';
 export const NODE_BASE_DIGEST =
-  'sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e';
+  'sha256:662933cf47f013bc8e4beb31a6116448427a82057ba7c42c97e4c5ba766504c2';
 export const NPM_VERSION = '11.6.4';
 export const RDS_BUNDLE_SHA256 = 'e5bb2084ccf45087bda1c9bffdea0eb15ee67f0b91646106e466714f9de3c7e3';
 export const MAX_PRODUCTION_CONTAINER_SOURCE_BYTES = 393_216;
@@ -503,7 +503,9 @@ function validateWebDockerfile(source) {
   );
   addError(
     errors,
-    normalized.includes('RUN ["node", "infra/containers/assemble-mainnet-web.mjs", "apps/web/.next/standalone"]'),
+    normalized.includes(
+      'RUN ["node", "infra/containers/assemble-mainnet-web.mjs", "apps/web/.next/standalone"]',
+    ),
     'Dockerfile.web must materialize the traced mainnet provider aliases before runtime validation',
   );
   addError(
@@ -737,7 +739,7 @@ export function validateProductionContainerSources(sources) {
   addError(
     errors,
     Object.entries({
-      '@solana/web3.js': '1.98.4',
+      '@solana/web3.js': '1.99.0',
       '@0dotxyz/p0-ts-sdk': '2.8.3',
       '@jup-ag/lend': '0.3.0-beta.1',
       '@solendprotocol/solend-sdk': '0.14.27',

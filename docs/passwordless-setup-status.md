@@ -7,17 +7,17 @@ Both `/login` and `/register` show the phone field and **Send sign-in code** but
 The implementation was merged in [PR #45](https://github.com/BurstCrypto/Crypto-lending/pull/45).
 The deployed commit is `13000d0f9acbc2724a92338aeff7203ac1e39a44`.
 
-| Item                         | Verified state                                                                                        |
-| ---------------------------- | ----------------------------------------------------------------------------------------------------- |
-| API deployment               | `ca5b12be-491c-412a-8e30-244c941d75a9`: SUCCESS                                                       |
-| Web deployment               | `245cd29e-6ee2-4c9d-9007-bb8fb1c09611`: SUCCESS                                                       |
-| Authentication mode          | `AUTH_MODE=passwordless` on API and web                                                               |
-| Public origin                | `AUTH_PUBLIC_ORIGIN=https://hqbonsai.com` on both services                                            |
-| Database migrations          | `9002` and `9003` completed successfully at 16:53:15 UTC                                              |
-| SMS delivery configuration   | All three Twilio Verify variables are configured on API; Auth Token is sealed                         |
-| Email delivery configuration | Resend API key is sealed; `AUTH_EMAIL_FROM` is unset, so email sign-in remains disabled               |
+| Item                         | Verified state                                                                                         |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------ |
+| API deployment               | `ca5b12be-491c-412a-8e30-244c941d75a9`: SUCCESS                                                        |
+| Web deployment               | `245cd29e-6ee2-4c9d-9007-bb8fb1c09611`: SUCCESS                                                        |
+| Authentication mode          | `AUTH_MODE=passwordless` on API and web                                                                |
+| Public origin                | `AUTH_PUBLIC_ORIGIN=https://hqbonsai.com` on both services                                             |
+| Database migrations          | `9002` and `9003` completed successfully at 16:53:15 UTC                                               |
+| SMS delivery configuration   | All three Twilio Verify variables are configured on API; Auth Token is sealed                          |
+| Email delivery configuration | Resend API key is sealed; `AUTH_EMAIL_FROM` is unset, so email sign-in remains disabled                |
 | Twilio service               | Runtime credentials authenticated successfully; matching account/service and six-digit codes confirmed |
-| SMS display name             | The current Twilio Verify service name is `Burst`; the optional rename preference is unanswered       |
+| SMS display name             | The current Twilio Verify service name is `Burst`; the optional rename preference is unanswered        |
 
 The live endpoint `GET /api/v1/auth/options` returns:
 

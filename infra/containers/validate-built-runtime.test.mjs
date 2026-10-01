@@ -107,27 +107,48 @@ function addPackage(root, name) {
 test('mainnet web artifacts require pinned provider SDKs and all three compiled routers', (t) => {
   const root = webFixture(t);
   const packages = {
-    '@solana/web3.js': '1.98.4', '@0dotxyz/p0-ts-sdk': '2.8.3',
-    '@jup-ag/lend': '0.3.0-beta.1', '@solendprotocol/solend-sdk': '0.14.27',
+    '@solana/web3.js': '1.99.0',
+    '@0dotxyz/p0-ts-sdk': '2.8.3',
+    '@jup-ag/lend': '0.3.0-beta.1',
+    '@solendprotocol/solend-sdk': '0.14.27',
   };
   for (const [name, version] of Object.entries(packages)) {
     const directory = addPackage(root, name);
-    writeFileSync(join(directory, 'package.json'), JSON.stringify({ name, version, main: 'index.js' }));
+    writeFileSync(
+      join(directory, 'package.json'),
+      JSON.stringify({ name, version, main: 'index.js' }),
+    );
   }
   mkdirSync(join(root, 'onchain/build'), { recursive: true });
-  withProduction(() => assert.throws(() => validateBuiltMainnetWebRuntime(root), /Missing compiled mainnet router/));
+  withProduction(() =>
+    assert.throws(() => validateBuiltMainnetWebRuntime(root), /Missing compiled mainnet router/),
+  );
   for (const name of ['BonsaiCctpSourceRouter', 'BonsaiAaveSupplyRouter', 'BonsaiLendingRouter']) {
-    withProduction(() => assert.throws(() => validateBuiltMainnetWebRuntime(root), /Missing compiled mainnet router/));
+    withProduction(() =>
+      assert.throws(() => validateBuiltMainnetWebRuntime(root), /Missing compiled mainnet router/),
+    );
     writeFileSync(join(root, `onchain/build/${name}.json`), '{"bytecode":"0x00"}');
   }
   withProduction(() => {
     assert.equal(validateBuiltMainnetWebRuntime(root).valid, true);
     assert.throws(() => validateBuiltWebRuntime(root), /Forbidden web standalone/);
-    writeFileSync(join(root, 'node_modules/@solana/web3.js/package.json'), JSON.stringify({ name: '@solana/web3.js', version: '1.0.0' }));
-    assert.throws(() => validateBuiltMainnetWebRuntime(root), /Unexpected mainnet provider dependency version/);
-    writeFileSync(join(root, 'node_modules/@solana/web3.js/package.json'), JSON.stringify({ name: '@solana/web3.js', version: '1.98.4' }));
+    writeFileSync(
+      join(root, 'node_modules/@solana/web3.js/package.json'),
+      JSON.stringify({ name: '@solana/web3.js', version: '1.0.0' }),
+    );
+    assert.throws(
+      () => validateBuiltMainnetWebRuntime(root),
+      /Unexpected mainnet provider dependency version/,
+    );
+    writeFileSync(
+      join(root, 'node_modules/@solana/web3.js/package.json'),
+      JSON.stringify({ name: '@solana/web3.js', version: '1.99.0' }),
+    );
     const otherRoot = webFixture(t);
-    assert.throws(() => validateBuiltMainnetWebRuntime(otherRoot), /Missing mainnet provider dependency/);
+    assert.throws(
+      () => validateBuiltMainnetWebRuntime(otherRoot),
+      /Missing mainnet provider dependency/,
+    );
   });
 });
 
@@ -300,7 +321,7 @@ test('rejects an unsanitized standalone package manifest', (t) => {
   const root = webFixture(t);
   writeFileSync(
     join(root, 'apps/web/package.json'),
-    '{"dependencies":{"@solana/web3.js":"1.98.4"},"name":"@crypto-lending/web","private":true,"version":"0.1.0"}\n',
+    '{"dependencies":{"@solana/web3.js":"1.99.0"},"name":"@crypto-lending/web","private":true,"version":"0.1.0"}\n',
     'utf8',
   );
   assert.throws(

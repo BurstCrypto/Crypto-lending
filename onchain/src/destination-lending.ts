@@ -99,23 +99,57 @@ export function kaminoUsdcSupplyInstructions(input: {
 }
 
 /** Redeem wallet-held reserve cTokens into the same wallet's native USDC ATA. */
-export function kaminoUsdcWithdrawInstructions(input: { user: PublicKey; collateralAmount: bigint }): readonly TransactionInstruction[] {
-  if (input.user.equals(PublicKey.default) || !PublicKey.isOnCurve(input.user.toBytes()) || input.collateralAmount <= 0n || input.collateralAmount > MAX_U64) throw new Error('INVALID_KAMINO_WITHDRAWAL');
-  const receiptAccount = PublicKey.findProgramAddressSync([input.user.toBuffer(), TOKEN_PROGRAM.toBuffer(), KAMINO_COLLATERAL_MINT.toBuffer()], ASSOCIATED_TOKEN_PROGRAM)[0];
+export function kaminoUsdcWithdrawInstructions(input: {
+  user: PublicKey;
+  collateralAmount: bigint;
+}): readonly TransactionInstruction[] {
+  if (
+    input.user.equals(PublicKey.default) ||
+    !PublicKey.isOnCurve(input.user.toBytes()) ||
+    input.collateralAmount <= 0n ||
+    input.collateralAmount > MAX_U64
+  )
+    throw new Error('INVALID_KAMINO_WITHDRAWAL');
+  const receiptAccount = PublicKey.findProgramAddressSync(
+    [input.user.toBuffer(), TOKEN_PROGRAM.toBuffer(), KAMINO_COLLATERAL_MINT.toBuffer()],
+    ASSOCIATED_TOKEN_PROGRAM,
+  )[0];
   const destination = associatedUsdcAccount(input.user);
   const data = Buffer.alloc(16);
   createHash('sha256').update('global:redeem_reserve_collateral').digest().copy(data, 0, 0, 8);
   data.writeBigUInt64LE(input.collateralAmount, 8);
   return [
-    new TransactionInstruction({ programId: ASSOCIATED_TOKEN_PROGRAM, data: Buffer.from([1]), keys: [
-      meta(input.user, true, true), meta(destination, true), meta(input.user), meta(SOLANA_USDC), meta(SystemProgram.programId), meta(TOKEN_PROGRAM),
-    ] }),
+    new TransactionInstruction({
+      programId: ASSOCIATED_TOKEN_PROGRAM,
+      data: Buffer.from([1]),
+      keys: [
+        meta(input.user, true, true),
+        meta(destination, true),
+        meta(input.user),
+        meta(SOLANA_USDC),
+        meta(SystemProgram.programId),
+        meta(TOKEN_PROGRAM),
+      ],
+    }),
     // Account order from klend's RedeemReserveCollateral account context.
-    new TransactionInstruction({ programId: KAMINO_PROGRAM, data, keys: [
-      meta(input.user, false, true), meta(KAMINO_MARKET), meta(KAMINO_USDC_RESERVE, true), meta(reservePda('lma', KAMINO_MARKET)),
-      meta(SOLANA_USDC), meta(KAMINO_COLLATERAL_MINT, true), meta(KAMINO_LIQUIDITY_VAULT, true), meta(receiptAccount, true),
-      meta(destination, true), meta(TOKEN_PROGRAM), meta(TOKEN_PROGRAM), meta(SYSVAR_INSTRUCTIONS_PUBKEY),
-    ] }),
+    new TransactionInstruction({
+      programId: KAMINO_PROGRAM,
+      data,
+      keys: [
+        meta(input.user, false, true),
+        meta(KAMINO_MARKET),
+        meta(KAMINO_USDC_RESERVE, true),
+        meta(reservePda('lma', KAMINO_MARKET)),
+        meta(SOLANA_USDC),
+        meta(KAMINO_COLLATERAL_MINT, true),
+        meta(KAMINO_LIQUIDITY_VAULT, true),
+        meta(receiptAccount, true),
+        meta(destination, true),
+        meta(TOKEN_PROGRAM),
+        meta(TOKEN_PROGRAM),
+        meta(SYSVAR_INSTRUCTIONS_PUBKEY),
+      ],
+    }),
   ];
 }
 

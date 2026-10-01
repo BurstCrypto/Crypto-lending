@@ -23,8 +23,16 @@ export interface LocalWalletConfig extends Omit<BridgeConfig, 'ethereumWallet' |
 export function hasBothWallets(config: LocalWalletConfig): config is BridgeConfig {
   return Boolean(config.ethereumWallet && config.solanaWallet);
 }
-export type BridgeStatus = 'CREATED' | 'SOURCE_PENDING' | 'SOURCE_FAILED' | 'AWAITING_ATTESTATION' |
-  'READY_TO_MINT' | 'DESTINATION_PENDING' | 'MINTED' | 'LENT' | 'CANCELLED';
+export type BridgeStatus =
+  | 'CREATED'
+  | 'SOURCE_PENDING'
+  | 'SOURCE_FAILED'
+  | 'AWAITING_ATTESTATION'
+  | 'READY_TO_MINT'
+  | 'DESTINATION_PENDING'
+  | 'MINTED'
+  | 'LENT'
+  | 'CANCELLED';
 export interface BridgeRecord {
   id: Hex;
   config: BridgeConfig;
@@ -39,15 +47,46 @@ export interface BridgeRecord {
   smartQuoteId?: string;
   destinationProvider?: LendingProvider;
 }
-export type BridgeStepKind = 'SOURCE_APPROVAL' | 'SOURCE_REVOKE' | 'SOURCE_BURN' | 'DESTINATION_APPROVAL' |
-  'DESTINATION_REVOKE' | 'DESTINATION_MINT_SUPPLY' | 'DESTINATION_MINT' | 'DESTINATION_SUPPLY' |
-  'DEPLOY_SOURCE' | 'DEPLOY_SUPPLY' | 'DEPLOY_LENDING' | 'CREATE_LOOKUP_TABLE' | 'EXTEND_LOOKUP_TABLE' |
-  'LENDING_APPROVAL' | 'LENDING_REVOKE' | 'LENDING_SUPPLY' | 'LENDING_WITHDRAW';
+export type BridgeStepKind =
+  | 'SOURCE_APPROVAL'
+  | 'SOURCE_REVOKE'
+  | 'SOURCE_BURN'
+  | 'DESTINATION_APPROVAL'
+  | 'DESTINATION_REVOKE'
+  | 'DESTINATION_MINT_SUPPLY'
+  | 'DESTINATION_MINT'
+  | 'DESTINATION_SUPPLY'
+  | 'DEPLOY_SOURCE'
+  | 'DEPLOY_SUPPLY'
+  | 'DEPLOY_LENDING'
+  | 'CREATE_LOOKUP_TABLE'
+  | 'EXTEND_LOOKUP_TABLE'
+  | 'LENDING_APPROVAL'
+  | 'LENDING_REVOKE'
+  | 'LENDING_SUPPLY'
+  | 'LENDING_WITHDRAW';
 export function isDirectLendingStep(step: BridgeStep) {
-  return step.bridgeId === null && ['DEPLOY_LENDING', 'LENDING_APPROVAL', 'LENDING_REVOKE', 'LENDING_SUPPLY', 'LENDING_WITHDRAW'].includes(step.kind);
+  return (
+    step.bridgeId === null &&
+    [
+      'DEPLOY_LENDING',
+      'LENDING_APPROVAL',
+      'LENDING_REVOKE',
+      'LENDING_SUPPLY',
+      'LENDING_WITHDRAW',
+    ].includes(step.kind)
+  );
 }
-export type BridgeStepState = 'PREPARED' | 'RESERVED' | 'SIGNED' | 'SUBMITTED' | 'CONFIRMED' |
-  'FINALIZED' | 'FAILED' | 'REJECTED' | 'CANCELLED';
+export type BridgeStepState =
+  | 'PREPARED'
+  | 'RESERVED'
+  | 'SIGNED'
+  | 'SUBMITTED'
+  | 'CONFIRMED'
+  | 'FINALIZED'
+  | 'FAILED'
+  | 'REJECTED'
+  | 'CANCELLED';
 export interface BridgeStep {
   id: string;
   bridgeId: Hex | null;
@@ -60,10 +99,24 @@ export interface BridgeStep {
   fingerprint: string;
   transactionId: string | null;
   ethereum: {
-    from: Address; to?: Address; data: Hex; value: '0x0'; chainId: '0x1'; type: '0x2';
-    gas: Hex; nonce: Hex; maxFeePerGas: Hex; maxPriorityFeePerGas: Hex;
+    from: Address;
+    to?: Address;
+    data: Hex;
+    value: '0x0';
+    chainId: '0x1';
+    type: '0x2';
+    gas: Hex;
+    nonce: Hex;
+    maxFeePerGas: Hex;
+    maxPriorityFeePerGas: Hex;
   } | null;
-  solana: { serialized: string; version: 'legacy' | 0; message: string; lastValidBlockHeight: number; contextSlot: number } | null;
+  solana: {
+    serialized: string;
+    version: 'legacy' | 0;
+    message: string;
+    lastValidBlockHeight: number;
+    contextSlot: number;
+  } | null;
   maxNetworkCost: string;
   sourcePrincipal: string;
   // Public, immutable context required to verify events or recover after restart.

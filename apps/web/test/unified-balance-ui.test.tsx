@@ -16,7 +16,11 @@ import { parseUnifiedBalanceResponse } from '@/lib/portfolio/unified-balance';
 vi.mock('@/components/mainnet/workspace', async () => {
   const { LocalMainnetTest } = await import('@/components/mainnet/mainnet-test');
   const { MAINNET_TREASURIES } = await import('@/lib/mainnet/public-config');
-  return { MainnetWorkspace: () => <LocalMainnetTest setupToken="" initialTreasuries={MAINNET_TREASURIES} /> };
+  return {
+    MainnetWorkspace: () => (
+      <LocalMainnetTest setupToken="" initialTreasuries={MAINNET_TREASURIES} />
+    ),
+  };
 });
 
 const READY_STATE = Object.freeze({
@@ -211,11 +215,13 @@ describe('PortfolioPage', () => {
     expect(screen.queryByText(/synthetic local portfolio/iu)).not.toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Bonsai Lending home' })).toHaveAttribute('href', '/');
     expect(screen.queryByRole('link', { name: 'Account' })).toBeNull();
-    expect(screen.getByRole('navigation', { name: 'Jump to portfolio sections' })).toBeInTheDocument();
+    expect(
+      screen.getByRole('navigation', { name: 'Jump to portfolio sections' }),
+    ).toBeInTheDocument();
     expect(document.querySelector('#balances')).not.toBeNull();
     expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
     expect(screen.getByText('Loading your workspace…')).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Find the best route for your USDC.' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Put your USDC to work.' })).toBeInTheDocument();
     expect(metadata).toMatchObject({
       title: 'Portfolio',
       robots: { index: false, follow: false },
@@ -236,9 +242,11 @@ describe('PortfolioPage', () => {
     ).toBeInTheDocument();
     expect(screen.queryByText('Bonsai Lending isolated synthetic regression harness')).toBeNull();
     expect(screen.getByText('Bonsai Lending · Ethereum and Solana mainnet')).toBeVisible();
-    expect(screen.getByRole('navigation', { name: 'Jump to portfolio sections' })).toBeInTheDocument();
+    expect(
+      screen.getByRole('navigation', { name: 'Jump to portfolio sections' }),
+    ).toBeInTheDocument();
     expect(document.querySelector('#balances')).not.toBeNull();
-    expect(screen.getByRole('heading', { name: 'Find the best route for your USDC.' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Put your USDC to work.' })).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Verify a Base Mainnet wallet' })).toBeNull();
   });
 });

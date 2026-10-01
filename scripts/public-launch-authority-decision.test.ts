@@ -1,10 +1,5 @@
 import assert from 'node:assert/strict';
-import {
-  generateKeyPairSync,
-  sign,
-  type KeyObject,
-  type KeyPairKeyObjectResult,
-} from 'node:crypto';
+import { generateKeyPairSync, sign, type KeyObject } from 'node:crypto';
 import {
   linkSync,
   mkdirSync,
@@ -56,7 +51,7 @@ const KEY_VALID_UNTIL = '2027-01-01T00:00:00.000Z';
 interface TestAuthority {
   readonly role: PublicLaunchAuthorityRole;
   readonly keyId: string;
-  readonly keyPair: KeyPairKeyObjectResult;
+  readonly keyPair: { readonly publicKey: KeyObject; readonly privateKey: KeyObject };
 }
 
 const TEST_AUTHORITIES: readonly TestAuthority[] = Object.freeze(

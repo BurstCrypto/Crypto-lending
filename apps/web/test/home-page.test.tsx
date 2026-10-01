@@ -15,14 +15,21 @@ import HomePage from '../app/page';
 import { restoreAuthenticationSession } from '@/lib/authentication';
 
 describe('HomePage', () => {
-  afterEach(() => { cleanup(); vi.unstubAllEnvs(); vi.clearAllMocks(); });
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllEnvs();
+    vi.clearAllMocks();
+  });
 
   it('uses wallet access and shared navigation locally without making an account request', () => {
     vi.stubEnv('NODE_ENV', 'development');
     vi.stubEnv('LOCAL_MAINNET_TEST_MODE', 'enabled');
     vi.stubEnv('LOCAL_MAINNET_TEST_LAUNCH_TOKEN', 'a'.repeat(64));
     render(<HomePage />);
-    expect(screen.getByRole('link', { name: 'Connect wallets' })).toHaveAttribute('href', '/portfolio#wallets');
+    expect(screen.getByRole('link', { name: 'Connect wallets' })).toHaveAttribute(
+      'href',
+      '/portfolio#wallets',
+    );
     expect(screen.getByRole('navigation', { name: 'Primary' })).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Sign in' })).toBeNull();
     expect(restoreAuthenticationSession).not.toHaveBeenCalled();
@@ -34,9 +41,7 @@ describe('HomePage', () => {
       name: 'Your stablecoins. Smarter lending.',
     });
     expect(within(hero).getByText(/Smart Lending selects where to lend/i)).toBeInTheDocument();
-    expect(
-      within(hero).getByText(/Your wallet approves every transaction/iu),
-    ).toBeInTheDocument();
+    expect(within(hero).getByText(/Your wallet approves every transaction/iu)).toBeInTheDocument();
     expect(await within(hero).findByRole('link', { name: 'Sign in' })).toHaveAttribute(
       'href',
       '/login?returnTo=%2Fportfolio',

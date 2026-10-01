@@ -56,13 +56,18 @@ export interface MainnetTestSnapshot {
 }
 
 export class MainnetTestError extends Error {}
-export function fail(message: string): never { throw new MainnetTestError(message); }
+export function fail(message: string): never {
+  throw new MainnetTestError(message);
+}
 export function address(value: unknown): Address {
   if (typeof value !== 'string' || !/^0x[0-9a-fA-F]{40}$/.test(value) || /^0x0{40}$/i.test(value)) {
     return fail('Enter a nonzero Ethereum wallet address.');
   }
-  try { return getAddress(value).toLowerCase() as Address; }
-  catch { return fail('The Ethereum address checksum is invalid.'); }
+  try {
+    return getAddress(value).toLowerCase() as Address;
+  } catch {
+    return fail('The Ethereum address checksum is invalid.');
+  }
 }
 export function usdcAmount(value: unknown): bigint {
   if (typeof value !== 'string' || !/^(?:0|[1-9]\d{0,9})(?:\.\d{1,6})?$/.test(value)) {
@@ -70,6 +75,7 @@ export function usdcAmount(value: unknown): bigint {
   }
   const [whole, decimal = ''] = value.split('.');
   const units = BigInt(whole!) * 1_000_000n + BigInt(decimal.padEnd(6, '0'));
-  if (units <= 0n || units > MAINNET_TEST.maxAmount) return fail('The USDC amount is outside the supported numeric range.');
+  if (units <= 0n || units > MAINNET_TEST.maxAmount)
+    return fail('The USDC amount is outside the supported numeric range.');
   return units;
 }

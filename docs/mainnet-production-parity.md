@@ -6,16 +6,16 @@ does not substitute a different recommendation or execution engine. Wallet
 connection, automatic APY, transaction review, fees, deposits and withdrawals use
 the same components and API operations in both modes.
 
-| Concern | Shared implementation |
-| --- | --- |
-| Portfolio and wallet connection | `apps/web/components/mainnet/` |
-| Internal provider catalog and exact USDC markets | `apps/web/lib/lending/markets.ts` |
-| Automatic lending plan presentation | `apps/web/components/lending/smart-lending-panel.tsx` |
-| Rates, fees, best fundable route | `apps/web/lib/mainnet/smart-lending.server.ts` |
-| Transaction preparation, review, reservation and recovery | `apps/web/lib/mainnet/`, `onchain/src/` |
-| Treasury receiving addresses | `apps/web/lib/mainnet/public-config.ts` |
-| API for both environments | `/api/mainnet` |
-| Authentication boundary | `apps/web/lib/mainnet/access.server.ts` |
+| Concern                                                   | Shared implementation                                 |
+| --------------------------------------------------------- | ----------------------------------------------------- |
+| Portfolio and wallet connection                           | `apps/web/components/mainnet/`                        |
+| Internal provider catalog and exact USDC markets          | `apps/web/lib/lending/markets.ts`                     |
+| Automatic lending plan presentation                       | `apps/web/components/lending/smart-lending-panel.tsx` |
+| Rates, fees, best fundable route                          | `apps/web/lib/mainnet/smart-lending.server.ts`        |
+| Transaction preparation, review, reservation and recovery | `apps/web/lib/mainnet/`, `onchain/src/`               |
+| Treasury receiving addresses                              | `apps/web/lib/mainnet/public-config.ts`               |
+| API for both environments                                 | `/api/mainnet`                                        |
+| Authentication boundary                                   | `apps/web/lib/mainnet/access.server.ts`               |
 
 Production validates the real backend account session and CSRF token for writes.
 Its configuration and transaction journal are isolated by verified account ID.
@@ -49,18 +49,18 @@ deposit/full-withdrawal builder. They are not placeholders for every market the
 provider offers. The catalog records exact contract/program addresses and rate
 sources, and changes must also update independent browser transaction checks.
 
-| Chain | Provider | Configured market |
-| --- | --- | --- |
-| Ethereum | Aave | V3 Core USDC |
-| Ethereum | Morpho | Blue cbBTC/USDC, 86% LLTV |
-| Ethereum | Compound | V3 USDC Comet |
-| Ethereum | Spark | SparkLend USDC |
-| Ethereum | Euler | K3 Capital Prime USDC vault |
-| Ethereum | Gearbox | V3 USDC pool |
-| Solana | Kamino | Main Market USDC reserve |
-| Solana | Save | Main Pool USDC reserve |
-| Solana | Project 0 | USDC bank in the configured group |
-| Solana | Jupiter | Lend Earn main USDC |
+| Chain    | Provider  | Configured market                 |
+| -------- | --------- | --------------------------------- |
+| Ethereum | Aave      | V3 Core USDC                      |
+| Ethereum | Morpho    | Blue cbBTC/USDC, 86% LLTV         |
+| Ethereum | Compound  | V3 USDC Comet                     |
+| Ethereum | Spark     | SparkLend USDC                    |
+| Ethereum | Euler     | K3 Capital Prime USDC vault       |
+| Ethereum | Gearbox   | V3 USDC pool                      |
+| Solana   | Kamino    | Main Market USDC reserve          |
+| Solana   | Save      | Main Pool USDC reserve            |
+| Solana   | Project 0 | USDC bank in the configured group |
+| Solana   | Jupiter   | Lend Earn main USDC               |
 
 The engine compares every provider internally and selects an eligible, fundable
 route by estimated net return after entry/exit costs over the chosen holding
@@ -175,8 +175,7 @@ Production requires:
 
 - `AUTH_PUBLIC_ORIGIN` set to the canonical HTTPS application origin, with the
   existing backend account-session endpoint reachable through the gateway.
-- `MAINNET_DATA_DIR` set to an absolute persistent directory writable by UID/GID
-  10001. There is no temporary-directory fallback for account journals.
+- `MAINNET_DATA_DIR` set to an absolute persistent directory writable by UID/GID 10001. There is no temporary-directory fallback for account journals.
 - A single web replica for the current SQLite journal implementation. The checked
   in Railway topology mounts `/data/mainnet` from the mainnet journal volume and
   sets the replica count to one. Provisioning and volume permissions must be
