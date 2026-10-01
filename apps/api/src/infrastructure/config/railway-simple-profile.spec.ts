@@ -29,6 +29,14 @@ function railwaySimpleApiEnvironment(): NodeJS.ProcessEnv {
 }
 
 describe('applyRailwaySimpleProfileDefaults', () => {
+  it('keeps native passwordless free of placeholder OIDC settings', () => {
+    const env = railwaySimpleApiEnvironment();
+    env.AUTH_MODE = 'passwordless';
+    applyRailwaySimpleProfileDefaults(env);
+    expect(loadAuthenticationConfig(env).mode).toBe('passwordless');
+    expect(env.OIDC_CLIENT_ID).toBeUndefined();
+    expect(env.OIDC_ISSUER_URL).toBeUndefined();
+  });
   it('is a no-op when the profile flag is absent', () => {
     const env: NodeJS.ProcessEnv = { NODE_ENV: 'production' };
     expect(applyRailwaySimpleProfileDefaults(env)).toBe(false);

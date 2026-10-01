@@ -227,7 +227,10 @@ export function loadWalletRegistrationConfig(
     return Object.freeze({ mode: 'disabled' });
   }
 
-  if (environment.AUTH_MODE !== 'oidc') return fail('AUTH_MODE');
+  const authenticated =
+    environment.AUTH_MODE === 'oidc' ||
+    (environment.AUTH_MODE === 'passwordless' && environment.DEPLOYMENT_TARGET === 'railway');
+  if (!authenticated) return fail('AUTH_MODE');
   const localDemo = environment.LOCAL_DEMO_MODE === 'enabled';
   if (
     localDemo &&

@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server';
 
 import { decideProtectedAccountShell } from '@/lib/authentication/protected-route';
 import { readCanonicalAuthenticationPublicOrigin } from '@/lib/authentication/public-origin.server';
+import { isLocalMainnetRequest, localMainnetConfig } from '@/lib/local-mainnet/config.server';
 
 const ACCOUNT_SHELL_HEADERS = Object.freeze([
   { key: 'Cache-Control', value: 'private, no-store, max-age=0' },
@@ -37,6 +38,20 @@ function authenticationConfigurationUnavailable(): NextResponse {
 }
 
 export function proxy(request: NextRequest) {
+  const localConfig = localMainnetConfig();
+  if (localConfig) {
+    if (!isLocalMainnetRequest(request, false)) return new NextResponse(null, { status: 404 });
+    if (isAuthenticationPagePath(request.nextUrl.pathname)) {
+      return applyAccountShellHeaders(NextResponse.redirect(new URL('/portfolio', localConfig.origin), 307));
+    }
+    return applyAccountShellHeaders(NextResponse.next());
+  }
+  if (request.nextUrl.pathname === '/') return NextResponse.next();
+  if (request.nextUrl.pathname === '/mainnet-test') {
+    // Reject before the app shell starts streaming, so production gets a real 404.
+    if (!localMainnetConfig() || !isLocalMainnetRequest(request, false)) return new NextResponse(null, { status: 404 });
+    return applyAccountShellHeaders(NextResponse.next());
+  }
   if (isProtectedShellPath(request.nextUrl.pathname)) {
     const decision = decideProtectedAccountShell({
       cookieHeader: request.headers.get('cookie'),
@@ -65,5 +80,5 @@ export function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/account/:path*', '/platforms', '/portfolio', '/login', '/register'],
+  matcher: ['/', '/account/:path*', '/platforms', '/portfolio', '/login', '/register', '/mainnet-test'],
 };

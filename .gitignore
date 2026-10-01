@@ -12,6 +12,7 @@ _netrc
 .aws/
 .docker/
 .kube/
+.config/auth0/
 credentials
 credentials.json
 secrets.json
@@ -56,3 +57,4 @@ Thumbs.db
 *.tmp
 *.temp
 .local-validation/
+.local-mainnet/

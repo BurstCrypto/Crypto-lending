@@ -62,6 +62,18 @@ function expectConfigurationErrorOnField(environment: NodeJS.ProcessEnv, field: 
 }
 
 describe('wallet registration configuration', () => {
+  it('accepts Railway passwordless sessions for wallet ownership registration', () => {
+    const env = {
+      ...enabledEnvironment(),
+      AUTH_MODE: 'passwordless',
+      DEPLOYMENT_TARGET: 'railway',
+    };
+    expect(loadWalletRegistrationConfig(env).mode).toBe('enabled');
+    expect(() => loadWalletRegistrationConfig({ ...env, DEPLOYMENT_TARGET: 'aws' })).toThrow(
+      WalletRegistrationConfigurationError,
+    );
+  });
+
   it('is disabled by default and rejects stray wallet secrets while disabled', () => {
     expect(loadWalletRegistrationConfig({})).toEqual({ mode: 'disabled' });
     expect(() => loadWalletRegistrationConfig({ WALLET_IDENTITY_HMAC_KEY: 'unexpected' })).toThrow(

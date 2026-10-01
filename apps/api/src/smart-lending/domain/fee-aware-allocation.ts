@@ -3,6 +3,8 @@ import {
   type MainnetLaunchNetworkId,
 } from '../../blockchain/domain/mainnet-launch-network-policy';
 import { PORTFOLIO_USD_SCALE } from '../../portfolio/domain/unified-portfolio';
+import { calculateFeeAwareReturn, compareFeeAwareReturns, type FeeAwareAllocationCostsUsdMantissa, type FeeAwareCandidateCalculation } from './fee-aware-return';
+export type { FeeAwareAllocationCostsUsdMantissa, FeeAwareCandidateCalculation } from './fee-aware-return';
 
 const CANONICAL_TIMESTAMP_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
 const SAFE_REFERENCE_PATTERN = /^[\x21-\x7e]{1,192}$/u;
@@ -10,8 +12,6 @@ const MAX_UINT256 = (1n << 256n) - 1n;
 const MAX_RATE_BASIS_POINTS = 1_000_000n;
 const MAX_HOLDING_PERIOD_DAYS = 36_500n;
 const MAX_FRESHNESS_SECONDS = 86_400n;
-const BASIS_POINTS_DENOMINATOR = 10_000n;
-const DAYS_PER_YEAR = 365n;
 
 export const FEE_AWARE_ALLOCATION_POLICY_VERSION = 1 as const;
 export const FEE_AWARE_ALLOCATION_NETWORK_IDS = MAINNET_LAUNCH_NETWORK_IDS;
@@ -36,21 +36,6 @@ export const FEE_AWARE_ALLOCATION_COST_KINDS = Object.freeze([
 
 export type FeeAwareAllocationCostKind = (typeof FEE_AWARE_ALLOCATION_COST_KINDS)[number];
 
-export interface FeeAwareAllocationCostsUsdMantissa {
-  readonly entrySourceNetwork: bigint;
-  readonly entrySourceSwap: bigint;
-  readonly entryBridge: bigint;
-  readonly entryDestinationNetwork: bigint;
-  readonly entryDestinationSwap: bigint;
-  readonly providerEntry: bigint;
-  readonly providerExit: bigint;
-  readonly exitDestinationNetwork: bigint;
-  readonly exitDestinationSwap: bigint;
-  readonly exitBridge: bigint;
-  readonly exitSourceNetwork: bigint;
-  readonly platformRouting: bigint;
-  readonly riskBuffer: bigint;
-}
 
 export interface FeeAwareCapitalPosition {
   readonly positionId: string;
@@ -207,23 +192,6 @@ export type FeeAwareCandidateReason =
   | 'AGGREGATE_PROVIDER_PRINCIPAL_EXCEEDED'
   | 'NUMERIC_LIMIT_EXCEEDED';
 
-export interface FeeAwareCandidateCalculation {
-  readonly grossApyBasisPoints: bigint;
-  readonly recurringFeeBasisPoints: bigint;
-  readonly riskPenaltyBasisPoints: bigint;
-  readonly conservativeApyBasisPoints: bigint;
-  readonly principalUsdMantissa: bigint;
-  readonly deployedPrincipalUsdMantissa: bigint;
-  readonly entryCostUsdMantissa: bigint;
-  readonly anticipatedExitCostUsdMantissa: bigint;
-  readonly totalLifecycleCostUsdMantissa: bigint;
-  readonly costsUsdMantissa: FeeAwareAllocationCostsUsdMantissa;
-  readonly projectedGrossYieldUsdMantissa: bigint;
-  readonly projectedConservativeYieldUsdMantissa: bigint;
-  readonly netBenefitUsdMantissa: bigint;
-  readonly breakEvenDays: bigint | null;
-  readonly improvementOverSameChainUsdMantissa: bigint | null;
-}
 
 export interface FeeAwareCandidateAssessment {
   readonly candidateId: string;
@@ -582,92 +550,17 @@ function calculateCandidate(
   costs: FeeAwareAllocationCostsUsdMantissa,
   reasons: FeeAwareCandidateReason[],
 ): FeeAwareCandidateCalculation | null {
-  const entryCostUsdMantissa = boundedSum([
-    costs.entrySourceNetwork,
-    costs.entrySourceSwap,
-    costs.entryBridge,
-    costs.entryDestinationNetwork,
-    costs.entryDestinationSwap,
-    costs.providerEntry,
-    costs.platformRouting,
-    costs.riskBuffer,
-  ]);
-  const anticipatedExitCostUsdMantissa = boundedSum([
-    costs.providerExit,
-    costs.exitDestinationNetwork,
-    costs.exitDestinationSwap,
-    costs.exitBridge,
-    costs.exitSourceNetwork,
-  ]);
-  const totalLifecycleCostUsdMantissa =
-    entryCostUsdMantissa === null || anticipatedExitCostUsdMantissa === null
-      ? null
-      : boundedSum([entryCostUsdMantissa, anticipatedExitCostUsdMantissa]);
-  if (
-    entryCostUsdMantissa === null ||
-    anticipatedExitCostUsdMantissa === null ||
-    totalLifecycleCostUsdMantissa === null
-  ) {
-    reasons.push('NUMERIC_LIMIT_EXCEEDED');
-    return null;
-  }
-
-  if (totalLifecycleCostUsdMantissa >= position.amountUsdMantissa) {
-    reasons.push('TOTAL_COST_EXCEEDS_PRINCIPAL');
-  }
-  const deployedPrincipalUsdMantissa =
-    entryCostUsdMantissa < position.amountUsdMantissa
-      ? position.amountUsdMantissa - entryCostUsdMantissa
-      : 0n;
-  const riskPenaltyBasisPoints = opportunity.riskAssessment?.penaltyBasisPoints ?? 0n;
-  const totalApyDeductions = opportunity.recurringFeeBasisPoints + riskPenaltyBasisPoints;
-  const conservativeApyBasisPoints =
-    opportunity.grossApyBasisPoints > totalApyDeductions
-      ? opportunity.grossApyBasisPoints - totalApyDeductions
-      : 0n;
-  const projectedGrossYieldUsdMantissa = projectedYield(
-    deployedPrincipalUsdMantissa,
-    opportunity.grossApyBasisPoints,
-    request.holdingPeriodDays,
-  );
-  const projectedConservativeYieldUsdMantissa = projectedYield(
-    deployedPrincipalUsdMantissa,
-    conservativeApyBasisPoints,
-    request.holdingPeriodDays,
-  );
-  if (projectedGrossYieldUsdMantissa === null || projectedConservativeYieldUsdMantissa === null) {
-    reasons.push('NUMERIC_LIMIT_EXCEEDED');
-    return null;
-  }
-  const netBenefitUsdMantissa =
-    projectedConservativeYieldUsdMantissa - totalLifecycleCostUsdMantissa;
-  if (netBenefitUsdMantissa <= 0n) reasons.push('NON_POSITIVE_NET_BENEFIT');
-  if (netBenefitUsdMantissa < request.minimumNetBenefitUsdMantissa) {
-    reasons.push('MINIMUM_NET_BENEFIT_NOT_MET');
-  }
-  const breakEvenDays = calculateBreakEvenDays(
-    deployedPrincipalUsdMantissa,
-    conservativeApyBasisPoints,
-    totalLifecycleCostUsdMantissa,
-  );
-
-  return deepFreeze({
+  const result = calculateFeeAwareReturn({
+    principalUsdMantissa: position.amountUsdMantissa,
     grossApyBasisPoints: opportunity.grossApyBasisPoints,
     recurringFeeBasisPoints: opportunity.recurringFeeBasisPoints,
-    riskPenaltyBasisPoints,
-    conservativeApyBasisPoints,
-    principalUsdMantissa: position.amountUsdMantissa,
-    deployedPrincipalUsdMantissa,
-    entryCostUsdMantissa,
-    anticipatedExitCostUsdMantissa,
-    totalLifecycleCostUsdMantissa,
-    costsUsdMantissa: costs,
-    projectedGrossYieldUsdMantissa,
-    projectedConservativeYieldUsdMantissa,
-    netBenefitUsdMantissa,
-    breakEvenDays,
-    improvementOverSameChainUsdMantissa: null,
+    riskPenaltyBasisPoints: opportunity.riskAssessment?.penaltyBasisPoints ?? 0n,
+    holdingPeriodDays: request.holdingPeriodDays,
+    minimumNetBenefitUsdMantissa: request.minimumNetBenefitUsdMantissa,
+    costs,
   });
+  reasons.push(...result.reasons);
+  return result.calculation;
 }
 
 function applyCrossChainComparisonPolicy(
@@ -828,23 +721,10 @@ function isEligibleInternal(assessment: InternalAssessment): boolean {
 }
 
 function compareAssessments(left: InternalAssessment, right: InternalAssessment): number {
-  const leftCalculation = left.calculation;
-  const rightCalculation = right.calculation;
-  if (leftCalculation === null) return rightCalculation === null ? 0 : 1;
-  if (rightCalculation === null) return -1;
-  if (leftCalculation.netBenefitUsdMantissa !== rightCalculation.netBenefitUsdMantissa) {
-    return leftCalculation.netBenefitUsdMantissa > rightCalculation.netBenefitUsdMantissa ? -1 : 1;
-  }
-  if (left.routeKind !== right.routeKind) return left.routeKind === 'SAME_CHAIN' ? -1 : 1;
-  if (
-    leftCalculation.totalLifecycleCostUsdMantissa !== rightCalculation.totalLifecycleCostUsdMantissa
-  ) {
-    return leftCalculation.totalLifecycleCostUsdMantissa <
-      rightCalculation.totalLifecycleCostUsdMantissa
-      ? -1
-      : 1;
-  }
-  return compareText(left.candidate.candidateId, right.candidate.candidateId);
+  return compareFeeAwareReturns(
+    { id: left.candidate.candidateId, routeKind: left.routeKind, calculation: left.calculation },
+    { id: right.candidate.candidateId, routeKind: right.routeKind, calculation: right.calculation },
+  );
 }
 
 function compareOptionalNetBenefit(
@@ -858,28 +738,7 @@ function compareOptionalNetBenefit(
   return leftValue === rightValue ? 0 : leftValue > rightValue ? -1 : 1;
 }
 
-function projectedYield(
-  principalUsdMantissa: bigint,
-  apyBasisPoints: bigint,
-  holdingPeriodDays: bigint,
-): bigint | null {
-  const value =
-    (principalUsdMantissa * apyBasisPoints * holdingPeriodDays) /
-    (BASIS_POINTS_DENOMINATOR * DAYS_PER_YEAR);
-  return value <= MAX_UINT256 ? value : null;
-}
 
-function calculateBreakEvenDays(
-  principalUsdMantissa: bigint,
-  apyBasisPoints: bigint,
-  totalCostsUsdMantissa: bigint,
-): bigint | null {
-  if (totalCostsUsdMantissa === 0n) return 0n;
-  const dailyYieldNumerator = principalUsdMantissa * apyBasisPoints;
-  if (dailyYieldNumerator === 0n) return null;
-  const numerator = totalCostsUsdMantissa * BASIS_POINTS_DENOMINATOR * DAYS_PER_YEAR;
-  return (numerator + dailyYieldNumerator - 1n) / dailyYieldNumerator;
-}
 
 function parseRequest(value: unknown): ParsedRequest {
   const record = exactRecord(value, [

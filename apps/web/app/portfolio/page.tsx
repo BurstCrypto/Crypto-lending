@@ -1,21 +1,24 @@
 import type { Metadata } from 'next';
 
-import { ProductionPortfolio } from '@/components/portfolio/production-portfolio';
 import { SiteHeader } from '@/components/site-header';
+import { MainnetWorkspace } from '@/components/mainnet/workspace';
+import { localMainnetConfig } from '@/lib/local-mainnet/config.server';
 
 export const metadata: Metadata = {
   title: 'Portfolio',
-  description: 'Authenticated portfolio reporting and source-freshness workspace.',
+  description: 'Your wallets, balances, and automatic USDC lending on Ethereum and Solana.',
   robots: { index: false, follow: false },
 };
 
 export const dynamic = 'force-dynamic';
 
 export default function PortfolioPage() {
+  const localWalletMode = localMainnetConfig() !== null;
   return (
     <main className="page-shell portfolio-page-shell">
       <SiteHeader
         activePage="portfolio"
+        localWalletMode={localWalletMode}
         authenticationActions="sign-in"
         signInHref="/login?returnTo=%2Fportfolio"
       />
@@ -32,16 +35,15 @@ export default function PortfolioPage() {
             Your supported balances, in one clear view.
           </h1>
           <p className="portfolio-introduction__description">
-            Preview conservative Ethereum and Solana reporting, source attribution, and freshness
-            while approved live-data providers remain pending.
+            Connect your wallet, choose how much USDC to lend, and let Smart Lending select the destination. Manage your deposits and withdrawals here.
           </p>
         </div>
       </section>
 
-      <ProductionPortfolio />
+      <MainnetWorkspace />
 
       <footer className="site-footer">
-        <p>Bonsai Lending multi-chain mainnet read-only preview</p>
+        <p>Bonsai Lending · Ethereum and Solana mainnet</p>
       </footer>
     </main>
   );

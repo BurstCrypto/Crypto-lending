@@ -46,7 +46,10 @@ import {
   AUTHENTICATION_CONFIG,
   type RuntimeAuthenticationConfig,
 } from '../infrastructure/config/authentication-config.provider';
-import type { OidcAuthenticationConfig } from '../infrastructure/config/authentication.config';
+import type {
+  OidcAuthenticationConfig,
+  EnabledAuthenticationConfig,
+} from '../infrastructure/config/authentication.config';
 import {
   activeAuthenticationHmacKey,
   constantTimeAuthenticationValueEquals,
@@ -169,7 +172,7 @@ export class AuthenticationService {
   ) {}
 
   async start(request: StartAuthenticationRequest): Promise<StartedAuthentication> {
-    const config = this.requireEnabled();
+    const config = this.requireOidcConfig();
     const returnPath = parseLocalReturnPath(request.returnPath);
     const registration = this.registrationForFlow(request.flow, request.registration);
     const correlationId = requestCorrelationId();
@@ -246,7 +249,7 @@ export class AuthenticationService {
   async completeCallback(
     request: CompleteAuthenticationCallbackRequest,
   ): Promise<CompletedAuthentication> {
-    const config = this.requireEnabled();
+    const config = this.requireOidcConfig();
     const correlationId = requestCorrelationId();
     await this.admit('CALLBACK', exactSourceAddress(request.sourceAddress), correlationId, config);
     let payload: ReturnType<typeof openPreAuthenticationTransactionCookie>;
@@ -567,7 +570,7 @@ export class AuthenticationService {
 
   private requireSessionProof(
     request: AuthenticationHttpRequest,
-    config: OidcAuthenticationConfig,
+    config: EnabledAuthenticationConfig,
   ): VerifiedBrowserSessionProof {
     try {
       const value = assertUnambiguousAuthenticationHeaders(
@@ -595,7 +598,7 @@ export class AuthenticationService {
 
   private async verifySessionProof(
     proof: VerifiedBrowserSessionProof,
-    config: OidcAuthenticationConfig,
+    config: EnabledAuthenticationConfig,
     correlationId: string,
   ): Promise<void> {
     try {
@@ -633,7 +636,7 @@ export class AuthenticationService {
     scope: AuthenticationRateLimitScope,
     subject: string,
     correlationId: string,
-    config: OidcAuthenticationConfig,
+    config: EnabledAuthenticationConfig,
   ): Promise<void> {
     const policy = RATE_LIMIT_POLICIES[scope];
     let decision: Awaited<ReturnType<AuthenticationRateLimiterPort['admit']>>;
@@ -702,14 +705,19 @@ export class AuthenticationService {
     }
   }
 
-  private enabledOrNull(): OidcAuthenticationConfig | null {
-    return this.runtimeConfig.mode === 'oidc' ? this.runtimeConfig : null;
+  private enabledOrNull(): EnabledAuthenticationConfig | null {
+    return this.runtimeConfig.mode !== 'disabled' ? this.runtimeConfig : null;
   }
 
-  private requireEnabled(): OidcAuthenticationConfig {
+  private requireEnabled(): EnabledAuthenticationConfig {
     const config = this.enabledOrNull();
     if (!config) throw new AuthenticationUnavailableError();
     return config;
+  }
+
+  private requireOidcConfig(): OidcAuthenticationConfig {
+    if (this.runtimeConfig.mode !== 'oidc') throw new AuthenticationUnavailableError();
+    return this.runtimeConfig;
   }
 
   private requireOidc(): OidcClientPort {

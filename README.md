@@ -9,6 +9,23 @@ records the completed local verification checkpoint and remaining external gates
 The next engineering milestone starts with the
 [production network foundation](docs/production-network-foundation.md).
 
+The [CCTP USDC execution package](onchain/README.md) contains source-chain fee
+collection contracts and transaction builders for Ethereum/Solana bridging and
+destination lending. The [local mainnet test page](tools/local-mainnet/README.md)
+connects these builders to browser wallets, router deployment, and durable bridge
+recovery. Start it with `npm run dev:mainnet` and open `http://127.0.0.1:3000`.
+Production and local mainnet use the same Portfolio, automatic lending selection,
+transaction review and execution code. Smart Lending compares providers internally
+and presents one plan without manual destination choices. Production hides
+provider names; local mode adds read-only provider APYs, current positions and
+verified deposit destinations. Local mode skips email/phone account
+sign-in on loopback; production verifies the account session before serving the
+same API. Connect either wallet or both in Portfolio. All ten configured USDC
+lenders participate in the comparison, and the saved treasury recipients are
+shared. See [production/local parity](docs/mainnet-production-parity.md) for the
+deployment requirements and limits of verification. These source changes do not
+update an already deployed website.
+
 ## Prerequisites
 
 - Node.js 22.13 or newer on the Node 22 line, or Node.js 24+
@@ -61,21 +78,17 @@ The default local endpoints are:
 
 ## Current production direction
 
-The product path targets Amazon Cognito managed sign-in, Ethereum mainnet
+The product path targets authenticated accounts, Ethereum mainnet
 (`eip155:1`), and Solana mainnet
 (`solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp`). Base is outside the active launch
 scope. Account identity, wallet ownership proof, portfolio reads, and financial
-actions are separate security boundaries. The current mainnet slice is
-read-only; existing testnet executors are not promoted or relabeled. See the
-[mainnet rollout boundary](docs/mainnet-rollout.md) for the explicit gates
-before live reads or any real-value write.
-The [smart lending allocation policy](docs/smart-lending-allocation-policy.md)
-defines the non-executing, fee-aware recommendation boundary for comparing
-same-chain and explicitly opted-in Ethereum/Solana cross-chain routes. Passive,
-disabled-by-default adapters now normalize wallet-free Aave Ethereum market
-corroboration, aggregate market corroboration, and read-only round-trip bridge
-quotes. A fail-closed composition boundary is wired with unavailable defaults;
-none of these pieces activates a provider or a mainnet transaction path.
+actions are separate boundaries. The web mainnet workspace now prepares reviewed
+transactions for the connected browser wallet, using the same implementation in
+production and local mode. It shares fee-aware return arithmetic with the API
+allocation policy. The earlier read-only API adapters and testnet executors remain
+separate from this wallet-signed web path; their historical rollout documents do
+not describe the new web runtime. The current [parity runbook](docs/mainnet-production-parity.md)
+records that distinction and the required persistent transaction journal.
 
 The first [Aave read-only connection](docs/aave-readonly-integration.md) now has
 private PostgreSQL wallet/checkpoint and bounded HTTPS RPC implementations,

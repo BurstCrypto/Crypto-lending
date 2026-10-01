@@ -39,6 +39,17 @@ describe('SiteHeader', () => {
     Reflect.deleteProperty(document, 'visibilityState');
   });
 
+  it('shows all local workspace links without checking an account session or offering sign-in', () => {
+    render(<SiteHeader activePage="portfolio" localWalletMode />);
+    expect(screen.getByRole('navigation', { name: 'Primary' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Portfolio' })).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByRole('link', { name: 'Account' })).toHaveAttribute('href', '/account');
+    expect(screen.queryByRole('link', { name: 'Platforms' })).toBeNull();
+    expect(screen.queryByRole('navigation', { name: 'Account actions' })).toBeNull();
+    expect(screen.queryByRole('link', { name: 'Sign in' })).toBeNull();
+    expect(authenticationMocks.restore).not.toHaveBeenCalled();
+  });
+
   it('does not request session-derived navigation when the header mounts hidden', async () => {
     authenticationMocks.restore.mockResolvedValueOnce({});
     Object.defineProperty(document, 'visibilityState', {
@@ -105,7 +116,7 @@ describe('SiteHeader', () => {
     });
 
     expect(screen.getByRole('link', { name: 'Portfolio' })).toHaveAttribute('href', '/portfolio');
-    expect(screen.getByRole('link', { name: 'Platforms' })).toHaveAttribute('href', '/platforms');
+    expect(screen.queryByRole('link', { name: 'Platforms' })).toBeNull();
     expect(screen.getByRole('link', { name: 'Home' })).toHaveAttribute('aria-current', 'page');
     expect(screen.getByRole('link', { name: 'Account' })).toHaveAttribute('href', '/account');
     expect(screen.queryByRole('navigation', { name: 'Account actions' })).toBeNull();

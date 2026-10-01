@@ -116,6 +116,23 @@ export interface MainnetPlatformDirectory {
   readonly providers: readonly MainnetPlatformCandidate[];
 }
 
+/** The same product roadmap labels, without claiming any live data or execution. */
+export function mainnetPlatformPlanningDirectory(): MainnetPlatformDirectory {
+  return {
+    schemaVersion: 1, use: 'MAINNET_PLATFORM_DIRECTORY', mayAuthorizeFinancialAction: false,
+    minimumProviderTarget: 10,
+    providers: PLATFORM_IDS.map((id) => {
+      const definition = PLATFORM_DEFINITIONS[id];
+      return {
+        id, name: definition.name, protocol: definition.protocol, ecosystem: definition.ecosystem,
+        networks: definition.networkIds.map((networkId) => ({ id: networkId, name: NETWORK_DEFINITIONS[networkId].name })),
+        integrationStatus: 'PLANNED', dataStatus: 'NOT_CONNECTED', accessStatus: 'UNAVAILABLE',
+        riskStatus: 'NOT_ASSESSED', supportedActions: [],
+      };
+    }),
+  };
+}
+
 export class MainnetPlatformDirectoryResponseError extends Error {
   constructor() {
     super('Mainnet platform directory response is invalid.');

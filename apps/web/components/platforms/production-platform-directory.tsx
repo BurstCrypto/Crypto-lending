@@ -140,7 +140,7 @@ function FailureView({ unavailable }: { readonly unavailable: boolean }) {
   );
 }
 
-function ReadyView({ directory }: { readonly directory: MainnetPlatformDirectory }) {
+export function PlatformDirectoryView({ directory }: { readonly directory: MainnetPlatformDirectory }) {
   return (
     <section className="platform-directory" aria-labelledby="platform-directory-title">
       <div className="platform-directory__summary" role="status">
@@ -271,7 +271,7 @@ export function ProductionPlatformDirectory({ dependencies }: ProductionPlatform
     );
   }
 
-  if (directory.status === 'READY') return <ReadyView directory={directory.directory} />;
+  if (directory.status === 'READY') return <PlatformDirectoryView directory={directory.directory} />;
 
   return (
     <div className="platform-directory-failure">

@@ -13,6 +13,7 @@
   },
   "scripts": {
     "dev:web": "npm run dev --workspace @crypto-lending/web",
+    "dev:mainnet": "node tools/local-mainnet/start.mjs",
     "dev:aave:local": "tsx tools/local-aave/cli.ts",
     "dev:chains:local": "tsx tools/local-aave/cli.ts",
     "chains:local:check": "tsx tools/local-aave/cli.ts --check-both",
@@ -83,7 +84,7 @@
     "infra:validate:providers": "node infra/providers/validate-kan-62-provider-decision.mjs && node infra/providers/validate-active-provider-research-captures.mjs && node infra/providers/validate-dormant-provider-inventory.mjs && node infra/providers/validate-dormant-mainnet-action-boundary.mjs",
     "infra:validate:valuation": "node infra/valuation/validate-kan-66-stablecoin-valuation-decision.mjs",
     "infra:test:guardrails": "node --test infra/aws/validate-account-guardrails.test.mjs infra/aws/validate-billing-control-record.test.mjs",
-    "infra:test:containers": "node --test infra/containers/validate-built-runtime.test.mjs infra/containers/validate-production-containers.test.mjs",
+    "infra:test:containers": "node --test infra/containers/validate-built-runtime.test.mjs infra/containers/validate-production-containers.test.mjs infra/containers/assemble-mainnet-web.test.mjs",
     "infra:test:acm-dns": "node --test infra/aws/validate-acm-dns-control-record.test.mjs",
     "infra:test:migrations": "node --test infra/aws/validate-database-migration-task.test.mjs infra/postgres/validate-bootstrap-principals.test.mjs",
     "infra:test:workload-boundaries": "node --test infra/aws/validate-application-workload-boundaries.test.mjs",

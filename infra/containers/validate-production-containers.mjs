@@ -52,11 +52,26 @@ const EXPECTED_DOCKERIGNORE = `**
 !apps/web/components/**
 !apps/web/lib/
 !apps/web/lib/**
+!onchain/
+!onchain/package.json
+!onchain/package-lock.json
+!onchain/src/
+!onchain/src/**
+!onchain/contracts/
+!onchain/contracts/**
+!onchain/scripts/
+!onchain/scripts/compile.mjs
 !infra/
 !infra/containers/
 !infra/containers/aws-rds-global-bundle.crt
 !infra/containers/validate-built-runtime.mjs
+!infra/containers/assemble-mainnet-web.mjs
 !infra/containers/validate-oci-build-metadata.mjs
+!deploy/
+!deploy/railway/
+!deploy/railway/gateway/
+!deploy/railway/gateway/Caddyfile
+!deploy/railway/gateway/Dockerfile
 **/.env
 **/.env.*
 **/*.key
@@ -475,7 +490,7 @@ function validateWebDockerfile(source) {
     command: 'CMD ["node", "server.js"]',
     health: 'http://127.0.0.1:3000/api/health',
     port: 3000,
-    runtimeMode: 'web',
+    runtimeMode: 'web-mainnet',
     runtimeRoot: 'apps/web/.next/standalone',
     workspace: '@crypto-lending/web',
   });
@@ -485,6 +500,11 @@ function validateWebDockerfile(source) {
     normalized.includes('/workspace/apps/web/.next/standalone /app') &&
       normalized.includes('/workspace/apps/web/.next/static /app/apps/web/.next/static'),
     'Dockerfile.web must assemble only the standalone server and static output',
+  );
+  addError(
+    errors,
+    normalized.includes('RUN ["node", "infra/containers/assemble-mainnet-web.mjs", "apps/web/.next/standalone"]'),
+    'Dockerfile.web must materialize the traced mainnet provider aliases before runtime validation',
   );
   addError(
     errors,
@@ -711,9 +731,18 @@ export function validateProductionContainerSources(sources) {
   );
   addError(
     errors,
-    apiPackage?.dependencies?.['@solana/web3.js'] === undefined &&
-      webPackage?.dependencies?.['@solana/web3.js'] === undefined,
-    '@solana/web3.js must remain outside both production dependency graphs',
+    apiPackage?.dependencies?.['@solana/web3.js'] === undefined,
+    '@solana/web3.js must remain outside the production API dependency graph',
+  );
+  addError(
+    errors,
+    Object.entries({
+      '@solana/web3.js': '1.98.4',
+      '@0dotxyz/p0-ts-sdk': '2.8.3',
+      '@jup-ag/lend': '0.3.0-beta.1',
+      '@solendprotocol/solend-sdk': '0.14.27',
+    }).every(([name, version]) => webPackage?.dependencies?.[name] === version),
+    'The mainnet web runtime must pin the reviewed wallet and lending SDK versions',
   );
   addError(
     errors,

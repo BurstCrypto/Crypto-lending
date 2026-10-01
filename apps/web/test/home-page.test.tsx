@@ -1,5 +1,5 @@
-import { render, screen, within } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { cleanup, render, screen, within } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('@/lib/authentication', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/authentication')>();
@@ -12,17 +12,30 @@ vi.mock('@/lib/authentication', async (importOriginal) => {
 });
 
 import HomePage from '../app/page';
+import { restoreAuthenticationSession } from '@/lib/authentication';
 
 describe('HomePage', () => {
+  afterEach(() => { cleanup(); vi.unstubAllEnvs(); vi.clearAllMocks(); });
+
+  it('uses wallet access and shared navigation locally without making an account request', () => {
+    vi.stubEnv('NODE_ENV', 'development');
+    vi.stubEnv('LOCAL_MAINNET_TEST_MODE', 'enabled');
+    vi.stubEnv('LOCAL_MAINNET_TEST_LAUNCH_TOKEN', 'a'.repeat(64));
+    render(<HomePage />);
+    expect(screen.getByRole('link', { name: 'Connect wallets' })).toHaveAttribute('href', '/portfolio#wallets');
+    expect(screen.getByRole('navigation', { name: 'Primary' })).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Sign in' })).toBeNull();
+    expect(restoreAuthenticationSession).not.toHaveBeenCalled();
+  });
   it('presents a session-safe signed-out path and explains the product', async () => {
     render(<HomePage />);
 
     const hero = screen.getByRole('region', {
-      name: 'See how supported balances will be reported—without giving up wallet control.',
+      name: 'Your stablecoins. Smarter lending.',
     });
-    expect(within(hero).getByText(/conservative reporting totals/i)).toBeInTheDocument();
+    expect(within(hero).getByText(/Smart Lending selects where to lend/i)).toBeInTheDocument();
     expect(
-      within(hero).getByText(/Live provider-backed balance data is not active yet/iu),
+      within(hero).getByText(/Your wallet approves every transaction/iu),
     ).toBeInTheDocument();
     expect(await within(hero).findByRole('link', { name: 'Sign in' })).toHaveAttribute(
       'href',
@@ -48,21 +61,21 @@ describe('HomePage', () => {
     );
 
     const preview = screen.getByRole('complementary', {
-      name: 'From secure access to an informed decision.',
+      name: 'From your wallet to a reviewed deposit.',
     });
     expect(within(preview).getAllByRole('listitem')).toHaveLength(3);
     expect(
-      within(preview).getByRole('heading', { name: 'Verify your wallet' }),
+      within(preview).getByRole('heading', { name: 'Let Smart Lending choose' }),
     ).toBeInTheDocument();
 
     const productExplanation = screen.getByRole('region', {
-      name: 'Design every reported total to be easier to understand.',
+      name: 'Let Smart Lending do the comparison.',
     });
     expect(
       within(productExplanation).getByRole('heading', { name: 'Unify supported balances' }),
     ).toBeInTheDocument();
     expect(
-      within(productExplanation).getByRole('heading', { name: 'Understand each reported total' }),
+      within(productExplanation).getByRole('heading', { name: 'See returns after costs' }),
     ).toBeInTheDocument();
     expect(
       within(productExplanation).getByRole('heading', { name: 'Keep control in your wallet' }),
@@ -70,7 +83,7 @@ describe('HomePage', () => {
 
     expect(
       screen.getByRole('region', { name: 'Review first. Act only when you are ready.' }),
-    ).toHaveTextContent('When enabled, connecting a wallet proves ownership only');
+    ).toHaveTextContent('Deposit amounts are bounded by your connected wallet balance');
     expect(screen.queryByRole('link', { name: 'Open the portfolio workspace' })).toBeNull();
     expect(screen.queryByRole('link', { name: 'Portfolio' })).toBeNull();
     expect(screen.queryByRole('link', { name: 'Account' })).toBeNull();

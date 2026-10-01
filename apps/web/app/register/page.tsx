@@ -1,3 +1,4 @@
+import { PasswordlessForm } from '@/components/authentication/passwordless-form';
 import type { Metadata } from 'next';
 
 import { AuthenticationShell } from '@/components/authentication/authentication-shell';
@@ -26,9 +27,17 @@ export default async function RegisterPage({ searchParams }: RegisterPageProps) 
       authenticationActionHref={`/login?returnTo=${encodeURIComponent(returnPath)}`}
       eyebrow="Get started"
       title="Create your account."
-      description="Add your contact details, then complete the secure identity step."
+      description={
+        process.env.AUTH_MODE === 'passwordless'
+          ? 'Start with your email or phone number.'
+          : 'Add your contact details, then complete the secure identity step.'
+      }
     >
-      <RegistrationForm key={returnPath} returnPath={returnPath} />
+      {process.env.AUTH_MODE === 'passwordless' ? (
+        <PasswordlessForm key={returnPath} returnPath={returnPath} />
+      ) : (
+        <RegistrationForm key={returnPath} returnPath={returnPath} />
+      )}
     </AuthenticationShell>
   );
 }

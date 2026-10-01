@@ -16,6 +16,7 @@ export type SiteHeaderAuthenticationActions = 'both' | 'sign-in' | 'create-accou
 
 interface SiteHeaderProps {
   readonly activePage: SitePage;
+  readonly localWalletMode?: boolean;
   readonly authenticationActions?: SiteHeaderAuthenticationActions;
   readonly signInHref?: string | undefined;
   readonly createAccountHref?: string | undefined;
@@ -24,7 +25,6 @@ interface SiteHeaderProps {
 
 const PRIMARY_LINKS = [
   { page: 'home', href: '/', label: 'Home' },
-  { page: 'platforms', href: '/platforms', label: 'Platforms' },
   { page: 'portfolio', href: '/portfolio', label: 'Portfolio' },
   { page: 'account', href: '/account', label: 'Account' },
 ] as const;
@@ -79,6 +79,7 @@ function AuthenticationNavigation({
 
 export function SiteHeader({
   activePage,
+  localWalletMode = false,
   authenticationActions = 'both',
   signInHref = '/login',
   createAccountHref = '/register',
@@ -103,6 +104,7 @@ export function SiteHeader({
   });
 
   useEffect(() => {
+    if (localWalletMode) return;
     if (!isSensitiveViewActive()) return;
     const abortController = new AbortController();
     activeSessionCheck.current = abortController;
@@ -123,19 +125,20 @@ export function SiteHeader({
       abortController.abort();
       if (activeSessionCheck.current === abortController) activeSessionCheck.current = null;
     };
-  }, [isSensitiveViewActive, sessionRevision]);
+  }, [isSensitiveViewActive, sessionRevision, localWalletMode]);
 
-  const primaryLinks = sessionState === 'authenticated' ? PRIMARY_LINKS : [];
+  const primaryLinks = localWalletMode || sessionState === 'authenticated' ? PRIMARY_LINKS : [];
   const isPublicEntryPage =
     activePage === 'home' || activePage === 'login' || activePage === 'register';
   const visibleAuthenticationActions =
+    !localWalletMode &&
     authenticationActions !== 'none' &&
     (sessionState === 'public' || (sessionState === 'unavailable' && isPublicEntryPage))
       ? authenticationActions
       : null;
 
   return (
-    <header className="site-header site-header--shared" data-session-navigation={sessionState}>
+    <header className="site-header site-header--shared" data-session-navigation={localWalletMode ? 'local-wallet' : sessionState}>
       <Link className="brand site-header__brand" href="/" aria-label="Bonsai Lending home">
         <span className="brand-mark" aria-hidden="true">
           <BonsaiLogo />
@@ -169,7 +172,7 @@ export function SiteHeader({
           />
         ) : null}
 
-        {authenticationActions !== 'none' ? (
+        {!localWalletMode && authenticationActions !== 'none' ? (
           <noscript>
             <AuthenticationNavigation
               activePage={activePage}

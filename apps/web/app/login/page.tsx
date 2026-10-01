@@ -1,3 +1,4 @@
+import { PasswordlessForm } from '@/components/authentication/passwordless-form';
 import type { Metadata } from 'next';
 
 import { AuthenticationShell } from '@/components/authentication/authentication-shell';
@@ -32,7 +33,11 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
       title="Welcome back."
       description="Sign in securely to view your portfolio and account."
     >
-      <LoginForm key={returnPath} returnPath={returnPath} initialError={callbackFailed} />
+      {process.env.AUTH_MODE === 'passwordless' ? (
+        <PasswordlessForm key={returnPath} returnPath={returnPath} />
+      ) : (
+        <LoginForm key={returnPath} returnPath={returnPath} initialError={callbackFailed} />
+      )}
     </AuthenticationShell>
   );
 }

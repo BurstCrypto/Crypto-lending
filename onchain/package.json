@@ -1,0 +1,23 @@
+{
+  "name": "@bonsai-lending/onchain",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/compile.mjs",
+    "test": "node --import tsx --test test/*.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@openzeppelin/contracts": "5.4.0",
+    "@solana/web3.js": "1.98.4",
+    "viem": "2.55.18"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.1",
+    "hardhat": "3.14.0",
+    "solc": "0.8.30",
+    "tsx": "4.23.12",
+    "typescript": "5.9.3"
+  }
+}

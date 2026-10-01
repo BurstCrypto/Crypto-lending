@@ -369,8 +369,8 @@ export class AuthenticationController {
       }
     }
     response.setHeader('Set-Cookie', this.clearSessionCookies());
-    if (localLogoutConfirmed) {
-      const providerLogoutUrl = managedProviderLogoutUrl(this.enabledConfig());
+    if (localLogoutConfirmed && this.config.mode === 'oidc') {
+      const providerLogoutUrl = managedProviderLogoutUrl(this.config);
       if (providerLogoutUrl !== undefined) {
         response.setHeader(AUTHENTICATION_PROVIDER_LOGOUT_HEADER, providerLogoutUrl);
       }
@@ -385,8 +385,8 @@ export class AuthenticationController {
     ];
   }
 
-  private enabledConfig(): Extract<RuntimeAuthenticationConfig, { readonly mode: 'oidc' }> {
-    if (this.config.mode !== 'oidc') throw new AuthenticationUnavailableError();
+  private enabledConfig(): Exclude<RuntimeAuthenticationConfig, { readonly mode: 'disabled' }> {
+    if (this.config.mode === 'disabled') throw new AuthenticationUnavailableError();
     return this.config;
   }
 

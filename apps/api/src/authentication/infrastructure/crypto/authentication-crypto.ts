@@ -23,7 +23,8 @@ import {
 
 export type AuthenticationKeyPurpose =
   'csrf-hmac' | 'identity-hmac' | 'preauth-seal' | 'session-hmac';
-export type AuthenticationDigestPurpose = 'csrf' | 'oidc-state' | 'rate-limit' | 'session';
+export type AuthenticationDigestPurpose =
+  'csrf' | 'oidc-state' | 'rate-limit' | 'session' | 'otp-code';
 export type AuthenticationOpaqueSecretPurpose =
   'browser-binding' | 'csrf' | 'oidc-nonce' | 'oidc-state' | 'session';
 export type AuthenticationOpaqueDigestPurpose = Extract<
