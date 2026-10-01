@@ -742,7 +742,7 @@ const REVIEWED_PROVIDER_POSITION_READ_ARTIFACT_SHA256 = Object.freeze({
   providerPositionChainAnchorCandidateFinalityFinalizerSource:
     '581c7c17dac3ca3a09a29ac9757efda55b02cb17ea882fc6788aa3d6cf6c33d8',
   providerPositionAaveV3EthereumSource:
-    '7bb670f1435d2a5dbd6ad707a3cfcef80b4ef3452433653a7f49a045440eaba5',
+    '346f2e23b73ab4ee13423b0c3f50b669c721abd16e430c16587f2a378acdeb88',
   providerPositionKaminoSource: 'eacdafa7fcd5fa5574183d0f0e2beb6a02c270cd8ecd71be6b7a120ca60355a6',
   providerPositionCompoundIIIEthereumSource:
     'f70dee0b5af6a5a0d137d5b580e1fcca95565c40141f96f0de79a9316e40569a',
@@ -923,7 +923,7 @@ const REVIEWED_BALANCE_CONSUMER_ARTIFACT_SHA256 = Object.freeze({
     '1565ac2215fd495359ad128c0945ea0b170a1c546ce27469a1c828da24c3d4d2',
   balanceJsonRpcSource: 'f8fdf7f1e292824a8041e37455022103b6e54720dde125bcf6e055285d1bec75',
   nodeHttpsBalanceJsonRpcTransportSource:
-    '429f008baa77c7e6791171d7cfd300e795c093d9c7eebb12d0bdd15e6301741f',
+    '93884248a6e603b378166e84422b8b222b53ddca3fb8d3b5c4caae2e132b4879',
   ethereumBalanceIndexerSource: 'd5fb11f282817206bbdb7e054962f1830f4a0f6122ffa3786094a65e7c4cb353',
   solanaBalanceIndexerSource: '1958e16a9878b0df9328d912a7bc855b102cda643818cb97d52d5ee521387d9e',
   ethereumMainnetBalanceDeploymentManifestSource:
@@ -1002,7 +1002,7 @@ const REVIEWED_BALANCE_CONSUMER_ARTIFACT_SHA256 = Object.freeze({
   mainnetBalanceAgreementEvidenceV2MigrationSource:
     'c9afef59a9101d568597eb37845d6d2a997edf63f1496d3d04296075fcc61fff',
   migrationIndexSource: '7957f7a45a3d1ff26bff668a8a84634855e526c7122df0c7b7e8ec0b0f3ffc6a',
-  releaseManifestSource: 'a06a41af34ec8f52a8001572aef68a2e3ea38520318152a4953b575f877745d6',
+  releaseManifestSource: 'de21eaf35f60691ec9a2fa9127d8caddfc608cbcdc69776002efb3da730e5bc0',
   productionContainerValidatorSource:
     'b5384c259a2fea022c7341f04bd279e4b4ab22c6f3763c28ddf485680ac62875',
 } satisfies Readonly<Record<keyof BalanceConsumerArtifactSources, string>>);
@@ -12069,13 +12069,19 @@ function hasDormantNodeHttpsBalanceRpcTransportContract(
     'export interface NodeHttpsBalanceJsonRpcTransportConfig {',
     'export class NodeHttpsBalanceJsonRpcTransport implements BalanceJsonRpcTransport {',
     'exchange(request: BalanceJsonRpcRequest, signal: AbortSignal): Promise<unknown> {',
+    'return exchangeWithLimit(this, request, signal, MAX_JSON_BYTES).then(({ value }) => value);',
+    'return exchangeWithLimit(this, request, signal, maximumResponseBytes);',
+    '!Number.isSafeInteger(maximumResponseBytes) ||',
+    'maximumResponseBytes < 1 ||',
+    'maximumResponseBytes > MAX_JSON_BYTES',
     "AbortSignal.prototype.addEventListener.call(signal, 'abort', onAbort, { once: true });",
     "AbortSignal.prototype.removeEventListener.call(signal, 'abort', state.abortListener);",
     'resolver = new dns.Resolver({',
     'maxTimeout: CONNECT_TIMEOUT_MS,',
     'timeout: CONNECT_TIMEOUT_MS,',
     'tries: 1,',
-    'resolver.resolve4(hostname, (error, addresses) => finishFamily(4, error, addresses));',
+    'resolver.resolve4(hostname, (error, addresses) => {',
+    'finishFamily(4, error, addresses);',
     'resolver.resolve6(hostname, (error, addresses) => finishFamily(6, error, addresses));',
     'resolver.cancel();',
     'const clientRequest = https.request(',
@@ -12105,13 +12111,15 @@ function hasDormantNodeHttpsBalanceRpcTransportContract(
     "if (contentLengths?.length !== 1 || !/^(?:[1-9][0-9]{0,6})$/u.test(rawContentLength ?? '')) {",
     'if (!Number.isSafeInteger(contentLength) || contentLength > MAX_JSON_BYTES) return null;',
     "return Object.freeze({ framing: 'CONTENT_LENGTH' as const, contentLength });",
-    "metadata.framing === 'CONTENT_LENGTH' ? metadata.contentLength : MAX_JSON_BYTES;",
+    "(metadata.framing === 'CONTENT_LENGTH' && metadata.contentLength > bodyByteLimit)",
+    "metadata.framing === 'CONTENT_LENGTH' ? metadata.contentLength : bodyByteLimit;",
     'chunks.length >= MAX_RESPONSE_CHUNKS ||',
     'receivedBytes > maximumResponseBytes - buffer.length',
     '!response.complete ||',
     "(metadata.framing === 'CONTENT_LENGTH' && receivedBytes !== metadata.contentLength)",
     'if (!hasNoResponseTrailers(response.rawTrailers)) {',
     'return Array.isArray(rawTrailers) && rawTrailers.length === 0;',
+    'settleSuccess(Object.freeze({ value: parseStrictJson(text), bodyBytes: receivedBytes }));',
     'const awaitRequestClose = state.request !== undefined && !state.requestClosed;',
     'const awaitResponseClose = state.response !== undefined && !state.responseClosed;',
     'state.closeTimer = scheduleTimer(finishFailure, IO_CLOSE_TIMEOUT_MS);',

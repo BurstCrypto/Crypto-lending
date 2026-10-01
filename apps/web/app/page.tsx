@@ -1,11 +1,18 @@
+import Link from 'next/link';
+
 import { HomeSessionActions } from '@/components/authentication/home-session-actions';
 import { SiteHeader } from '@/components/site-header';
+import { localMainnetConfig } from '@/lib/local-mainnet/config.server';
+
+export const dynamic = 'force-dynamic';
 
 export default function HomePage() {
+  const localWalletMode = localMainnetConfig() !== null;
   return (
     <main className="page-shell home-page-shell">
       <SiteHeader
         activePage="home"
+        localWalletMode={localWalletMode}
         signInHref="/login?returnTo=%2Fportfolio"
         createAccountHref="/register?returnTo=%2Fportfolio"
       />
@@ -17,56 +24,54 @@ export default function HomePage() {
           aria-labelledby="page-title"
           tabIndex={-1}
         >
-          <p className="eyebrow">Ethereum and Solana read-only preview</p>
+          <p className="eyebrow">Ethereum and Solana mainnet</p>
           <h1 id="page-title">
-            See how supported balances will be reported—without giving up wallet control.
+            Your stablecoins. Smarter lending.
           </h1>
           <p className="hero-copy">
-            Bonsai Lending is building one protected workspace for supported Ethereum and Solana
-            wallet balances, conservative reporting totals, and source freshness. Live
-            provider-backed balance data is not active yet; this rollout focuses on secure account
-            access and wallet-ownership verification while your wallet keeps control.
+            Connect an Ethereum wallet, a Solana wallet, or both. Choose your USDC amount and holding period. Smart Lending selects where to lend, and your wallet approves every transaction.
           </p>
-          <HomeSessionActions />
+          {localWalletMode ? <div className="hero-actions action-group">
+            <Link className="primary-action action-button" href="/portfolio#wallets">Connect wallets</Link>
+            <Link className="secondary-action action-button" href="/portfolio#lending">Explore Smart Lending</Link>
+          </div> : <HomeSessionActions />}
 
           <ul className="home-hero-points" aria-label="Platform highlights">
             <li>Ethereum and Solana scope</li>
-            <li>Conservative reporting model</li>
-            <li>Ownership-only signatures</li>
+            <li>Automatic lending selection</li>
+            <li>Wallet-approved transactions</li>
           </ul>
         </section>
 
         <aside className="home-preview-card" aria-labelledby="home-preview-title">
           <div className="home-preview-heading">
             <p className="eyebrow">How it works</p>
-            <h2 id="home-preview-title">From secure access to an informed decision.</h2>
+            <h2 id="home-preview-title">From your wallet to a reviewed deposit.</h2>
           </div>
 
           <ol className="home-steps">
             <li className="home-step">
               <span aria-hidden="true">01</span>
               <div>
-                <h3>Sign in securely</h3>
-                <p>Use a managed identity provider to access your private account workspace.</p>
+                <h3>{localWalletMode ? 'Connect your wallets' : 'Sign in securely'}</h3>
+                <p>{localWalletMode ? 'Choose Ethereum, Solana, or both. Your saved treasury addresses are ready.' : 'Use a managed identity provider to access your private account workspace.'}</p>
               </div>
             </li>
             <li className="home-step">
               <span aria-hidden="true">02</span>
               <div>
-                <h3>Verify your wallet</h3>
+                <h3>Let Smart Lending choose</h3>
                 <p>
-                  Prove wallet ownership with a message signature that cannot move funds or approve
-                  a loan.
+                  Choose the USDC amount and holding period. Smart Lending selects a destination using current rates, available capacity, and estimated costs.
                 </p>
               </div>
             </li>
             <li className="home-step">
               <span aria-hidden="true">03</span>
               <div>
-                <h3>Preview clear reporting</h3>
+                <h3>Review and confirm</h3>
                 <p>
-                  See how network and asset totals will expose source coverage and freshness without
-                  treating missing data as zero.
+                  Review the amount, expected return, receiving wallet, and costs before approving each mainnet transaction in your wallet.
                 </p>
               </div>
             </li>
@@ -78,12 +83,11 @@ export default function HomePage() {
         <div className="home-section-heading">
           <div>
             <p className="eyebrow">What we do</p>
-            <h2 id="home-purpose-title">Design every reported total to be easier to understand.</h2>
+            <h2 id="home-purpose-title">Let Smart Lending do the comparison.</h2>
           </div>
           <p>
-            Mainnet lending data can be scattered across wallets, networks, and protocols. We are
-            building a reporting view that brings the important parts together and shows how each
-            figure was formed.
+            Smart Lending checks rates and costs across supported markets, selects the destination,
+            and gives you one deposit plan to review.
           </p>
         </div>
 
@@ -94,8 +98,7 @@ export default function HomePage() {
             </span>
             <h3>Unify supported balances</h3>
             <p>
-              Once approved Ethereum and Solana data sources are active, review supported network
-              and asset totals with source coverage and observation freshness.
+              Check the balances available in each connected wallet, and manage your supported USDC lending positions.
             </p>
           </article>
 
@@ -103,10 +106,9 @@ export default function HomePage() {
             <span className="home-benefit-number" aria-hidden="true">
               02
             </span>
-            <h3>Understand each reported total</h3>
+            <h3>See returns after costs</h3>
             <p>
-              See when unsupported inputs, missing prices, or stale data make a total partial or
-              unavailable instead of treating missing information as zero.
+              See the selected plan’s current supply APY, estimated fees, and projected net earnings for your amount and holding period.
             </p>
           </article>
 
@@ -116,8 +118,7 @@ export default function HomePage() {
             </span>
             <h3>Keep control in your wallet</h3>
             <p>
-              Account sign-in and wallet ownership are separate. Neither one can silently approve or
-              broadcast a financial transaction.
+              Connecting a wallet does not approve spending. Review and sign each transaction in your wallet or on your Ledger.
             </p>
           </article>
         </div>
@@ -125,16 +126,11 @@ export default function HomePage() {
 
       <section className="home-scope-panel" aria-labelledby="home-scope-title">
         <div>
-          <p className="eyebrow">Built for a careful mainnet rollout</p>
+          <p className="eyebrow">Wallet-controlled lending</p>
           <h2 id="home-scope-title">Review first. Act only when you are ready.</h2>
         </div>
         <p>
-          Mainnet reads will only be enabled after approved provider and protocol checks. Financial
-          actions will only be enabled after separate value-limit, cost, recovery, and
-          emergency-stop controls are reviewed. When enabled, connecting a wallet proves ownership
-          only. No financial action is available in this rollout; any future action would require a
-          separate wallet confirmation after its network, amount, and estimated costs are shown.
-          Portfolio figures are informational and are not financial advice.
+          Deposit amounts are bounded by your connected wallet balance and the selected market’s capacity. Direct lending has no platform fee. Bridge fees, network fees, and account rent are shown before you sign. Supply rates and future returns can change.
         </p>
       </section>
 

@@ -1,187 +1,134 @@
-# Bonsai passwordless sign-in setup
+# Bonsai passwordless sign-in
 
-## Checkpoint: September 15, 2026
+## Live checkpoint: September 15, 2026, SMS restriction diagnosed at 22:14 UTC
 
-The workspace implements a six-digit sign-in code sent by email or SMS. New
-users complete their profile after verification; returning users go to their
-account. Email uses Resend; U.S. phone login now uses Twilio Verify's managed
-codes. The Verify integration is implemented and validated locally; it has
-not been deployed to Railway.
+U.S. phone-code sign-in is deployed and enabled at [hqbonsai.com/login](https://hqbonsai.com/login).
+Both `/login` and `/register` show the phone field and **Send sign-in code** button.
+The implementation was merged in [PR #45](https://github.com/BurstCrypto/Crypto-lending/pull/45).
+The deployed commit is `13000d0f9acbc2724a92338aeff7203ac1e39a44`.
 
-Validation after the Verify changes:
+| Item                         | Verified state                                                                                        |
+| ---------------------------- | ----------------------------------------------------------------------------------------------------- |
+| API deployment               | `ca5b12be-491c-412a-8e30-244c941d75a9`: SUCCESS                                                       |
+| Web deployment               | `245cd29e-6ee2-4c9d-9007-bb8fb1c09611`: SUCCESS                                                       |
+| Authentication mode          | `AUTH_MODE=passwordless` on API and web                                                               |
+| Public origin                | `AUTH_PUBLIC_ORIGIN=https://hqbonsai.com` on both services                                            |
+| Database migrations          | `9002` and `9003` completed successfully at 16:53:15 UTC                                              |
+| SMS delivery configuration   | All three Twilio Verify variables are configured on API; Auth Token is sealed                         |
+| Email delivery configuration | Resend API key is sealed; `AUTH_EMAIL_FROM` is unset, so email sign-in remains disabled               |
+| Twilio service               | Runtime credentials authenticated successfully; matching account/service and six-digit codes confirmed |
+| SMS display name             | The current Twilio Verify service name is `Burst`; the optional rename preference is unanswered       |
 
-- 35 Verify adapter and U.S. phone tests passed, alongside 286 existing
-  authentication/configuration tests and 18 authentication end-to-end tests.
-- All 17 passwordless integration tests passed against an isolated PostgreSQL
-  18 instance, including migration upgrade/rollback, email and phone account
-  creation, returning-user login, failed codes, expiry, provider outages,
-  concurrent verification/completion, cookies, CSRF and session revocation.
-- All 8 passwordless UI tests passed, including SMS-only registration and the
-  unsupported-phone error. API and web TypeScript checks passed.
-- API production build and targeted API lint passed. The earlier web production
-  build passed with local development-proxy settings excluded; the later U.S.
-  phone copy/input changes were checked through UI tests and TypeScript.
+The live endpoint `GET /api/v1/auth/options` returns:
 
-### Production branch preparation
+```json
+{ "mode": "passwordless", "email": false, "sms": true }
+```
 
-The local branch `feature/bonsai-passwordless-verify` is based on production
-commit `f719f6004d03dcffe6e266b1a18d96efd8951011` and contains the passwordless
-changes and required migration-command fix. On that branch, 321 API
-authentication/configuration tests, 62 web authentication/proxy tests and 8
-Railway topology tests passed. API and web production builds, API/web lint,
-API TypeScript, and OpenAPI generation also passed.
+Live checks passed: API health (200), the configured channels above, rejection
+of a non-U.S. number, rejection of a foreign-origin request, and rejection of a
+code without a browser challenge (401, no cookies issued). Authentication
+responses use `Cache-Control: private, no-store`.
 
-The existing main-branch secret scan fails on dummy connection strings in the
-Railway configuration/bootstrap tests, including historical blobs:
-[run 34562706613](https://github.com/BurstCrypto/Crypto-lending/actions/runs/34562706613).
-The rollout branch records these synthetic fixtures in the existing exact-match
-exception ledger, bound to source path, line, Git blob, rule, scope and redacted
-fingerprint. Its hash pin and regression tests cover the additional entries.
+The owner expects zero existing accounts. No account migration was performed,
+and no account was created by these checks. No database account count was made
+or database endpoint added. Later Twilio diagnostics used temporary Railway
+SSH keys, each removed after the check; their local private keys were deleted.
 
-The production preflight retains its exact source comparisons and negative tests.
-Its API snapshot now covers 442 runtime files and 7,538,187 bytes, with SHA-256
-`e803c868013d4ca7f8e14bc355bdf9537d9e09a056beb8777676dd8aa209357f`.
-This incorporates the passwordless changes and the existing Railway simple-profile
-bootstrap changes since the previous snapshot. The related entrypoint, dependency
-lock and gateway-validator fingerprints were refreshed after checking their diffs.
-The full runtime inspection still confirms dormant balance-consumer registration
-is absent. All 137 executable preflight tests passed locally; one Windows symlink
-test was skipped. Both production container builds and their hardened runtime
-checks passed, as did all 71 API end-to-end tests and the release tooling tests.
+## Confirmed blocker: Twilio error 21608 and missing primary compliance profile
 
-The owner confirmed that there should be zero existing accounts, so no existing
-login migration is planned. Native phone identities remain separate from OIDC
-identities. A read-only database count was unavailable because no public
-Postgres connection or local Railway SSH key was configured; no endpoint or key
-was added. The SMS display-name preference remains optional and unanswered.
+The owner tried the registration form. At `2026-09-15T19:23:11.549Z`,
+`POST /api/v1/auth/code/request` returned HTTP 503 after 180 ms. Railway DNS
+logs show successful resolution of `verify.twilio.com` at 19:23:11.449 UTC,
+and network logs show outbound HTTPS activity at the same time. The request
+therefore reached the SMS delivery step. No database error was returned in
+the queried 19:20-19:25 UTC PostgreSQL log window.
 
-Tests use fake provider responses and delivery adapters. A real SMS still needs
-the owner's completed Twilio/Railway setup and chosen test number.
+The owner showed empty Verify logs and phone-number inventory. An empty
+inventory is expected when using Twilio Verify; no sending number purchase
+is required. The API discards provider error bodies, so the original request's
+logs did not disclose Twilio's reason.
 
-Read-only checks of the live Railway project confirmed:
+After the owner explicitly authorized one diagnostic SMS to the same number,
+the deployed SMS adapter was invoked once from the API container. Twilio
+returned **HTTP 403, error 21608**. No verification was accepted or text sent.
+The diagnostic captured only status, numeric error code, and safe booleans;
+it did not expose credentials, codes, or the phone number. A single-use marker
+in the API container prevents repeating that authorized diagnostic by accident.
 
-| Item                    | Current state                                                                                                                                                                    |
-| ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Live API and web        | Successful deployments of commit `7c266ef5074b8afc5a96a80061445b320845580e`; `/login` uses the older OIDC flow and `/api/v1/auth/options` returns 404.                           |
-| Public origin           | Both services use `https://hqbonsai.com`.                                                                                                                                        |
-| API authentication keys | Configured, valid for passwordless mode, and different from the public demo keys.                                                                                                |
-| API migration command   | Includes the shell wrapper that runs both bootstrap and migrations. The new deployment must include migrations `9002` and `9003`.                                                |
-| Authentication mode     | API: `oidc`; web: unset. Both must become `passwordless` for the code flow.                                                                                                      |
-| Email delivery          | The API service now lists `RESEND_API_KEY` with its value hidden. `AUTH_EMAIL_FROM` remains unset. Key validity and live delivery still need verification.                       |
-| SMS delivery            | All three Twilio variables are present on the API service. A read-only Twilio request authenticated successfully and confirmed the matching account/service and six-digit codes. |
-| Resend account          | Created by the owner; sending-domain verification still needs confirmation in the dashboard.                                                                                     |
+Read-only requests from the same running container confirmed:
 
-## Domain verification
+- Account credentials: HTTP 200; main account, `type=Full`, `status=active`.
+- Verify service: HTTP 200; account and service match; six-digit codes;
+  custom codes and PSD2 disabled.
+- Trust Hub customer/compliance profiles: HTTP 200; **zero profiles**, no next page.
+- The owner's attempted recipient: **not preverified** in this Twilio account.
 
-`hqbonsai.com` uses Name.com nameservers. These public records already resolve:
+[Twilio error 21608](https://www.twilio.com/docs/api/errors/21608) applies to
+upgraded accounts without an approved primary compliance profile as well as
+trial accounts. The credentials and Verify service are configured correctly;
+Twilio's account onboarding remains incomplete.
 
-| Type | Host                             | Observation                                                                           |
-| ---- | -------------------------------- | ------------------------------------------------------------------------------------- |
-| TXT  | `resend._domainkey.hqbonsai.com` | A DKIM public key is published. Compare it with the key shown in this Resend account. |
-| MX   | `send.hqbonsai.com`              | Priority 10, `feedback-smtp.us-east-1.amazonses.com`.                                 |
-| TXT  | `send.hqbonsai.com`              | `v=spf1 include:amazonses.com ~all`.                                                  |
+Next: the owner must complete **Products & Services > Trust Hub > Profiles >
+Primary profile** with the appropriate identity/business information and obtain
+Twilio approval. For immediate testing while that remains incomplete, the owner
+can add and confirm their own phone number under **Verified caller IDs**.
+See [primary compliance profiles](https://www.twilio.com/docs/trust-hub/profiles/primary-compliance-profiles).
 
-Open [Resend Domains](https://resend.com/domains) and check the status of
-`hqbonsai.com`. If it is absent, add it. If verification is pending or failed,
-compare the account's required records with the existing records and correct
-any mismatch in Name.com. Published DNS records alone do not confirm that this
-Resend account has verified the domain. Follow
-[Resend's domain guide](https://resend.com/docs/dashboard/domains/introduction)
-and [Name.com's DNS instructions](https://www.name.com/support/articles/206127137-adding-dns-records-and-templates).
+## After resolving the error: finish the owner test
 
-The sender address does not require a mailbox. Once `hqbonsai.com` is verified
-in Resend, `Bonsai <login@hqbonsai.com>` can be used as `AUTH_EMAIL_FROM` without
-creating that address with an email-hosting provider. Receiving replies would
-require a mailbox or forwarding setup. See
-[Resend's sender-address guidance](https://resend.com/docs/knowledge-base/how-do-I-create-an-email-address-or-sender-in-resend).
+The single authorized SMS request was rejected before delivery. Provider receipt
+and a complete production sign-in still need the owner's test:
 
-## Remaining email rollout
+1. Open [the sign-in page](https://hqbonsai.com/login) and enter the owner's U.S.
+   number. Until the primary compliance profile is approved, use a number
+   preverified in this Twilio account.
+2. Request the six-digit code and enter it on the website.
+3. Complete the first account's contact email and country of residence.
+4. Sign out, then sign in again with the same phone number.
 
-1. Confirm the domain is **Verified** in Resend. Create an API key for email
-   sending, restricted to this domain where available. See
-   [Resend API keys](https://resend.com/docs/dashboard/api-keys/introduction).
-2. Store the key as `RESEND_API_KEY` on Railway's **API service**. Set
-   `AUTH_EMAIL_FROM=Bonsai <login@hqbonsai.com>` on the same service. Keep the
-   secret in Railway; the sender must belong to the verified domain.
-3. Deploy the reviewed passwordless API and web changes, including the generated
-   OpenAPI specification and migrations `9002` and `9003`. Confirm the migrations succeed.
-4. Set `AUTH_MODE=passwordless` on **both API and web** and deploy those settings.
-   Keep `AUTH_PUBLIC_ORIGIN=https://hqbonsai.com` on both.
-5. Check that `GET https://hqbonsai.com/api/v1/auth/options` returns
-   `{"mode":"passwordless","email":true,"sms":false}` for an email-only setup
-   (`sms` becomes `true` with valid-looking Twilio configuration) and `/login`
-   offers codes. This confirms configuration; actual receipt still needs a test.
-6. With the owner's chosen test address, verify email receipt, first account
-   creation, logout, and returning-user sign-in. The automated tests use an
-   in-memory delivery adapter; no live email has been sent during these checks.
+Twilio Verify supplies sending numbers; a purchased phone number is unnecessary.
+Its current service name means a text may say **Burst**. Rename the service to
+**Bonsai** in the Twilio console if that is the desired branding. Confirm U.S.
+Geo Permissions and Fraud Guard in the console; the service API does not expose
+those settings. The application already restricts accepted numbers to the U.S.
+numbering region. See [Twilio's Verify quickstart](https://www.twilio.com/docs/verify/quickstarts/node-express).
 
-The full configuration, limits, and local integration-test command are in
-[the Railway deployment guide](railway-simple-deploy.md#passwordless-email-and-phone-sign-in).
+## Enable email later
 
-## Phone login
+1. Check that `hqbonsai.com` is **Verified** in [Resend Domains](https://resend.com/domains).
+   Existing public DKIM, SPF and MX records do not establish verification in the
+   owner's particular Resend account. The owner has been asked for this status.
+2. On Railway's **api** service, add
+   `AUTH_EMAIL_FROM=Bonsai <login@hqbonsai.com>` and deploy that setting.
+3. Confirm `email:true` in `/api/v1/auth/options`, then test real receipt.
 
-The owner created a Twilio Verify service and added its credentials to Railway.
-A read-only API request confirmed that the credentials work, the service belongs
-to the configured account, and code length is six. Its current friendly name is
-`Burst`; this name appears in verification texts. Use `Bonsai` if the texts should
-match the website branding. Custom codes and PSD2 mode are disabled, as expected
-for this integration. Fraud Guard and geographic permissions are not exposed by
-the service endpoint and still need confirmation in the console. No SMS was sent.
+A mailbox for `login@hqbonsai.com` is not required to send from a verified domain.
+See [Resend's sender guidance](https://resend.com/docs/knowledge-base/how-do-I-create-an-email-address-or-sender-in-resend).
+Keep the Resend key and Twilio Auth Token sealed in Railway; account/service SIDs
+are identifiers and can remain unsealed.
 
-Seal `TWILIO_AUTH_TOKEN` using its Railway variable menu, as with the Resend key.
-The Account SID and Verify Service SID are identifiers and can remain unsealed.
-Sealing hides the secret from dashboard/API reads while still providing it to
-builds and deployments. See [Railway's sealed-variable documentation](https://docs.railway.com/variables#sealed-variables).
+## Validation and source checkpoint
 
-The local implementation and tests support sending a six-digit code to the
-user's phone. Text delivery now uses Twilio Verify to generate and check the
-code. Add these variables on Railway's **api** service only:
+Both full Foundation CI runs passed:
+[PR run](https://github.com/BurstCrypto/Crypto-lending/actions/runs/34993836026) and
+[branch run](https://github.com/BurstCrypto/Crypto-lending/actions/runs/34993829712).
+The Railway configuration review also passed.
 
-- `TWILIO_ACCOUNT_SID`
-- `TWILIO_AUTH_TOKEN`
-- `TWILIO_VERIFY_SERVICE_SID`
+- All 5,373 API unit tests and 829 web tests passed in CI.
+- All 71 API end-to-end tests passed locally and in CI.
+- All 17 passwordless integration tests passed on PostgreSQL 18; all 20
+  passwordless/Railway database-boundary tests passed on PostgreSQL 16.
+- Production builds, hardened container checks, OpenAPI, lint, TypeScript,
+  secret scans, dependency audit, release tooling and database integration checks passed.
+- Exact source-fingerprint checks and their negative tests remain in place.
+  The reviewed API snapshot covers 442 runtime files and 7,538,187 bytes, with
+  SHA-256 `e803c868013d4ca7f8e14bc355bdf9537d9e09a056beb8777676dd8aa209357f`.
 
-Copy the Account SID (`AC`) and Auth Token from the same Twilio account that
-owns the Verify service (`VA`). Seal the Auth Token in Railway. Do not paste
-credentials into chat. An older Messaging Service SID (`MG`) cannot be used.
+Implementation work used the isolated worktree
+`C:\Users\Admin\Desktop\CryptoLending-passwordless-verify-20260915`, preserving
+the original engineering workspace's other pending work. Preflight's byte pins
+were checked against canonical LF files in that isolated worktree.
 
-Twilio's category policy specifically permits 2FA and transactional messages
-for businesses operating in cryptocurrency, stocks, or investing. Other
-business-model restrictions, including third-party and affiliate lending,
-still apply. Describe Bonsai's actual business and user-requested login-code
-flow accurately during onboarding; this research does not establish account
-approval. See
-[Twilio's category policy](https://help.twilio.com/articles/360045004974-Forbidden-Message-Categories-for-SMS-and-MMS-in-the-US-and-Canada)
-and [cryptocurrency verification guidance](https://www.twilio.com/docs/api/errors/30464).
-
-### Account setup: Twilio Verify
-
-For the initial U.S. login-code rollout, Twilio Verify supplies managed sending
-numbers and generates and checks codes. Its pooled senders remove the need to
-purchase a dedicated number or register a separate A2P 10DLC campaign. See
-[Twilio's Verify quickstart](https://www.twilio.com/docs/verify/quickstarts/node-express)
-and [migration guide](https://www.twilio.com/en-us/blog/migrate-programmable-messaging-to-verify).
-
-1. Complete the owner's email and phone verification in the Twilio account.
-2. In [Verify Services](https://console.twilio.com/us1/develop/verify/services),
-   open or create the service named `Bonsai`, enable SMS, and set six-digit codes.
-   Use the owner's verified U.S. number for trial testing.
-3. Configure Verify Geo Permissions to allow the United States for this initial
-   rollout and keep Fraud Guard enabled.
-4. Store the Account SID and Auth Token directly on Railway's API service. The
-   Verify service identifier begins with `VA`; its application variable is
-   `TWILIO_VERIFY_SERVICE_SID`.
-5. Deploy the tested API/web changes and migrations, then enable passwordless
-   mode on both services. With only SMS configured, `/api/v1/auth/options`
-   should return `{"mode":"passwordless","email":false,"sms":true}`.
-6. Test receipt and account creation on the owner's chosen U.S. number, then
-   logout and returning-user sign-in. This still requires a real provider test.
-
-The adapter retains the browser-bound challenge and native session protections.
-Only U.S. numbering-region destinations are accepted, including formatted
-10-digit input; a `+1` prefix alone does not establish a U.S. number. SMS
-challenges store the Verify ID, and approval must match that ID and recipient.
-No local SMS-code fallback is used. Migration `9003` clears pending SMS
-challenges when applying or rolling back, preserving accounts and sessions.
-
-No Railway deployment or live email/SMS has been performed during this setup.
+The full configuration and integration-test commands remain in
+[the Railway guide](railway-simple-deploy.md#passwordless-email-and-phone-sign-in).

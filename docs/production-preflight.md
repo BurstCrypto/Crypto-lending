@@ -93,6 +93,13 @@ plus independently approved billing, egress, credential-transition, rollback,
 deployment-target, release, and live deployment evidence. This checkpoint does
 not widen an existing template or authorize a deployment.
 
+The next engineering slice adds a separate
+[production network foundation](production-network-foundation.md): an actual
+VPC/subnet/route-table/security-group template with all resources disabled by
+default. Its template and local validator are bound into release candidates.
+It does not yet compose the production application, implement the deployment
+executor, enroll a destination, or clear either infrastructure launch blocker.
+
 `BALANCE_CONSUMER` separately binds and inspects the exact release-bound
 standalone balance-consumer envelope together with its validator and dormant
 application source. That envelope is not referenced or composed by the

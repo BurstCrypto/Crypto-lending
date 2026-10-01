@@ -250,6 +250,91 @@ afterEach(() => {
   jest.restoreAllMocks();
 });
 
+describe('Node HTTPS balance JSON-RPC transport response limits', () => {
+  it('sequences DNS families and waits for both before opening HTTPS', async () => {
+    let finishIpv4: ResolverCallback | undefined;
+    let finishIpv6: ResolverCallback | undefined;
+    resolverBehavior = (_resolver, family, _hostname, callback) => {
+      if (family === 4) finishIpv4 = callback;
+      else finishIpv6 = callback;
+    };
+    const pending = new NodeHttpsBalanceJsonRpcTransport(config()).exchangeBounded(
+      rpc(),
+      new AbortController().signal,
+      64,
+    );
+    expect(finishIpv4).toBeDefined();
+    expect(finishIpv6).toBeUndefined();
+    expect(requestMock).not.toHaveBeenCalled();
+    finishIpv4!(null, [PUBLIC_IPV4]);
+    expect(finishIpv6).toBeDefined();
+    expect(requestMock).not.toHaveBeenCalled();
+    finishIpv6!(null, []);
+    const call = httpsCalls[0]!;
+    secure(call);
+    const body = Buffer.from('{"result":"0x1"}');
+    deliver(call, jsonResponse(200, body), [body]);
+    call.request.emit('close');
+    await expect(pending).resolves.toMatchObject({ value: { result: '0x1' } });
+  });
+
+  it.each(['content-length', 'chunked'] as const)(
+    'retains exact body bytes for %s responses',
+    async (framing) => {
+      installLookup();
+      const body = Buffer.from('  {"text":"é"} \n', 'utf8');
+      const pending = new NodeHttpsBalanceJsonRpcTransport(config()).exchangeBounded(
+        rpc(),
+        new AbortController().signal,
+        body.length,
+      );
+      const call = httpsCalls[0]!;
+      secure(call);
+      deliver(call, framing === 'chunked' ? chunkedJsonResponse() : jsonResponse(200, body), [
+        body,
+      ]);
+      call.request.emit('close');
+      await expect(pending).resolves.toEqual({ value: { text: 'é' }, bodyBytes: body.length });
+    },
+  );
+
+  it.each(['content-length', 'chunked'] as const)(
+    'rejects a %s body above the caller limit before parsing',
+    async (framing) => {
+      installLookup();
+      const body = Buffer.from(`{"x":"${'a'.repeat(100)}"}`);
+      const pending = new NodeHttpsBalanceJsonRpcTransport(config()).exchangeBounded(
+        rpc(),
+        new AbortController().signal,
+        32,
+      );
+      const call = httpsCalls[0]!;
+      secure(call);
+      deliver(call, framing === 'chunked' ? chunkedJsonResponse() : jsonResponse(200, body), [
+        body,
+      ]);
+      await expectFailure(pending, 'PERMANENT');
+      expect(call.request.destroy).toHaveBeenCalled();
+    },
+  );
+
+  it.each([0, -1, 0.5, Number.NaN, Number.POSITIVE_INFINITY, 4 * 1024 * 1024 + 1])(
+    'rejects invalid caller limit %s before DNS or HTTPS',
+    async (limit) => {
+      await expectFailure(
+        new NodeHttpsBalanceJsonRpcTransport(config()).exchangeBounded(
+          rpc(),
+          new AbortController().signal,
+          limit,
+        ),
+        'PERMANENT',
+      );
+      expect(resolverConstructorMock).not.toHaveBeenCalled();
+      expect(requestMock).not.toHaveBeenCalled();
+    },
+  );
+});
+
 describe('Node HTTPS balance JSON-RPC transport', () => {
   it('performs no DNS, HTTPS, or timer work on import or construction', () => {
     expect(IMPORT_RESOLVER_CALLS).toBe(0);

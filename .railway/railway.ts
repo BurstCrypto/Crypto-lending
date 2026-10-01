@@ -7,6 +7,7 @@ import {
   project,
   redis,
   service,
+  volume,
 } from 'railway/iac';
 
 type ImageEnvName = 'RAILWAY_GATEWAY_IMAGE' | 'RAILWAY_WEB_IMAGE' | 'RAILWAY_API_IMAGE';
@@ -209,17 +210,22 @@ export default defineRailway((ctx) => {
     },
   });
 
+  const mainnetJournal = volume('mainnet-journal');
   const web = service('web', {
     ...serviceSource('RAILWAY_WEB_IMAGE', 'Dockerfile.web', simpleProfile, sourceRepo),
     start: 'node server.js',
     healthcheck: '/api/health',
     healthcheckTimeout: 120,
     networking: { serviceDomains: {}, customDomains: {}, tcpProxies: {} },
-    replicas: production ? 2 : 1,
+    // Wallet transaction reservations use an account-scoped SQLite journal.
+    // Keep one writer and retain its volume across releases.
+    replicas: 1,
+    volumeMounts: { '/data/mainnet': mainnetJournal },
     env: {
       APP_ENV: 'staging',
       APP_VERSION: sealedOrLiteral(ctx, 'APP_VERSION', 'railway-simple', simpleProfile),
       AUTH_PUBLIC_ORIGIN: publicOrigin,
+      MAINNET_DATA_DIR: '/data/mainnet',
       PORT: '3000',
     },
   });
@@ -278,7 +284,7 @@ export default defineRailway((ctx) => {
   return project('crypto-lending', {
     resources: [
       group('Application', [gateway, web, api, worker]),
-      group('Data', [database, cache]),
+      group('Data', [database, cache, mainnetJournal]),
     ],
   });
 });

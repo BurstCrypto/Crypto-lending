@@ -424,7 +424,7 @@ test('rejects duplicate package keys, a byte-order mark, and malformed UTF-8', (
   );
 });
 
-test('rejects a production Solana SDK dependency or missing built-runtime guard', () => {
+test('rejects an API Solana SDK, unpinned web SDK, or missing mainnet built-runtime guard', () => {
   const source = loadSources();
   assertRejected(
     replace(
@@ -433,13 +433,17 @@ test('rejects a production Solana SDK dependency or missing built-runtime guard'
       '"dependencies": {',
       '"dependencies": {\n    "@solana/web3.js": "1.98.4",',
     ),
-    /outside both production dependency graphs/u,
+    /outside the production API dependency graph/u,
+  );
+  assertRejected(
+    replace(source, 'webPackage', '"@solana/web3.js": "1.98.4"', '"@solana/web3.js": "^1.98.4"'),
+    /pin the reviewed wallet and lending SDK versions/u,
   );
   assertRejected(
     replace(
       source,
       'webDockerfile',
-      'RUN ["node", "infra/containers/validate-built-runtime.mjs", "web", "apps/web/.next/standalone"]',
+      'RUN ["node", "infra/containers/validate-built-runtime.mjs", "web-mainnet", "apps/web/.next/standalone"]',
       'RUN ["node", "--version"]',
     ),
     /built-runtime dependency boundary/u,
@@ -607,6 +611,10 @@ test('rejects build-context allowlist weakening or accidental source omission', 
 
 test('rejects standalone web assembly and runtime binding drift', () => {
   const source = loadSources();
+  assertRejected(
+    replace(source, 'webDockerfile', 'RUN ["node", "infra/containers/assemble-mainnet-web.mjs", "apps/web/.next/standalone"]', 'RUN ["node", "--version"]'),
+    /materialize the traced mainnet provider aliases/u,
+  );
   assertRejected(
     replace(source, 'webDockerfile', '.next/standalone /app', '.next/server /app'),
     /standalone server/u,

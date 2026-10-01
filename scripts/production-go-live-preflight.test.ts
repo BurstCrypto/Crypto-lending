@@ -6264,7 +6264,7 @@ test('balance-consumer inspection pins the dormant Node HTTPS transport without 
       'if (!Number.isSafeInteger(contentLength)) return null;',
     ],
     [
-      "metadata.framing === 'CONTENT_LENGTH' ? metadata.contentLength : MAX_JSON_BYTES;",
+      "metadata.framing === 'CONTENT_LENGTH' ? metadata.contentLength : bodyByteLimit;",
       "metadata.framing === 'CONTENT_LENGTH' ? metadata.contentLength : Number.MAX_SAFE_INTEGER;",
     ],
     ['chunks.length >= MAX_RESPONSE_CHUNKS ||', 'false ||'],

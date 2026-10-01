@@ -1,0 +1,18 @@
+.panel { margin: 1.5rem 0; padding: clamp(1.25rem, 3vw, 2rem); border: 1px solid var(--line); border-radius: var(--radius-large); background: var(--panel); color: var(--ink); scroll-margin-top: 1.5rem; }
+.panel header > p:last-child { max-width: 52rem; color: var(--ink-soft); }
+.inputs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; }
+.help { color: var(--ink-soft); font-size: 0.875rem; }
+.rate { display: flex; flex-direction: column; gap: 0.35rem; padding: 1.25rem 0 1.75rem; }
+.rate > span, .rate small { color: var(--ink-soft); }
+.rate strong { font-size: clamp(2rem, 5vw, 3rem); line-height: 1.15; color: var(--accent); }
+.panel .checkbox { display: flex; align-items: center; gap: 0.6rem; }
+.panel .checkbox input { width: auto; min-height: auto; margin: 0; }
+.estimate { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0.65rem 1rem; font-size: 0.875rem; }
+.estimate dt { color: var(--ink-soft); }
+.estimate dd { margin: 0; }
+.recommendation, .status { padding: 1rem 1.25rem; margin-top: 1.5rem; border: 1px solid var(--line); border-radius: var(--radius-medium); }
+.recommendation { background: var(--success-surface); }
+.recommendation h3 { margin-top: 0; }
+.costNotice { padding: 0.75rem 1rem; border-left: 3px solid var(--line-strong); background: var(--panel); color: var(--ink); font-size: 0.875rem; }
+.method { margin-top: 1.25rem; font-size: 0.875rem; color: var(--ink-soft); }
+@media (max-width: 700px) { .inputs, .estimate { grid-template-columns: minmax(0, 1fr); gap: 0.25rem; } .estimate dd { margin-bottom: 0.75rem; } }

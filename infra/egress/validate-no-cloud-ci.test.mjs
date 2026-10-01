@@ -38,6 +38,11 @@ test('CI requires the offline secret, transition, and SQS mutation suites', () =
   assert.match(workflow, /^\s+npm run infra:test:auth-wallet-transition\s*$/m);
   assert.match(workflow, /^\s+npm run infra:test:redis-operator-transition\s*$/m);
   assert.match(workflow, /^\s+npm run infra:test:production-deployment-intent\s*$/m);
+  assert.match(workflow, /^\s+npm run infra:test:production-network\s*$/m);
+  assert.match(
+    workflow,
+    /^\s+python infra\/aws\/lint-cloudformation\.py [^\r\n]*infra\/aws\/production-network-foundation\.json(?: |$)/m,
+  );
   assert.match(
     workflow,
     /^\s+npm run infra:test:auth-wallet-transition\s*\r?\n\s+npm run infra:test:credential-transition\s*\r?\n\s+npm run infra:test:redis-operator-transition\s*\r?\n\s+npm run infra:test:production-deployment-intent\s*$/m,

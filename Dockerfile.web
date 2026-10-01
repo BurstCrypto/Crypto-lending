@@ -34,16 +34,26 @@ RUN ["node", "-e", "if (require('node:child_process').execFileSync('npm', ['--ve
 COPY package.json package-lock.json tsconfig.base.json ./
 COPY apps/web/package.json ./apps/web/package.json
 RUN ["npm", "ci", "--workspace", "@crypto-lending/web", "--include-workspace-root=false"]
+COPY onchain/package.json onchain/package-lock.json ./onchain/
+RUN ["npm", "ci", "--prefix", "onchain"]
 
 COPY apps/web/next-env.d.ts apps/web/next.config.ts apps/web/tsconfig.json apps/web/instrumentation.ts apps/web/proxy.ts ./apps/web/
 COPY apps/web/app ./apps/web/app
 COPY apps/web/components ./apps/web/components
 COPY apps/web/lib ./apps/web/lib
+COPY onchain/src ./onchain/src
+COPY onchain/contracts ./onchain/contracts
+COPY onchain/scripts/compile.mjs ./onchain/scripts/compile.mjs
+COPY apps/api/src/routing-fees/domain/routing-fee.ts ./apps/api/src/routing-fees/domain/routing-fee.ts
+COPY apps/api/src/smart-lending/domain/fee-aware-return.ts ./apps/api/src/smart-lending/domain/fee-aware-return.ts
+RUN ["npm", "run", "build", "--prefix", "onchain"]
 ENV NODE_ENV=production
 RUN ["npm", "run", "build", "--workspace", "@crypto-lending/web"]
 RUN ["node", "-e", "const fs=require('node:fs');const file='apps/web/.next/standalone/apps/web/package.json';const current=JSON.parse(fs.readFileSync(file,'utf8'));fs.writeFileSync(file,JSON.stringify({name:current.name,private:true,version:current.version})+'\\n',{encoding:'utf8',flag:'w'});"]
 COPY infra/containers/validate-built-runtime.mjs ./infra/containers/validate-built-runtime.mjs
-RUN ["node", "infra/containers/validate-built-runtime.mjs", "web", "apps/web/.next/standalone"]
+COPY infra/containers/assemble-mainnet-web.mjs ./infra/containers/assemble-mainnet-web.mjs
+RUN ["node", "infra/containers/assemble-mainnet-web.mjs", "apps/web/.next/standalone"]
+RUN ["node", "infra/containers/validate-built-runtime.mjs", "web-mainnet", "apps/web/.next/standalone"]
 
 FROM node:24.20.0-bookworm-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e AS runtime
 

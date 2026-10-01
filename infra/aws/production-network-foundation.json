@@ -1,0 +1,795 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "Production network foundation: isolated IPv4 subnets and dedicated workload security groups. Disabled by default; provisioning this foundation does not activate an application or authorize public launch.",
+  "Metadata": {
+    "CryptoLendingProductionNetworkFoundation": {
+      "SchemaVersion": 1,
+      "Environment": "production",
+      "Scope": "NETWORK_FOUNDATION_ONLY",
+      "DefaultResourceCount": 0,
+      "PublicIngress": "ABSENT",
+      "InternetRoute": "ABSENT",
+      "LaunchApproval": "NOT_APPROVED"
+    }
+  },
+  "Parameters": {
+    "ActivationMode": {
+      "Type": "String",
+      "Default": "DISABLED",
+      "AllowedValues": ["DISABLED", "PROVISION_INERT"]
+    },
+    "BillingAcknowledgement": {
+      "Type": "String",
+      "Default": "NOT_AUTHORIZED",
+      "AllowedValues": ["NOT_AUTHORIZED", "I_ACKNOWLEDGE_THIS_CREATES_BILLABLE_AWS_RESOURCES"]
+    },
+    "NetworkOctet": {
+      "Type": "String",
+      "Default": "43",
+      "AllowedPattern": "^(?:0|[1-9][0-9]?|1[0-9]{2}|2[0-4][0-9]|25[0-5])$",
+      "Description": "Second octet of the private 10.x.0.0/16 network; confirm no overlap with existing or planned networks."
+    },
+    "AvailabilityZoneA": {
+      "Type": "AWS::EC2::AvailabilityZone::Name",
+      "Description": "First approved Availability Zone in the deployment Region."
+    },
+    "AvailabilityZoneB": {
+      "Type": "AWS::EC2::AvailabilityZone::Name",
+      "Description": "Second approved Availability Zone in the deployment Region."
+    }
+  },
+  "Rules": {
+    "ProvisioningRequiresAcknowledgement": {
+      "RuleCondition": {
+        "Fn::Equals": [
+          {
+            "Ref": "ActivationMode"
+          },
+          "PROVISION_INERT"
+        ]
+      },
+      "Assertions": [
+        {
+          "Assert": {
+            "Fn::Equals": [
+              {
+                "Ref": "BillingAcknowledgement"
+              },
+              "I_ACKNOWLEDGE_THIS_CREATES_BILLABLE_AWS_RESOURCES"
+            ]
+          },
+          "AssertDescription": "Explicit resource provisioning acknowledgement is required; this parameter does not replace deployment authorization."
+        }
+      ]
+    },
+    "AvailabilityZonesMustDiffer": {
+      "RuleCondition": {
+        "Fn::Equals": [
+          {
+            "Ref": "ActivationMode"
+          },
+          "PROVISION_INERT"
+        ]
+      },
+      "Assertions": [
+        {
+          "Assert": {
+            "Fn::Not": [
+              {
+                "Fn::Equals": [
+                  {
+                    "Ref": "AvailabilityZoneA"
+                  },
+                  {
+                    "Ref": "AvailabilityZoneB"
+                  }
+                ]
+              }
+            ]
+          },
+          "AssertDescription": "Use two distinct Availability Zones in the deployment Region."
+        }
+      ]
+    }
+  },
+  "Conditions": {
+    "ProvisionNetwork": {
+      "Fn::Equals": [
+        {
+          "Ref": "ActivationMode"
+        },
+        "PROVISION_INERT"
+      ]
+    }
+  },
+  "Resources": {
+    "Vpc": {
+      "Type": "AWS::EC2::VPC",
+      "Condition": "ProvisionNetwork",
+      "Properties": {
+        "CidrBlock": {
+          "Fn::Sub": "10.${NetworkOctet}.0.0/16"
+        },
+        "EnableDnsSupport": true,
+        "EnableDnsHostnames": true,
+        "InstanceTenancy": "default",
+        "Tags": [
+          {
+            "Key": "project",
+            "Value": "crypto-lending"
+          },
+          {
+            "Key": "environment",
+            "Value": "production"
+          },
+          {
+            "Key": "Name",
+            "Value": {
+              "Fn::Sub": "${AWS::StackName}-Vpc"
+            }
+          }
+        ]
+      }
+    },
+    "WorkloadSubnetA": {
+      "Type": "AWS::EC2::Subnet",
+      "Condition": "ProvisionNetwork",
+      "Properties": {
+        "VpcId": {
+          "Ref": "Vpc"
+        },
+        "AvailabilityZone": {
+          "Ref": "AvailabilityZoneA"
+        },
+        "CidrBlock": {
+          "Fn::Sub": "10.${NetworkOctet}.10.0/24"
+        },
+        "MapPublicIpOnLaunch": false,
+        "AssignIpv6AddressOnCreation": false,
+        "EnableDns64": false,
+        "Tags": [
+          {
+            "Key": "project",
+            "Value": "crypto-lending"
+          },
+          {
+            "Key": "environment",
+            "Value": "production"
+          },
+          {
+            "Key": "Name",
+            "Value": {
+              "Fn::Sub": "${AWS::StackName}-WorkloadSubnetA"
+            }
+          }
+        ]
+      }
+    },
+    "WorkloadRouteTableA": {
+      "Type": "AWS::EC2::RouteTable",
+      "Condition": "ProvisionNetwork",
+      "Properties": {
+        "VpcId": {
+          "Ref": "Vpc"
+        },
+        "Tags": [
+          {
+            "Key": "project",
+            "Value": "crypto-lending"
+          },
+          {
+            "Key": "environment",
+            "Value": "production"
+          },
+          {
+            "Key": "Name",
+            "Value": {
+              "Fn::Sub": "${AWS::StackName}-WorkloadRouteTableA"
+            }
+          }
+        ]
+      }
+    },
+    "WorkloadRouteAssociationA": {
+      "Type": "AWS::EC2::SubnetRouteTableAssociation",
+      "Condition": "ProvisionNetwork",
+      "Properties": {
+        "SubnetId": {
+          "Ref": "WorkloadSubnetA"
+        },
+        "RouteTableId": {
+          "Ref": "WorkloadRouteTableA"
+        }
+      }
+    },
+    "WorkloadSubnetB": {
+      "Type": "AWS::EC2::Subnet",
+      "Condition": "ProvisionNetwork",
+      "Properties": {
+        "VpcId": {
+          "Ref": "Vpc"
+        },
+        "AvailabilityZone": {
+          "Ref": "AvailabilityZoneB"
+        },
+        "CidrBlock": {
+          "Fn::Sub": "10.${NetworkOctet}.11.0/24"
+        },
+        "MapPublicIpOnLaunch": false,
+        "AssignIpv6AddressOnCreation": false,
+        "EnableDns64": false,
+        "Tags": [
+          {
+            "Key": "project",
+            "Value": "crypto-lending"
+          },
+          {
+            "Key": "environment",
+            "Value": "production"
+          },
+          {
+            "Key": "Name",
+            "Value": {
+              "Fn::Sub": "${AWS::StackName}-WorkloadSubnetB"
+            }
+          }
+        ]
+      }
+    },
+    "WorkloadRouteTableB": {
+      "Type": "AWS::EC2::RouteTable",
+      "Condition": "ProvisionNetwork",
+      "Properties": {
+        "VpcId": {
+          "Ref": "Vpc"
+        },
+        "Tags": [
+          {
+            "Key": "project",
+            "Value": "crypto-lending"
+          },
+          {
+            "Key": "environment",
+            "Value": "production"
+          },
+          {
+            "Key": "Name",
+            "Value": {
+              "Fn::Sub": "${AWS::StackName}-WorkloadRouteTableB"
+            }
+          }
+        ]
+      }
+    },
+    "WorkloadRouteAssociationB": {
+      "Type": "AWS::EC2::SubnetRouteTableAssociation",
+      "Condition": "ProvisionNetwork",
+      "Properties": {
+        "SubnetId": {
+          "Ref": "WorkloadSubnetB"
+        },
+        "RouteTableId": {
+          "Ref": "WorkloadRouteTableB"
+        }
+      }
+    },
+    "DataSubnetA": {
+      "Type": "AWS::EC2::Subnet",
+      "Condition": "ProvisionNetwork",
+      "Properties": {
+        "VpcId": {
+          "Ref": "Vpc"
+        },
+        "AvailabilityZone": {
+          "Ref": "AvailabilityZoneA"
+        },
+        "CidrBlock": {
+          "Fn::Sub": "10.${NetworkOctet}.20.0/24"
+        },
+        "MapPublicIpOnLaunch": false,
+        "AssignIpv6AddressOnCreation": false,
+        "EnableDns64": false,
+        "Tags": [
+          {
+            "Key": "project",
+            "Value": "crypto-lending"
+          },
+          {
+            "Key": "environment",
+            "Value": "production"
+          },
+          {
+            "Key": "Name",
+            "Value": {
+              "Fn::Sub": "${AWS::StackName}-DataSubnetA"
+            }
+          }
+        ]
+      }
+    },
+    "DataRouteTableA": {
+      "Type": "AWS::EC2::RouteTable",
+      "Condition": "ProvisionNetwork",
+      "Properties": {
+        "VpcId": {
+          "Ref": "Vpc"
+        },
+        "Tags": [
+          {
+            "Key": "project",
+            "Value": "crypto-lending"
+          },
+          {
+            "Key": "environment",
+            "Value": "production"
+          },
+          {
+            "Key": "Name",
+            "Value": {
+              "Fn::Sub": "${AWS::StackName}-DataRouteTableA"
+            }
+          }
+        ]
+      }
+    },
+    "DataRouteAssociationA": {
+      "Type": "AWS::EC2::SubnetRouteTableAssociation",
+      "Condition": "ProvisionNetwork",
+      "Properties": {
+        "SubnetId": {
+          "Ref": "DataSubnetA"
+        },
+        "RouteTableId": {
+          "Ref": "DataRouteTableA"
+        }
+      }
+    },
+    "DataSubnetB": {
+      "Type": "AWS::EC2::Subnet",
+      "Condition": "ProvisionNetwork",
+      "Properties": {
+        "VpcId": {
+          "Ref": "Vpc"
+        },
+        "AvailabilityZone": {
+          "Ref": "AvailabilityZoneB"
+        },
+        "CidrBlock": {
+          "Fn::Sub": "10.${NetworkOctet}.21.0/24"
+        },
+        "MapPublicIpOnLaunch": false,
+        "AssignIpv6AddressOnCreation": false,
+        "EnableDns64": false,
+        "Tags": [
+          {
+            "Key": "project",
+            "Value": "crypto-lending"
+          },
+          {
+            "Key": "environment",
+            "Value": "production"
+          },
+          {
+            "Key": "Name",
+            "Value": {
+              "Fn::Sub": "${AWS::StackName}-DataSubnetB"
+            }
+          }
+        ]
+      }
+    },
+    "DataRouteTableB": {
+      "Type": "AWS::EC2::RouteTable",
+      "Condition": "ProvisionNetwork",
+      "Properties": {
+        "VpcId": {
+          "Ref": "Vpc"
+        },
+        "Tags": [
+          {
+            "Key": "project",
+            "Value": "crypto-lending"
+          },
+          {
+            "Key": "environment",
+            "Value": "production"
+          },
+          {
+            "Key": "Name",
+            "Value": {
+              "Fn::Sub": "${AWS::StackName}-DataRouteTableB"
+            }
+          }
+        ]
+      }
+    },
+    "DataRouteAssociationB": {
+      "Type": "AWS::EC2::SubnetRouteTableAssociation",
+      "Condition": "ProvisionNetwork",
+      "Properties": {
+        "SubnetId": {
+          "Ref": "DataSubnetB"
+        },
+        "RouteTableId": {
+          "Ref": "DataRouteTableB"
+        }
+      }
+    },
+    "ApiTaskSecurityGroup": {
+      "Type": "AWS::EC2::SecurityGroup",
+      "Condition": "ProvisionNetwork",
+      "Properties": {
+        "GroupDescription": "API tasks - isolated production foundation",
+        "VpcId": {
+          "Ref": "Vpc"
+        },
+        "SecurityGroupIngress": [],
+        "SecurityGroupEgress": [
+          {
+            "CidrIp": "127.0.0.1/32",
+            "IpProtocol": "-1"
+          }
+        ],
+        "Tags": [
+          {
+            "Key": "project",
+            "Value": "crypto-lending"
+          },
+          {
+            "Key": "environment",
+            "Value": "production"
+          },
+          {
+            "Key": "Name",
+            "Value": {
+              "Fn::Sub": "${AWS::StackName}-ApiTaskSecurityGroup"
+            }
+          }
+        ]
+      }
+    },
+    "WebTaskSecurityGroup": {
+      "Type": "AWS::EC2::SecurityGroup",
+      "Condition": "ProvisionNetwork",
+      "Properties": {
+        "GroupDescription": "Web tasks - isolated production foundation",
+        "VpcId": {
+          "Ref": "Vpc"
+        },
+        "SecurityGroupIngress": [],
+        "SecurityGroupEgress": [
+          {
+            "CidrIp": "127.0.0.1/32",
+            "IpProtocol": "-1"
+          }
+        ],
+        "Tags": [
+          {
+            "Key": "project",
+            "Value": "crypto-lending"
+          },
+          {
+            "Key": "environment",
+            "Value": "production"
+          },
+          {
+            "Key": "Name",
+            "Value": {
+              "Fn::Sub": "${AWS::StackName}-WebTaskSecurityGroup"
+            }
+          }
+        ]
+      }
+    },
+    "OutboxWorkerSecurityGroup": {
+      "Type": "AWS::EC2::SecurityGroup",
+      "Condition": "ProvisionNetwork",
+      "Properties": {
+        "GroupDescription": "Outbox worker tasks - isolated production foundation",
+        "VpcId": {
+          "Ref": "Vpc"
+        },
+        "SecurityGroupIngress": [],
+        "SecurityGroupEgress": [
+          {
+            "CidrIp": "127.0.0.1/32",
+            "IpProtocol": "-1"
+          }
+        ],
+        "Tags": [
+          {
+            "Key": "project",
+            "Value": "crypto-lending"
+          },
+          {
+            "Key": "environment",
+            "Value": "production"
+          },
+          {
+            "Key": "Name",
+            "Value": {
+              "Fn::Sub": "${AWS::StackName}-OutboxWorkerSecurityGroup"
+            }
+          }
+        ]
+      }
+    },
+    "BalanceConsumerSecurityGroup": {
+      "Type": "AWS::EC2::SecurityGroup",
+      "Condition": "ProvisionNetwork",
+      "Properties": {
+        "GroupDescription": "Balance consumer tasks - isolated production foundation",
+        "VpcId": {
+          "Ref": "Vpc"
+        },
+        "SecurityGroupIngress": [],
+        "SecurityGroupEgress": [
+          {
+            "CidrIp": "127.0.0.1/32",
+            "IpProtocol": "-1"
+          }
+        ],
+        "Tags": [
+          {
+            "Key": "project",
+            "Value": "crypto-lending"
+          },
+          {
+            "Key": "environment",
+            "Value": "production"
+          },
+          {
+            "Key": "Name",
+            "Value": {
+              "Fn::Sub": "${AWS::StackName}-BalanceConsumerSecurityGroup"
+            }
+          }
+        ]
+      }
+    },
+    "MigrationTaskSecurityGroup": {
+      "Type": "AWS::EC2::SecurityGroup",
+      "Condition": "ProvisionNetwork",
+      "Properties": {
+        "GroupDescription": "Database migration tasks - isolated production foundation",
+        "VpcId": {
+          "Ref": "Vpc"
+        },
+        "SecurityGroupIngress": [],
+        "SecurityGroupEgress": [
+          {
+            "CidrIp": "127.0.0.1/32",
+            "IpProtocol": "-1"
+          }
+        ],
+        "Tags": [
+          {
+            "Key": "project",
+            "Value": "crypto-lending"
+          },
+          {
+            "Key": "environment",
+            "Value": "production"
+          },
+          {
+            "Key": "Name",
+            "Value": {
+              "Fn::Sub": "${AWS::StackName}-MigrationTaskSecurityGroup"
+            }
+          }
+        ]
+      }
+    },
+    "DatabaseSecurityGroup": {
+      "Type": "AWS::EC2::SecurityGroup",
+      "Condition": "ProvisionNetwork",
+      "Properties": {
+        "GroupDescription": "PostgreSQL database - isolated production foundation",
+        "VpcId": {
+          "Ref": "Vpc"
+        },
+        "SecurityGroupIngress": [],
+        "SecurityGroupEgress": [
+          {
+            "CidrIp": "127.0.0.1/32",
+            "IpProtocol": "-1"
+          }
+        ],
+        "Tags": [
+          {
+            "Key": "project",
+            "Value": "crypto-lending"
+          },
+          {
+            "Key": "environment",
+            "Value": "production"
+          },
+          {
+            "Key": "Name",
+            "Value": {
+              "Fn::Sub": "${AWS::StackName}-DatabaseSecurityGroup"
+            }
+          }
+        ]
+      }
+    },
+    "RedisSecurityGroup": {
+      "Type": "AWS::EC2::SecurityGroup",
+      "Condition": "ProvisionNetwork",
+      "Properties": {
+        "GroupDescription": "Redis cache - isolated production foundation",
+        "VpcId": {
+          "Ref": "Vpc"
+        },
+        "SecurityGroupIngress": [],
+        "SecurityGroupEgress": [
+          {
+            "CidrIp": "127.0.0.1/32",
+            "IpProtocol": "-1"
+          }
+        ],
+        "Tags": [
+          {
+            "Key": "project",
+            "Value": "crypto-lending"
+          },
+          {
+            "Key": "environment",
+            "Value": "production"
+          },
+          {
+            "Key": "Name",
+            "Value": {
+              "Fn::Sub": "${AWS::StackName}-RedisSecurityGroup"
+            }
+          }
+        ]
+      }
+    },
+    "InterfaceEndpointSecurityGroup": {
+      "Type": "AWS::EC2::SecurityGroup",
+      "Condition": "ProvisionNetwork",
+      "Properties": {
+        "GroupDescription": "Future private AWS service endpoints - isolated production foundation",
+        "VpcId": {
+          "Ref": "Vpc"
+        },
+        "SecurityGroupIngress": [],
+        "SecurityGroupEgress": [
+          {
+            "CidrIp": "127.0.0.1/32",
+            "IpProtocol": "-1"
+          }
+        ],
+        "Tags": [
+          {
+            "Key": "project",
+            "Value": "crypto-lending"
+          },
+          {
+            "Key": "environment",
+            "Value": "production"
+          },
+          {
+            "Key": "Name",
+            "Value": {
+              "Fn::Sub": "${AWS::StackName}-InterfaceEndpointSecurityGroup"
+            }
+          }
+        ]
+      }
+    }
+  },
+  "Outputs": {
+    "FoundationScope": {
+      "Value": "NETWORK_FOUNDATION_ONLY"
+    },
+    "ActivationMode": {
+      "Value": {
+        "Ref": "ActivationMode"
+      }
+    },
+    "VpcId": {
+      "Condition": "ProvisionNetwork",
+      "Value": {
+        "Ref": "Vpc"
+      }
+    },
+    "WorkloadSubnetAId": {
+      "Condition": "ProvisionNetwork",
+      "Value": {
+        "Ref": "WorkloadSubnetA"
+      }
+    },
+    "WorkloadRouteTableAId": {
+      "Condition": "ProvisionNetwork",
+      "Value": {
+        "Ref": "WorkloadRouteTableA"
+      }
+    },
+    "WorkloadSubnetBId": {
+      "Condition": "ProvisionNetwork",
+      "Value": {
+        "Ref": "WorkloadSubnetB"
+      }
+    },
+    "WorkloadRouteTableBId": {
+      "Condition": "ProvisionNetwork",
+      "Value": {
+        "Ref": "WorkloadRouteTableB"
+      }
+    },
+    "DataSubnetAId": {
+      "Condition": "ProvisionNetwork",
+      "Value": {
+        "Ref": "DataSubnetA"
+      }
+    },
+    "DataRouteTableAId": {
+      "Condition": "ProvisionNetwork",
+      "Value": {
+        "Ref": "DataRouteTableA"
+      }
+    },
+    "DataSubnetBId": {
+      "Condition": "ProvisionNetwork",
+      "Value": {
+        "Ref": "DataSubnetB"
+      }
+    },
+    "DataRouteTableBId": {
+      "Condition": "ProvisionNetwork",
+      "Value": {
+        "Ref": "DataRouteTableB"
+      }
+    },
+    "ApiTaskSecurityGroupId": {
+      "Condition": "ProvisionNetwork",
+      "Value": {
+        "Ref": "ApiTaskSecurityGroup"
+      }
+    },
+    "WebTaskSecurityGroupId": {
+      "Condition": "ProvisionNetwork",
+      "Value": {
+        "Ref": "WebTaskSecurityGroup"
+      }
+    },
+    "OutboxWorkerSecurityGroupId": {
+      "Condition": "ProvisionNetwork",
+      "Value": {
+        "Ref": "OutboxWorkerSecurityGroup"
+      }
+    },
+    "BalanceConsumerSecurityGroupId": {
+      "Condition": "ProvisionNetwork",
+      "Value": {
+        "Ref": "BalanceConsumerSecurityGroup"
+      }
+    },
+    "MigrationTaskSecurityGroupId": {
+      "Condition": "ProvisionNetwork",
+      "Value": {
+        "Ref": "MigrationTaskSecurityGroup"
+      }
+    },
+    "DatabaseSecurityGroupId": {
+      "Condition": "ProvisionNetwork",
+      "Value": {
+        "Ref": "DatabaseSecurityGroup"
+      }
+    },
+    "RedisSecurityGroupId": {
+      "Condition": "ProvisionNetwork",
+      "Value": {
+        "Ref": "RedisSecurityGroup"
+      }
+    },
+    "InterfaceEndpointSecurityGroupId": {
+      "Condition": "ProvisionNetwork",
+      "Value": {
+        "Ref": "InterfaceEndpointSecurityGroup"
+      }
+    }
+  }
+}

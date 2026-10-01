@@ -62,7 +62,9 @@ describe('Railway production topology', () => {
     assert.equal(gateway.source?.image, IMAGE_ENVIRONMENT.RAILWAY_GATEWAY_IMAGE);
     assert.equal(worker.source?.image, IMAGE_ENVIRONMENT.RAILWAY_API_IMAGE);
     assert.equal(api.deploy?.numReplicas, 2);
-    assert.equal(web.deploy?.numReplicas, 2);
+    assert.equal(web.deploy?.numReplicas, 1);
+    assert.deepEqual(web.variables?.MAINNET_DATA_DIR, { type: 'literal', value: '/data/mainnet' });
+    assert.equal(web.volumeAttachments?.['mainnet-journal']?.mountPath, '/data/mainnet');
     assert.equal(gateway.deploy?.numReplicas, 2);
     assert.equal(worker.deploy?.numReplicas, 1);
     assert.equal(gateway.deploy?.healthcheckPath, '/healthz');

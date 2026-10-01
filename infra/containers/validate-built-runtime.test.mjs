@@ -19,6 +19,7 @@ import test from 'node:test';
 import {
   validateBuiltApiRuntime,
   validateBuiltWebRuntime,
+  validateBuiltMainnetWebRuntime,
   validateBuiltWebRuntimeForTest,
 } from './validate-built-runtime.mjs';
 
@@ -102,6 +103,33 @@ function addPackage(root, name) {
   writeFileSync(join(packageRoot, 'index.js'), 'module.exports = {};\n', 'utf8');
   return packageRoot;
 }
+
+test('mainnet web artifacts require pinned provider SDKs and all three compiled routers', (t) => {
+  const root = webFixture(t);
+  const packages = {
+    '@solana/web3.js': '1.98.4', '@0dotxyz/p0-ts-sdk': '2.8.3',
+    '@jup-ag/lend': '0.3.0-beta.1', '@solendprotocol/solend-sdk': '0.14.27',
+  };
+  for (const [name, version] of Object.entries(packages)) {
+    const directory = addPackage(root, name);
+    writeFileSync(join(directory, 'package.json'), JSON.stringify({ name, version, main: 'index.js' }));
+  }
+  mkdirSync(join(root, 'onchain/build'), { recursive: true });
+  withProduction(() => assert.throws(() => validateBuiltMainnetWebRuntime(root), /Missing compiled mainnet router/));
+  for (const name of ['BonsaiCctpSourceRouter', 'BonsaiAaveSupplyRouter', 'BonsaiLendingRouter']) {
+    withProduction(() => assert.throws(() => validateBuiltMainnetWebRuntime(root), /Missing compiled mainnet router/));
+    writeFileSync(join(root, `onchain/build/${name}.json`), '{"bytecode":"0x00"}');
+  }
+  withProduction(() => {
+    assert.equal(validateBuiltMainnetWebRuntime(root).valid, true);
+    assert.throws(() => validateBuiltWebRuntime(root), /Forbidden web standalone/);
+    writeFileSync(join(root, 'node_modules/@solana/web3.js/package.json'), JSON.stringify({ name: '@solana/web3.js', version: '1.0.0' }));
+    assert.throws(() => validateBuiltMainnetWebRuntime(root), /Unexpected mainnet provider dependency version/);
+    writeFileSync(join(root, 'node_modules/@solana/web3.js/package.json'), JSON.stringify({ name: '@solana/web3.js', version: '1.98.4' }));
+    const otherRoot = webFixture(t);
+    assert.throws(() => validateBuiltMainnetWebRuntime(otherRoot), /Missing mainnet provider dependency/);
+  });
+});
 
 function createSymbolicLinkOrSkip(t, target, path, type) {
   try {

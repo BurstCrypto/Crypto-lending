@@ -1,7 +1,13 @@
 # Zero-cost repository audit — 2026-09-08
 
-**Status: the current zero-cost repository scope is complete and locally
-audited.** All identified repository check failures were corrected and verified.
+**Status: the zero-cost repository scope at the implementation commit below was
+completed and locally audited.** All identified repository check failures at
+that checkpoint were corrected and verified.
+
+Subsequent engineering work and dependency findings are covered by the
+[Aave connection and security follow-up](aave-readonly-integration.md). This
+historical record's images, SBOMs, and test counts do not attest that later tree
+or establish live provider readiness.
 
 Audited implementation commit:
 `69b581f73270b8619cb4a0d65f5ad1b3dddcfbc5`.

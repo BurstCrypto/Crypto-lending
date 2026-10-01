@@ -4,6 +4,7 @@ import { SiteHeader, type SitePage } from '@/components/site-header';
 
 export interface AuthenticationShellProps {
   readonly activePage: Extract<SitePage, 'login' | 'register' | 'account'>;
+  readonly localWalletMode?: boolean;
   readonly authenticationActionHref?: string;
   readonly eyebrow: string;
   readonly title: string;
@@ -14,6 +15,7 @@ export interface AuthenticationShellProps {
 
 export function AuthenticationShell({
   activePage,
+  localWalletMode = false,
   authenticationActionHref,
   eyebrow,
   title,
@@ -27,6 +29,7 @@ export function AuthenticationShell({
     <main className="page-shell authentication-shell">
       <SiteHeader
         activePage={activePage}
+        localWalletMode={localWalletMode}
         authenticationActions={authenticationActions}
         signInHref={authenticationActionHref}
         createAccountHref={authenticationActionHref}
@@ -44,7 +47,7 @@ export function AuthenticationShell({
           <p className="authentication-description">{description}</p>
           <div className="authentication-assurance" aria-label="Security information">
             <span className="security-label-dot" aria-hidden="true" />
-            <p>Your secure session stays out of browser storage.</p>
+            <p>{localWalletMode ? 'Your wallets approve every transaction.' : 'Your secure session stays out of browser storage.'}</p>
           </div>
         </section>
 

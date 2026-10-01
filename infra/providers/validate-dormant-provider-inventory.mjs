@@ -12,6 +12,32 @@ import {
 export const REPOSITORY_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 export const DIRECTORY_PATH = 'apps/api/src/mainnet-platforms/domain/mainnet-platform-directory.ts';
 
+// Reviewed connection implementations remain private and unregistered. Their
+// exact bytes are pinned separately from the six endpoint-free position sources.
+export const AAVE_POSITION_CONNECTION_ARTIFACTS = Object.freeze([
+  Object.freeze({
+    id: 'aave-position-context',
+    path: 'apps/api/src/mainnet-platforms/infrastructure/aave-v3-ethereum-position-context.reader.ts',
+    specPath:
+      'apps/api/src/mainnet-platforms/infrastructure/aave-v3-ethereum-position-context.reader.spec.ts',
+    sha256: '43eab5970e38e1f92cc3a2f78fbca9ab66b75e9b9da25cd722c7e27dc0b0a175',
+    specSha256: 'cf07132dc706b1e1c07cb0ff5686f926006860df60f776beca882ec833e9a5f7',
+    symbols: ['AaveV3EthereumPositionContextReader', 'createPostgresAaveV3EthereumPositionSource'],
+  }),
+  Object.freeze({
+    id: 'aave-position-rpc-transcript',
+    path: 'apps/api/src/mainnet-platforms/infrastructure/aave-v3-ethereum-position-rpc-transcript.source.ts',
+    specPath:
+      'apps/api/src/mainnet-platforms/infrastructure/aave-v3-ethereum-position-rpc-transcript.source.spec.ts',
+    sha256: '6a5dadbcf6f11299cf4f800c6ac4bc6cdd44da804017885897ae6d95bcca8ea1',
+    specSha256: '0eebfa9a903703a8c3295c0af2848c6762e863610e24b52aecccde2608e3495e',
+    symbols: [
+      'AaveV3EthereumPositionRpcTranscriptSource',
+      'createAaveV3EthereumPositionRpcTranscriptSource',
+    ],
+  }),
+]);
+
 const API_SOURCE_ROOT = 'apps/api/src';
 export const MAX_DORMANT_PROVIDER_ARTIFACT_BYTES = 2 * 1024 * 1024;
 export const MAX_DORMANT_PROVIDER_RUNTIME_FILES = 4_096;
@@ -773,6 +799,22 @@ export function validateDormantProviderInventorySnapshot(snapshot) {
     }
   }
 
+  for (const artifact of AAVE_POSITION_CONNECTION_ARTIFACTS) {
+    for (const [path, expectedHash] of [
+      [artifact.path, artifact.sha256],
+      [artifact.specPath, artifact.specSha256],
+    ]) {
+      exactArtifactPaths.add(path);
+      const source = snapshot.artifacts.get(path);
+      if (
+        typeof source !== 'string' ||
+        createHash('sha256').update(source, 'utf8').digest('hex') !== expectedHash
+      ) {
+        errors.push(`${artifact.id} reviewed connection artifact is missing or drifted: ${path}`);
+      }
+    }
+  }
+
   for (const path of snapshot.artifacts.keys()) {
     if (!exactArtifactPaths.has(path)) errors.push(`unexpected inventory artifact: ${path}`);
   }
@@ -805,6 +847,15 @@ export function validateDormantProviderInventorySnapshot(snapshot) {
     }
     if (hasUnreviewedDynamicLoading(path, source)) {
       errors.push(`runtime source contains unreviewed dynamic loading: ${path}`);
+    }
+    for (const artifact of AAVE_POSITION_CONNECTION_ARTIFACTS) {
+      if (
+        normalizedRuntimePath === artifact.path ||
+        artifact.symbols.some((symbol) => source.includes(symbol)) ||
+        source.includes(adapterImportStem(artifact.path))
+      ) {
+        errors.push(`${artifact.id} private connection is referenced by runtime source ${path}`);
+      }
     }
     for (const provider of DORMANT_PROVIDER_INVENTORY) {
       if (
@@ -938,7 +989,10 @@ function loadDormantProviderInventorySnapshotInternal(repositoryRoot, afterFirst
     }
   }
 
-  for (const artifact of ADDITIONAL_DORMANT_PROVIDER_ARTIFACTS) {
+  for (const artifact of [
+    ...ADDITIONAL_DORMANT_PROVIDER_ARTIFACTS,
+    ...AAVE_POSITION_CONNECTION_ARTIFACTS,
+  ]) {
     for (const path of [artifact.path, artifact.specPath].filter(Boolean)) {
       artifacts.set(
         path,
@@ -987,6 +1041,7 @@ function loadDormantProviderInventorySnapshotInternal(repositoryRoot, afterFirst
     ...ADDITIONAL_DORMANT_PROVIDER_ARTIFACTS.map(({ path }) => path),
     ...DORMANT_ACCOUNT_POSITION_TRANSCRIPTS.map(({ path }) => path),
     ...DORMANT_ACCOUNT_POSITION_SEMANTICS.map(({ path }) => path),
+    ...AAVE_POSITION_CONNECTION_ARTIFACTS.map(({ path }) => path),
   ]);
   const runtimeSources = new Map();
   let runtimeBytes = 0;

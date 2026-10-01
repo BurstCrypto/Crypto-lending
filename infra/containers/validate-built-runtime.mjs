@@ -31,6 +31,14 @@ const FORBIDDEN_WEB_MARKERS = Object.freeze([
   'require("stream-json',
   "require('stream-json",
 ]);
+// The mainnet web entry owns unsigned provider preparation. The reporting-only
+// web profile and API profiles retain their existing dependency prohibitions.
+const MAINNET_WEB_PACKAGES = Object.freeze({
+  '@solana/web3.js': '1.98.4',
+  '@0dotxyz/p0-ts-sdk': '2.8.3',
+  '@jup-ag/lend': '0.3.0-beta.1',
+  '@solendprotocol/solend-sdk': '0.14.27',
+});
 const WEB_MANIFEST_PATH = 'apps/web/package.json';
 const WEB_SERVER_PATH = 'apps/web/server.js';
 const EXPECTED_WEB_PACKAGE_NAME = '@crypto-lending/web';
@@ -496,25 +504,39 @@ function validateCanonicalWebManifest(bytes) {
 
 function validateBuiltWebRuntimeInternal(standaloneRootInput, options = {}) {
   if (process.env.NODE_ENV !== 'production') invalid(ERRORS.webMode);
+  const mainnet = options.mainnet === true;
+  const packagePaths = Object.keys(MAINNET_WEB_PACKAGES).map((name) => `node_modules/${name}/package.json`);
   const snapshot = scanRuntimeTree(standaloneRootInput, {
     afterFirstRead: options.afterFirstRead,
-    capturePaths: new Set([WEB_MANIFEST_PATH]),
+    capturePaths: new Set([WEB_MANIFEST_PATH, ...(mainnet ? packagePaths : [])]),
     limits: options.limits,
     onDirectory(relativePath) {
-      for (const packageName of FORBIDDEN_RUNTIME_PACKAGES) {
+      for (const packageName of mainnet ? [] : FORBIDDEN_RUNTIME_PACKAGES) {
         if (isForbiddenPackageDirectory(relativePath, packageName)) {
           invalid('Forbidden web standalone package directory: ' + packageName);
         }
       }
     },
-    onFile: scanWebFile,
+    onFile: mainnet ? undefined : scanWebFile,
   });
   if (!snapshot.files.has(WEB_SERVER_PATH) || !snapshot.files.has(WEB_MANIFEST_PATH)) {
     invalid(ERRORS.webArtifacts);
   }
   validateCanonicalWebManifest(snapshot.capturedFiles.get(WEB_MANIFEST_PATH));
+  if (mainnet) {
+    for (const [name, version] of Object.entries(MAINNET_WEB_PACKAGES)) {
+      const bytes = snapshot.capturedFiles.get(`node_modules/${name}/package.json`);
+      if (!bytes) invalid('Missing mainnet provider dependency: ' + name);
+      const manifest = JSON.parse(bytes.toString('utf8'));
+      if (manifest.name !== name || manifest.version !== version) invalid('Unexpected mainnet provider dependency version: ' + name);
+    }
+    for (const name of ['BonsaiCctpSourceRouter', 'BonsaiAaveSupplyRouter', 'BonsaiLendingRouter']) {
+      if (!snapshot.files.has(`onchain/build/${name}.json`)) invalid('Missing compiled mainnet router: ' + name);
+    }
+  }
   return Object.freeze({
-    forbiddenPackages: FORBIDDEN_RUNTIME_PACKAGES,
+    forbiddenPackages: mainnet ? [] : FORBIDDEN_RUNTIME_PACKAGES,
+    ...(mainnet ? { mainnetPackages: MAINNET_WEB_PACKAGES } : {}),
     scannedBytes: snapshot.aggregateBytes,
     scannedFiles: snapshot.files.size,
     valid: true,
@@ -528,6 +550,9 @@ export function validateBuiltApiRuntime(apiRootInput) {
 export function validateBuiltWebRuntime(standaloneRootInput) {
   return withSanitizedFailure(() => validateBuiltWebRuntimeInternal(standaloneRootInput));
 }
+export function validateBuiltMainnetWebRuntime(standaloneRootInput) {
+  return withSanitizedFailure(() => validateBuiltWebRuntimeInternal(standaloneRootInput, { mainnet: true }));
+}
 
 /** Test-only fault and bound seam; production callers always use the fixed limits above. */
 export function validateBuiltWebRuntimeForTest(standaloneRootInput, options) {
@@ -536,12 +561,12 @@ export function validateBuiltWebRuntimeForTest(standaloneRootInput, options) {
 
 function main() {
   const [mode, root, ...extra] = process.argv.slice(2);
-  if (extra.length > 0 || !root || (mode !== 'api' && mode !== 'web')) {
+  if (extra.length > 0 || !root || !['api', 'web', 'web-mainnet'].includes(mode)) {
     throw new BuiltRuntimeValidationError(
-      'Usage: node validate-built-runtime.mjs <api|web> <runtime-root>',
+      'Usage: node validate-built-runtime.mjs <api|web|web-mainnet> <runtime-root>',
     );
   }
-  const report = mode === 'api' ? validateBuiltApiRuntime(root) : validateBuiltWebRuntime(root);
+  const report = mode === 'api' ? validateBuiltApiRuntime(root) : mode === 'web-mainnet' ? validateBuiltMainnetWebRuntime(root) : validateBuiltWebRuntime(root);
   process.stdout.write(JSON.stringify(report) + '\n');
 }
 

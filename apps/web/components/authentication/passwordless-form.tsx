@@ -169,7 +169,7 @@ export function PasswordlessForm({ returnPath }: { readonly returnPath: string }
           {step === 'identifier'
             ? 'We will send you a one-time code. No password needed.'
             : step === 'code'
-              ? `Enter the six-digit code sent to ${identifier}. Codes are valid for up to 10 minutes.`
+              ? `Enter the six-digit code sent to ${identifier}. It expires in 10 minutes.`
               : 'Your code is verified. Add these details to complete your profile.'}
         </p>
       </div>

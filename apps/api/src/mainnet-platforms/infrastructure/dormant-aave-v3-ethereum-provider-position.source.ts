@@ -163,6 +163,7 @@ export interface ReadAaveV3EthereumFinalizedPositionTranscriptRequestV1 {
   readonly continuityFloor: ProviderPositionAdmissionEvmAnchorV1;
   readonly assets: readonly ProviderPositionAdmissionAssetV1[];
   readonly balanceReads: readonly AaveV3EthereumPositionBalanceReadV1[];
+  /** Maximum encoded returned transcript; raw RPC bodies need a separate fixed budget. */
   readonly maximumResponseBytes: typeof MAX_TRANSCRIPT_BYTES;
   readonly deadlineAt: string;
   readonly signal: AbortSignal;
@@ -175,7 +176,7 @@ export interface ReadAaveV3EthereumFinalizedPositionTranscriptRequestV1 {
  * transcript. Implementations must execute the supplied balance reads at one
  * EIP-1898 block hash, read every requested reserve-token mapping from Aave's
  * protocol data provider at that same hash, reject redirects or endpoint
- * changes, enforce the byte and deadline bounds, cooperatively drain after
+ * changes, enforce the transcript, raw RPC body and deadline bounds, cooperatively drain after
  * abort, and bind an issued capability to the exact request object. No
  * endpoint or credential crosses this interface.
  */
@@ -907,7 +908,9 @@ function positions(
         Object.freeze({
           positionId: `${PROTOCOL_ID}-${request.walletId}-${definition.stablecoin.toLowerCase()}-${positionKind.toLowerCase()}`,
           positionKind,
-          asset,
+          // Admission accepts a bounded JSON tree, so positions must not alias
+          // the top-level asset list or each other's asset objects.
+          asset: Object.freeze({ ...asset }),
           balance: Object.freeze({
             atomic,
             decimal: mainnetProviderPositionDecimalFromAtomic(atomic, asset.decimals),
