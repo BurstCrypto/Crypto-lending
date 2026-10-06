@@ -205,7 +205,7 @@ jobs:
           npm run production:sbom:capture -- web crypto-lending-web:ci "$WEB_IMAGE_ID" .local-validation/production-sbom/web-image.binding.json
 
       - name: Generate API production image SPDX SBOM
-        uses: anchore/sbom-action@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2 (2026-08-28)
+        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.2 (2026-08-28)
         env:
           AWS_REGION: ''
           AWS_ACCESS_KEY_ID: ''
@@ -231,7 +231,7 @@ jobs:
           github-token: ''
 
       - name: Generate API production image binding record
-        uses: anchore/sbom-action@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2 (2026-08-28)
+        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.2 (2026-08-28)
         env:
           AWS_REGION: ''
           AWS_ACCESS_KEY_ID: ''
@@ -257,7 +257,7 @@ jobs:
           github-token: ''
 
       - name: Generate web production image SPDX SBOM
-        uses: anchore/sbom-action@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2 (2026-08-28)
+        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.2 (2026-08-28)
         env:
           AWS_REGION: ''
           AWS_ACCESS_KEY_ID: ''
@@ -283,7 +283,7 @@ jobs:
           github-token: ''
 
       - name: Generate web production image binding record
-        uses: anchore/sbom-action@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2 (2026-08-28)
+        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.2 (2026-08-28)
         env:
           AWS_REGION: ''
           AWS_ACCESS_KEY_ID: ''
