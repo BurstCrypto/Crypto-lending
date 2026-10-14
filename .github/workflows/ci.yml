@@ -321,7 +321,7 @@ jobs:
           npm run production:sbom:validate -- "$API_IMAGE_ID" "$WEB_IMAGE_ID" "$GITHUB_SHA"
 
       - name: Upload OpenAPI contract
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: crypto-lending-openapi
           path: apps/api/openapi.json
@@ -355,7 +355,7 @@ jobs:
 
       - name: Upload dependency logs on failure
         if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: infrastructure-logs
           path: infrastructure.log
@@ -373,7 +373,7 @@ jobs:
       - name: Upload immutable release candidate
         if: ${{ success() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' }}
         id: release-candidate-upload
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: crypto-lending-release-candidate-${{ github.sha }}
           path: .local-validation/release-candidate-stage/
