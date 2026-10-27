@@ -1,4 +1,4 @@
-FROM localstack/localstack:2026.8.4@sha256:03bde1974f8bb7a7b6d4128228cf9048c7bdb8249deb998d1b80af73926c0017
+FROM localstack/localstack:2026.10.2@sha256:0e95fa70a58fff808cdc4c8deea8cf56a247cdad403c082e33ec37924987e0c3
 
 COPY init/10-create-queues.sh /etc/localstack/init/ready.d/10-create-queues.sh
 RUN chmod 0755 /etc/localstack/init/ready.d/10-create-queues.sh
